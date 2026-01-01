@@ -1,0 +1,112 @@
+{
+  "name": "react-native-nitro-auth",
+  "version": "0.1.5",
+  "description": "High-performance authentication library for React Native with Google Sign-In and Apple Sign-In support, powered by Nitro Modules (JSI)",
+  "main": "lib/commonjs/index.js",
+  "module": "lib/module/index.js",
+  "types": "lib/typescript/index.d.ts",
+  "react-native": "src/index.ts",
+  "browser": "src/index.web.ts",
+  "source": "src/index.ts",
+  "app": "app.plugin.js",
+  "files": [
+    "src",
+    "lib",
+    "cpp",
+    "android",
+    "ios",
+    "nitrogen",
+    "nitro.json",
+    "*.podspec",
+    "app.plugin.js",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__",
+    "!cpp/core/*Test.cpp",
+    "!cpp/build",
+    "!android/build",
+    "!android/.cxx",
+    "!scripts"
+  ],
+  "scripts": {
+    "prebuild": "npm run codegen",
+    "build": "bob build",
+    "clean": "rimraf lib nitrogen/generated",
+    "codegen": "nitrogen --logLevel=\"debug\"",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "test:cpp": "node scripts/test-cpp.js",
+    "prepublishOnly": "npm run clean && npm run build",
+    "prepack": "node -e \"const fs=require('fs'); fs.copyFileSync('../../README.md','./README.md'); try{fs.copyFileSync('../../LICENSE','./LICENSE')}catch(e){}\"",
+    "postpack": "node -e \"const fs=require('fs'); ['./README.md','./LICENSE'].forEach(f=>fs.existsSync(f)&&fs.unlinkSync(f))\""
+  },
+  "keywords": [
+    "react-native",
+    "react-native-auth",
+    "authentication",
+    "google-sign-in",
+    "apple-sign-in",
+    "social-login",
+    "nitro",
+    "jsi",
+    "nitro-modules",
+    "expo",
+    "typescript",
+    "oauth",
+    "auth-provider",
+    "sign-in",
+    "login"
+  ],
+  "author": {
+    "name": "João Paulo C. Marra",
+    "url": "https://github.com/JoaoPauloCMarra"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/JoaoPauloCMarra/react-native-nitro-auth#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JoaoPauloCMarra/react-native-nitro-auth.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JoaoPauloCMarra/react-native-nitro-auth/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "devDependencies": {
+    "@expo/config-plugins": "^54.0.4",
+    "@react-native/babel-preset": "^0.81.0",
+    "@testing-library/react": "^16.1.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-nitro-modules": "^0.32.0",
+    "react-native-web": "^0.21.2"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": ">=0.75.0",
+    "react-native-nitro-modules": ">=0.32.0"
+  },
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      [
+        "commonjs",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "module",
+        {
+          "esm": true
+        }
+      ],
+      "typescript"
+    ]
+  }
+}

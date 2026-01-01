@@ -1,0 +1,15 @@
+{
+  "cxxNamespace": ["NitroAuth"],
+  "ios": {
+    "iosModuleName": "NitroAuth"
+  },
+  "android": {
+    "androidNamespace": ["com", "auth"],
+    "androidCxxLibName": "NitroAuth"
+  },
+  "autolinking": {
+    "Auth": {
+      "cpp": "HybridAuth"
+    }
+  }
+}
