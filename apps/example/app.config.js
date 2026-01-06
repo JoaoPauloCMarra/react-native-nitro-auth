@@ -26,6 +26,7 @@ export default {
           ios: {
             googleClientId: process.env.GOOGLE_IOS_CLIENT_ID,
             googleUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME,
+            appleSignIn: true,
           },
           android: {
             googleClientId: process.env.GOOGLE_WEB_CLIENT_ID,
