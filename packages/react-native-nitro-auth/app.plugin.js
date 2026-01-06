@@ -36,10 +36,12 @@ const withNitroAuth = (config, props = {}) => {
   });
 
   // 2. iOS Entitlements
-  config = withEntitlementsPlist(config, (config) => {
-    config.modResults["com.apple.developer.applesignin"] = ["Default"];
-    return config;
-  });
+  if (ios.appleSignIn === true) {
+    config = withEntitlementsPlist(config, (config) => {
+      config.modResults["com.apple.developer.applesignin"] = ["Default"];
+      return config;
+    });
+  }
 
   // 3. Android Strings (for Google Client ID)
   config = withStringsXml(config, (config) => {
@@ -63,5 +65,5 @@ const withNitroAuth = (config, props = {}) => {
 module.exports = createRunOncePlugin(
   withNitroAuth,
   "react-native-nitro-auth",
-  "0.1.3"
+  "0.1.6"
 );

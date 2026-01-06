@@ -52,7 +52,8 @@ Add the plugin to `app.json`:
           "ios": {
             "googleClientId": "YOUR_IOS_CLIENT_ID.apps.googleusercontent.com",
             "googleServerClientId": "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com",
-            "googleUrlScheme": "com.googleusercontent.apps.YOUR_IOS_CLIENT_ID"
+            "googleUrlScheme": "com.googleusercontent.apps.YOUR_IOS_CLIENT_ID",
+            "appleSignIn": true
           },
           "android": {
             "googleClientId": "YOUR_ANDROID_CLIENT_ID.apps.googleusercontent.com"
@@ -64,7 +65,9 @@ Add the plugin to `app.json`:
 }
 ```
 
-> [!NOTE] > `googleServerClientId` is only required if you need a `serverAuthCode` for backend integration.
+> [!NOTE]
+> `appleSignIn` on iOS is `false` by default to avoid unnecessary entitlements. Set it to `true` to enable Apple Sign-In.
+> `googleServerClientId` is only required if you need a `serverAuthCode` for backend integration.
 
 ### Bare React Native
 
