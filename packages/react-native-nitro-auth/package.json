@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-auth",
-  "version": "0.1.6",
+  "version": "0.3.0",
   "description": "High-performance authentication library for React Native with Google Sign-In and Apple Sign-In support, powered by Nitro Modules (JSI)",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -82,13 +82,13 @@
     "jest-environment-jsdom": "^29.7.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
-    "react-native-nitro-modules": "^0.32.0",
+    "react-native-nitro-modules": "^0.33.0",
     "react-native-web": "^0.21.2"
   },
   "peerDependencies": {
     "react": "*",
     "react-native": ">=0.75.0",
-    "react-native-nitro-modules": ">=0.32.0"
+    "react-native-nitro-modules": ">=0.33.0"
   },
   "react-native-builder-bob": {
     "source": "src",

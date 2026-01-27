@@ -112,13 +112,15 @@ export function useAuth() {
       });
       return tokens;
     } catch (e) {
-      const error = e instanceof Error ? e : new Error(String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      const authError = new Error(msg) as Error & { underlyingError?: string };
+      authError.underlyingError = AuthService.currentUser?.underlyingError;
       setState((prev) => ({
         ...prev,
         loading: false,
-        error,
+        error: authError,
       }));
-      throw error;
+      throw authError;
     }
   }, []);
 

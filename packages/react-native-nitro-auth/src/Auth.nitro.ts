@@ -15,6 +15,8 @@ export interface LoginOptions {
   scopes?: string[];
   loginHint?: string;
   useOneTap?: boolean;
+  /** (iOS only) Use native sign-in sheet */
+  useSheet?: boolean;
 }
 
 export interface AuthTokens {
@@ -33,6 +35,8 @@ export interface AuthUser {
   serverAuthCode?: string;
   scopes?: string[];
   expirationTime?: number;
+  /** Raw native error message */
+  underlyingError?: string;
 }
 
 export interface Auth extends HybridObject<{ ios: "c++"; android: "c++" }> {

@@ -183,25 +183,23 @@ class AuthWeb implements Auth {
   }
 
   private mapError(error: unknown): Error {
-    if (error instanceof Error) {
-      const msg = error.message.toLowerCase();
-      if (msg.includes("cancel") || msg.includes("popup_closed")) {
-        return new Error("cancelled");
-      }
-      if (msg.includes("network")) {
-        return new Error("network_error");
-      }
-      if (msg.includes("client id") || msg.includes("config")) {
-        return new Error("configuration_error");
-      }
-      return error;
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    const msg = rawMessage.toLowerCase();
+    let mappedMsg = rawMessage;
+
+    if (msg.includes("cancel") || msg.includes("popup_closed")) {
+      mappedMsg = "cancelled";
+    } else if (msg.includes("network")) {
+      mappedMsg = "network_error";
+    } else if (msg.includes("client id") || msg.includes("config")) {
+      mappedMsg = "configuration_error";
     }
 
-    const msg = String(error).toLowerCase();
-    if (msg.includes("cancel") || msg.includes("popup_closed")) {
-      return new Error("cancelled");
-    }
-    return new Error(String(error));
+    const authError = new Error(mappedMsg) as Error & {
+      underlyingError?: string;
+    };
+    authError.underlyingError = rawMessage;
+    return authError;
   }
 
   private async loginGoogle(
@@ -222,12 +220,11 @@ class AuthWeb implements Auth {
       const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       authUrl.searchParams.set("client_id", clientId);
       authUrl.searchParams.set("redirect_uri", redirectUri);
-      // Requesting code alongside tokens for server-side verification if needed
       authUrl.searchParams.set("response_type", "id_token token code");
       authUrl.searchParams.set("scope", scopes.join(" "));
       authUrl.searchParams.set("nonce", Math.random().toString(36).slice(2));
-      authUrl.searchParams.set("access_type", "offline"); // Needed for server auth code flow
-      authUrl.searchParams.set("prompt", "consent"); // Force consent to get refresh token/code sometimes
+      authUrl.searchParams.set("access_type", "offline");
+      authUrl.searchParams.set("prompt", "consent");
 
       if (loginHint) {
         authUrl.searchParams.set("login_hint", loginHint);
@@ -353,7 +350,7 @@ class AuthWeb implements Auth {
             this.updateUser(user);
             resolve();
           })
-          .catch((e: any) => reject(this.mapError(e)));
+          .catch((err: unknown) => reject(this.mapError(err)));
       };
       script.onerror = () => reject(new Error("Failed to load Apple SDK"));
       document.head.appendChild(script);

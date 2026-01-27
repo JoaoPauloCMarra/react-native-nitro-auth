@@ -47,10 +47,11 @@ namespace margelo::nitro::NitroAuth {
     std::optional<std::string> serverAuthCode     SWIFT_PRIVATE;
     std::optional<std::vector<std::string>> scopes     SWIFT_PRIVATE;
     std::optional<double> expirationTime     SWIFT_PRIVATE;
+    std::optional<std::string> underlyingError     SWIFT_PRIVATE;
 
   public:
     AuthUser() = default;
-    explicit AuthUser(AuthProvider provider, std::optional<std::string> email, std::optional<std::string> name, std::optional<std::string> photo, std::optional<std::string> idToken, std::optional<std::string> accessToken, std::optional<std::string> serverAuthCode, std::optional<std::vector<std::string>> scopes, std::optional<double> expirationTime): provider(provider), email(email), name(name), photo(photo), idToken(idToken), accessToken(accessToken), serverAuthCode(serverAuthCode), scopes(scopes), expirationTime(expirationTime) {}
+    explicit AuthUser(AuthProvider provider, std::optional<std::string> email, std::optional<std::string> name, std::optional<std::string> photo, std::optional<std::string> idToken, std::optional<std::string> accessToken, std::optional<std::string> serverAuthCode, std::optional<std::vector<std::string>> scopes, std::optional<double> expirationTime, std::optional<std::string> underlyingError): provider(provider), email(email), name(name), photo(photo), idToken(idToken), accessToken(accessToken), serverAuthCode(serverAuthCode), scopes(scopes), expirationTime(expirationTime), underlyingError(underlyingError) {}
   };
 
 } // namespace margelo::nitro::NitroAuth
@@ -71,7 +72,8 @@ namespace margelo::nitro {
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, "accessToken")),
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, "serverAuthCode")),
         JSIConverter<std::optional<std::vector<std::string>>>::fromJSI(runtime, obj.getProperty(runtime, "scopes")),
-        JSIConverter<std::optional<double>>::fromJSI(runtime, obj.getProperty(runtime, "expirationTime"))
+        JSIConverter<std::optional<double>>::fromJSI(runtime, obj.getProperty(runtime, "expirationTime")),
+        JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, "underlyingError"))
       );
     }
     static inline jsi::Value toJSI(jsi::Runtime& runtime, const margelo::nitro::NitroAuth::AuthUser& arg) {
@@ -85,6 +87,7 @@ namespace margelo::nitro {
       obj.setProperty(runtime, "serverAuthCode", JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.serverAuthCode));
       obj.setProperty(runtime, "scopes", JSIConverter<std::optional<std::vector<std::string>>>::toJSI(runtime, arg.scopes));
       obj.setProperty(runtime, "expirationTime", JSIConverter<std::optional<double>>::toJSI(runtime, arg.expirationTime));
+      obj.setProperty(runtime, "underlyingError", JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.underlyingError));
       return obj;
     }
     static inline bool canConvert(jsi::Runtime& runtime, const jsi::Value& value) {
@@ -104,6 +107,7 @@ namespace margelo::nitro {
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, "serverAuthCode"))) return false;
       if (!JSIConverter<std::optional<std::vector<std::string>>>::canConvert(runtime, obj.getProperty(runtime, "scopes"))) return false;
       if (!JSIConverter<std::optional<double>>::canConvert(runtime, obj.getProperty(runtime, "expirationTime"))) return false;
+      if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, "underlyingError"))) return false;
       return true;
     }
   };

@@ -47,13 +47,13 @@ object AuthAdapter {
     )
     
     @JvmStatic
-    private external fun nativeOnLoginError(error: String)
+    private external fun nativeOnLoginError(error: String, underlyingError: String?)
 
     @JvmStatic
     private external fun nativeOnRefreshSuccess(idToken: String?, accessToken: String?, expirationTime: Long?)
 
     @JvmStatic
-    private external fun nativeOnRefreshError(error: String)
+    private external fun nativeOnRefreshError(error: String, underlyingError: String?)
 
     fun initialize(context: Context) {
         val app = context.applicationContext as? Application
@@ -90,27 +90,27 @@ object AuthAdapter {
             12501 -> "cancelled"
             7 -> "network_error"
             8, 10 -> "configuration_error"
-            else -> message ?: "unknown"
+            else -> "unknown"
         }
-        nativeOnLoginError(mappedError)
+        nativeOnLoginError(mappedError, message)
     }
 
     @JvmStatic
     fun loginSync(context: Context, provider: String, googleClientId: String?, scopes: Array<String>?, loginHint: String?, useOneTap: Boolean) {
         if (provider == "apple") {
-            nativeOnLoginError("Apple Sign-In is not supported on Android.")
+            nativeOnLoginError("unsupported_provider", "Apple Sign-In is not supported on Android.")
             return
         }
 
         if (provider != "google") {
-            nativeOnLoginError("Unsupported provider: $provider")
+            nativeOnLoginError("unsupported_provider", "Unsupported provider: $provider")
             return
         }
 
         val ctx = appContext ?: context.applicationContext
         val clientId = googleClientId ?: getClientIdFromResources(ctx)
         if (clientId == null) {
-            nativeOnLoginError("Google Client ID is required. Set it in app.json plugins.")
+            nativeOnLoginError("configuration_error", "Google Client ID is required. Set it in app.json plugins.")
             return
         }
 
@@ -137,7 +137,7 @@ object AuthAdapter {
         val googleIdOption = GetGoogleIdOption.Builder()
             .setFilterByAuthorizedAccounts(false)
             .setServerClientId(clientId)
-            .setAutoSelectEnabled(false) // Disable auto-select for testing so the sheet always shows
+            .setAutoSelectEnabled(false)
             .build()
 
         val request = GetCredentialRequest.Builder()
@@ -191,7 +191,7 @@ object AuthAdapter {
             )
         } else {
             Log.w(TAG, "Unsupported credential type: ${credential.type}")
-            nativeOnLoginError("Unsupported credential type: ${credential.type}")
+            nativeOnLoginError("unknown", "Unsupported credential type: ${credential.type}")
         }
     }
 
@@ -200,7 +200,7 @@ object AuthAdapter {
         val ctx = appContext ?: context.applicationContext
         val account = GoogleSignIn.getLastSignedInAccount(ctx)
         if (account == null) {
-            nativeOnLoginError("No user logged in")
+            nativeOnLoginError("unknown", "No user logged in")
             return
         }
 
@@ -212,7 +212,7 @@ object AuthAdapter {
 
         val clientId = getClientIdFromResources(ctx)
         if (clientId == null) {
-            nativeOnLoginError("Google Client ID not configured")
+            nativeOnLoginError("configuration_error", "Google Client ID not configured")
             return
         }
 
@@ -227,12 +227,12 @@ object AuthAdapter {
         if (googleSignInClient == null) {
             val account = GoogleSignIn.getLastSignedInAccount(ctx)
             if (account == null) {
-                nativeOnRefreshError("No user logged in")
+                nativeOnRefreshError("unknown", "No user logged in")
                 return
             }
             val clientId = getClientIdFromResources(ctx)
             if (clientId == null) {
-                nativeOnRefreshError("Google Client ID not configured")
+                nativeOnRefreshError("configuration_error", "Google Client ID not configured")
                 return
             }
             val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -248,7 +248,7 @@ object AuthAdapter {
                 val account = task.result
                 nativeOnRefreshSuccess(account?.idToken, null, null)
             } else {
-                nativeOnRefreshError(task.exception?.message ?: "Silent sign-in failed")
+                nativeOnRefreshError("network_error", task.exception?.message ?: "Silent sign-in failed")
             }
         }
     }
@@ -333,7 +333,7 @@ object AuthAdapter {
                 val serverAuthCode = extractJsonValue(json, "serverAuthCode")
                 nativeOnLoginSuccess(provider, email, name, photo, idToken, null, serverAuthCode, null, null)
             } else {
-                nativeOnLoginError("No session")
+                nativeOnLoginError("unknown", "No session")
             }
         }
     }

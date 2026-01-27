@@ -46,7 +46,7 @@ export default function HomeScreen() {
     revokeScopes,
   } = useAuth();
   const [localStatus, setLocalStatus] = useState("Welcome");
-  const [useOneTap, setUseOneTap] = useState(true);
+  const [useOneTap, setUseOneTap] = useState(false);
   const [isSecureStorageEnabled, setIsSecureStorageEnabled] = useState(false);
 
   useEffect(() => {
@@ -74,7 +74,14 @@ export default function HomeScreen() {
     }
     try {
       await login(provider, {
-        useOneTap: provider === "google" ? useOneTap : undefined,
+        useOneTap:
+          provider === "google" && Platform.OS === "android"
+            ? useOneTap
+            : undefined,
+        useSheet:
+          provider === "google" && Platform.OS === "ios"
+            ? useOneTap
+            : undefined,
       });
     } catch (e: unknown) {
       // Error is already handled by useAuth and displayed in UI
@@ -180,6 +187,16 @@ export default function HomeScreen() {
                   />
                 </View>
               )}
+              {Platform.OS === "ios" && (
+                <View style={styles.oneTapRow}>
+                  <Text style={styles.oneTapLabel}>Use Sign-In Sheet</Text>
+                  <Switch
+                    value={useOneTap}
+                    onValueChange={setUseOneTap}
+                    trackColor={{ false: "#767577", true: "#4285F4" }}
+                  />
+                </View>
+              )}
               <SocialButton
                 provider="google"
                 onPress={() => handleLogin("google")}
@@ -190,6 +207,11 @@ export default function HomeScreen() {
                 variant="black"
                 onPress={() => handleLogin("apple")}
               />
+              {(error as any)?.underlyingError && (
+                <Text style={styles.underlyingError}>
+                  Native Error: {(error as any).underlyingError}
+                </Text>
+              )}
             </View>
           </View>
         )}
@@ -435,5 +457,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#333",
     fontWeight: "500",
+  },
+  underlyingError: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 12,
+    textAlign: "center",
+    fontStyle: "italic",
+    paddingHorizontal: 8,
   },
 });

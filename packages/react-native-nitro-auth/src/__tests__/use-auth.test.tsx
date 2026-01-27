@@ -147,6 +147,29 @@ describe("useAuth", () => {
       expect(mockLogin).toHaveBeenCalledWith("google", { useOneTap: true });
     });
 
+    it("sets error when login fails", async () => {
+      const error = new Error("network_error");
+      // @ts-ignore
+      error.underlyingError = "Detailed native error";
+      mockLogin.mockRejectedValueOnce(error);
+
+      const { result } = renderHook(() => useAuth());
+
+      await act(async () => {
+        try {
+          await result.current.login("google");
+        } catch (e) {
+          // ignore
+        }
+      });
+
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error?.message).toBe("network_error");
+      expect((result.current.error as any)?.underlyingError).toBe(
+        "Detailed native error"
+      );
+    });
+
     it("should handle login error", async () => {
       const error = new Error("Login failed");
       mockLogin.mockRejectedValue(error);

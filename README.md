@@ -27,7 +27,8 @@ Nitro Auth is designed to replace legacy modules like `@react-native-google-sign
 - **Expo Ready**: Comes with a powerful Config Plugin for zero-config setup.
 - **Cross-Platform**: Unified API for iOS, Android, and Web.
 - **Auto-Refresh**: Synchronous access to tokens with automatic silent refresh.
-- **Google One-Tap**: Modern login experience on Android using Credential Manager.
+- **Google One-Tap / Sheet**: Modern login experience on Android (Credential Manager) and iOS (Sign-In Sheet).
+- **Error Metadata**: Detailed native error messages for easier debugging.
 - **Custom Storage**: Pluggable storage adapters for secure persistence (e.g., Keychain).
 - **Refresh Interceptors**: Listen to token updates globally.
 
@@ -65,8 +66,7 @@ Add the plugin to `app.json`:
 }
 ```
 
-> [!NOTE]
-> `appleSignIn` on iOS is `false` by default to avoid unnecessary entitlements. Set it to `true` to enable Apple Sign-In.
+> [!NOTE] > `appleSignIn` on iOS is `false` by default to avoid unnecessary entitlements. Set it to `true` to enable Apple Sign-In.
 > `googleServerClientId` is only required if you need a `serverAuthCode` for backend integration.
 
 ### Bare React Native
@@ -147,12 +147,23 @@ try {
 }
 ```
 
-| Code                   | Description                                    |
-| ---------------------- | ---------------------------------------------- |
-| `cancelled`            | The user cancelled the sign-in flow            |
-| `network_error`        | A network error occurred                       |
-| `configuration_error`  | Missing client IDs or invalid setup            |
+| `cancelled` | The user cancelled the sign-in flow |
+| `network_error` | A network error occurred |
+| `configuration_error` | Missing client IDs or invalid setup |
 | `unsupported_provider` | The provider is not supported on this platform |
+
+### Native Error Metadata
+
+For more detailed debugging, Nitro Auth captures the raw native error message in the `underlyingError` property of the `AuthUser` (on success) or surfaces it in the caught `Error` object:
+
+```ts
+try {
+  await login("google");
+} catch (e) {
+  // Access raw native error message
+  console.log(e.underlyingError);
+}
+```
 
 ### Automatic Token Refresh
 
@@ -227,12 +238,15 @@ AuthService.onTokensRefreshed((tokens) => {
 });
 ```
 
-### Google One-Tap (Android)
+### Google One-Tap & Sheet
 
-Explicitly enable the modern One-Tap flow on Android:
+Explicitly enable the modern One-Tap flow on Android or the Sign-In Sheet on iOS:
 
 ```ts
-await login("google", { useOneTap: true });
+await login("google", {
+  useOneTap: true, // Android
+  useSheet: true, // iOS
+});
 ```
 
 ## API Reference

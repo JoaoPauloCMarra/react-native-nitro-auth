@@ -14,6 +14,11 @@
 #include "LoginOptions.hpp"
 
 namespace margelo::nitro::NitroAuth {
+ 
+ inline std::string nsToStd(NSString* _Nullable ns) {
+     if (ns == nil) return "";
+     return std::string([ns UTF8String]);
+ }
 
 std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, const std::optional<LoginOptions>& options) {
     auto promise = Promise<AuthUser>::create();
@@ -33,12 +38,12 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         }
     }
     
-    // Default scopes if none provided
-    if (scopesArray.count == 0) {
-        [scopesArray addObjectsFromArray:@[@"openid", @"email", @"profile"]];
+    BOOL useSheet = NO;
+    if (options.has_value() && options->useSheet.has_value()) {
+        useSheet = options->useSheet.value();
     }
     
-    [AuthAdapter loginWithProvider:providerStr scopes:scopesArray loginHint:hintStr completion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
+    [AuthAdapter loginWithProvider:providerStr scopes:scopesArray loginHint:hintStr useSheet:useSheet completion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
         if (error != nil) {
             promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
             return;
@@ -50,13 +55,14 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         
         AuthUser user;
         user.provider = provider;
-        user.email = std::string([[data objectForKey:@"email"] UTF8String]);
-        user.name = std::string([[data objectForKey:@"name"] UTF8String]);
-        user.photo = std::string([[data objectForKey:@"photo"] UTF8String]);
-        user.idToken = std::string([[data objectForKey:@"idToken"] UTF8String]);
-        if ([data objectForKey:@"accessToken"]) user.accessToken = std::string([[data objectForKey:@"accessToken"] UTF8String]);
-        if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = std::string([[data objectForKey:@"serverAuthCode"] UTF8String]);
+        user.email = nsToStd([data objectForKey:@"email"]);
+        user.name = nsToStd([data objectForKey:@"name"]);
+        user.photo = nsToStd([data objectForKey:@"photo"]);
+        user.idToken = nsToStd([data objectForKey:@"idToken"]);
+        if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
+        if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
         if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
+        if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
         
         promise->resolve(user);
     }];
@@ -80,13 +86,14 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector
         
         AuthUser user;
         user.provider = AuthProvider::GOOGLE;
-        user.email = std::string([[data objectForKey:@"email"] UTF8String]);
-        user.name = std::string([[data objectForKey:@"name"] UTF8String]);
-        user.photo = std::string([[data objectForKey:@"photo"] UTF8String]);
-        user.idToken = std::string([[data objectForKey:@"idToken"] UTF8String]);
-        if ([data objectForKey:@"accessToken"]) user.accessToken = std::string([[data objectForKey:@"accessToken"] UTF8String]);
-        if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = std::string([[data objectForKey:@"serverAuthCode"] UTF8String]);
+        user.email = nsToStd([data objectForKey:@"email"]);
+        user.name = nsToStd([data objectForKey:@"name"]);
+        user.photo = nsToStd([data objectForKey:@"photo"]);
+        user.idToken = nsToStd([data objectForKey:@"idToken"]);
+        if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
+        if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
         if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
+        if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
         promise->resolve(user);
     }];
     return promise;
@@ -100,8 +107,8 @@ std::shared_ptr<Promise<AuthTokens>> PlatformAuth::refreshToken() {
             return;
         }
         AuthTokens tokens;
-        if ([data objectForKey:@"accessToken"]) tokens.accessToken = std::string([[data objectForKey:@"accessToken"] UTF8String]);
-        if ([data objectForKey:@"idToken"]) tokens.idToken = std::string([[data objectForKey:@"idToken"] UTF8String]);
+        if ([data objectForKey:@"accessToken"]) tokens.accessToken = nsToStd([data objectForKey:@"accessToken"]);
+        if ([data objectForKey:@"idToken"]) tokens.idToken = nsToStd([data objectForKey:@"idToken"]);
         if ([data objectForKey:@"expirationTime"]) tokens.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
         promise->resolve(tokens);
     }];
@@ -117,13 +124,14 @@ std::shared_ptr<Promise<std::optional<AuthUser>>> PlatformAuth::silentRestore() 
         }
         AuthUser user;
         user.provider = [[data objectForKey:@"provider"] isEqualToString:@"google"] ? AuthProvider::GOOGLE : AuthProvider::APPLE;
-        user.email = std::string([[data objectForKey:@"email"] UTF8String]);
-        user.name = std::string([[data objectForKey:@"name"] UTF8String]);
-        user.photo = std::string([[data objectForKey:@"photo"] UTF8String]);
-        user.idToken = std::string([[data objectForKey:@"idToken"] UTF8String]);
-        if ([data objectForKey:@"accessToken"]) user.accessToken = std::string([[data objectForKey:@"accessToken"] UTF8String]);
-        if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = std::string([[data objectForKey:@"serverAuthCode"] UTF8String]);
+        user.email = nsToStd([data objectForKey:@"email"]);
+        user.name = nsToStd([data objectForKey:@"name"]);
+        user.photo = nsToStd([data objectForKey:@"photo"]);
+        user.idToken = nsToStd([data objectForKey:@"idToken"]);
+        if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
+        if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
         if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
+        if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
         promise->resolve(user);
     }];
     return promise;

@@ -225,13 +225,14 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess
         jmethodID longValueMethod = env->GetMethodID(longClass, "longValue", "()J");
         user.expirationTime = (double)env->CallLongMethod(expirationTime, longValueMethod);
     }
+    
     if (loginPromise) loginPromise->resolve(user);
     if (scopesPromise) scopesPromise->resolve(user);
     if (silentPromise) silentPromise->resolve(user);
 }
 
 extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginError(
-    JNIEnv* env, jclass, jstring error) {
+    JNIEnv* env, jclass, jstring error, jstring underlyingError) {
     
     std::shared_ptr<Promise<AuthUser>> loginPromise;
     std::shared_ptr<Promise<AuthUser>> scopesPromise;
@@ -249,12 +250,19 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginError(
     const char* errorCStr = env->GetStringUTFChars(error, nullptr);
     std::string errorStr(errorCStr);
     env->ReleaseStringUTFChars(error, errorCStr);
+    
+    std::string finalError = errorStr;
+    if (underlyingError) {
+        const char* uCStr = env->GetStringUTFChars(underlyingError, nullptr);
+        finalError = std::string(uCStr);
+        env->ReleaseStringUTFChars(underlyingError, uCStr);
+    }
 
-    if (loginPromise) loginPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
-    if (scopesPromise) scopesPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
+    if (loginPromise) loginPromise->reject(std::make_exception_ptr(std::runtime_error(finalError)));
+    if (scopesPromise) scopesPromise->reject(std::make_exception_ptr(std::runtime_error(finalError)));
     if (silentPromise) {
         if (errorStr == "No session") silentPromise->resolve(std::nullopt);
-        else silentPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
+        else silentPromise->reject(std::make_exception_ptr(std::runtime_error(finalError)));
     }
 }
 
@@ -290,7 +298,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshSucce
 }
 
 extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshError(
-    JNIEnv* env, jclass, jstring error) {
+    JNIEnv* env, jclass, jstring error, jstring underlyingError) {
     
     std::shared_ptr<Promise<AuthTokens>> refreshPromise;
     {
@@ -299,10 +307,17 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshError
         gRefreshPromise = nullptr;
     }
     if (refreshPromise) {
+        std::string finalError;
         const char* errorCStr = env->GetStringUTFChars(error, nullptr);
-        std::string errorStr(errorCStr);
+        finalError = std::string(errorCStr);
         env->ReleaseStringUTFChars(error, errorCStr);
-        refreshPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
+        
+        if (underlyingError) {
+            const char* uCStr = env->GetStringUTFChars(underlyingError, nullptr);
+            finalError = std::string(uCStr);
+            env->ReleaseStringUTFChars(underlyingError, uCStr);
+        }
+        refreshPromise->reject(std::make_exception_ptr(std::runtime_error(finalError)));
     }
 }
 

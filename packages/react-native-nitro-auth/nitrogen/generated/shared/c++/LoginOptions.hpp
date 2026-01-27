@@ -39,10 +39,11 @@ namespace margelo::nitro::NitroAuth {
     std::optional<std::vector<std::string>> scopes     SWIFT_PRIVATE;
     std::optional<std::string> loginHint     SWIFT_PRIVATE;
     std::optional<bool> useOneTap     SWIFT_PRIVATE;
+    std::optional<bool> useSheet     SWIFT_PRIVATE;
 
   public:
     LoginOptions() = default;
-    explicit LoginOptions(std::optional<std::vector<std::string>> scopes, std::optional<std::string> loginHint, std::optional<bool> useOneTap): scopes(scopes), loginHint(loginHint), useOneTap(useOneTap) {}
+    explicit LoginOptions(std::optional<std::vector<std::string>> scopes, std::optional<std::string> loginHint, std::optional<bool> useOneTap, std::optional<bool> useSheet): scopes(scopes), loginHint(loginHint), useOneTap(useOneTap), useSheet(useSheet) {}
   };
 
 } // namespace margelo::nitro::NitroAuth
@@ -57,7 +58,8 @@ namespace margelo::nitro {
       return margelo::nitro::NitroAuth::LoginOptions(
         JSIConverter<std::optional<std::vector<std::string>>>::fromJSI(runtime, obj.getProperty(runtime, "scopes")),
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, "loginHint")),
-        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, "useOneTap"))
+        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, "useOneTap")),
+        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, "useSheet"))
       );
     }
     static inline jsi::Value toJSI(jsi::Runtime& runtime, const margelo::nitro::NitroAuth::LoginOptions& arg) {
@@ -65,6 +67,7 @@ namespace margelo::nitro {
       obj.setProperty(runtime, "scopes", JSIConverter<std::optional<std::vector<std::string>>>::toJSI(runtime, arg.scopes));
       obj.setProperty(runtime, "loginHint", JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.loginHint));
       obj.setProperty(runtime, "useOneTap", JSIConverter<std::optional<bool>>::toJSI(runtime, arg.useOneTap));
+      obj.setProperty(runtime, "useSheet", JSIConverter<std::optional<bool>>::toJSI(runtime, arg.useSheet));
       return obj;
     }
     static inline bool canConvert(jsi::Runtime& runtime, const jsi::Value& value) {
@@ -78,6 +81,7 @@ namespace margelo::nitro {
       if (!JSIConverter<std::optional<std::vector<std::string>>>::canConvert(runtime, obj.getProperty(runtime, "scopes"))) return false;
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, "loginHint"))) return false;
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, "useOneTap"))) return false;
+      if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, "useSheet"))) return false;
       return true;
     }
   };
