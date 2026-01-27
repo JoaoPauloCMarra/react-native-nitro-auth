@@ -33,7 +33,7 @@ Pod::Spec.new do |s|
   }
 
   s.dependency "React-Core"
-  s.dependency "GoogleSignIn", "~> 8.0"
+  s.dependency "GoogleSignIn", "~> 9.0"
   
   load 'nitrogen/generated/ios/NitroAuth+autolinking.rb'
   add_nitrogen_files(s)

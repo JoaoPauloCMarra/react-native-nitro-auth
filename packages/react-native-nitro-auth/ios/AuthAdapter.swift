@@ -7,7 +7,7 @@ import ObjectiveC
 @objc
 public class AuthAdapter: NSObject {
   @objc
-  public static func login(provider: String, scopes: [String], loginHint: String?, completion: @escaping (NSDictionary?, String?) -> Void) {
+  public static func login(provider: String, scopes: [String], loginHint: String?, useSheet: Bool, completion: @escaping (NSDictionary?, String?) -> Void) {
     if provider == "google" {
       guard let clientId = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String, !clientId.isEmpty else {
         completion(nil, "configuration_error")
@@ -27,28 +27,10 @@ public class AuthAdapter: NSObject {
         GIDSignIn.sharedInstance.configuration = config
         
         let additionalScopes = scopes.isEmpty ? nil : scopes
+        
+        // Modern sheet-like API
         GIDSignIn.sharedInstance.signIn(withPresenting: rootVC, hint: loginHint, additionalScopes: additionalScopes) { result, error in
-          if let error = error {
-            completion(nil, AuthAdapter.mapError(error))
-            return
-          }
-          
-          guard let user = result?.user else {
-            completion(nil, "unknown")
-            return
-          }
-          
-          let data: [String: Any] = [
-            "provider": "google",
-            "email": user.profile?.email ?? "",
-            "name": user.profile?.name ?? "",
-            "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
-            "idToken": user.idToken?.tokenString ?? "",
-            "accessToken": user.accessToken.tokenString,
-            "serverAuthCode": result?.serverAuthCode ?? "",
-            "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000
-          ]
-          completion(data as NSDictionary, nil)
+          self.handleGoogleResult(result, error: error, completion: completion)
         }
       }
     } else if provider == "apple" {
@@ -64,6 +46,31 @@ public class AuthAdapter: NSObject {
     } else {
       completion(nil, "unsupported_provider")
     }
+  }
+
+  private static func handleGoogleResult(_ result: GIDSignInResult?, error: Error?, completion: @escaping (NSDictionary?, String?) -> Void) {
+    if let error = error {
+      completion(nil, error.localizedDescription)
+      return
+    }
+    
+    guard let user = result?.user else {
+      completion(nil, "unknown")
+      return
+    }
+    
+    let data: [String: Any] = [
+      "provider": "google",
+      "email": user.profile?.email ?? "",
+      "name": user.profile?.name ?? "",
+      "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
+      "idToken": user.idToken?.tokenString ?? "",
+      "accessToken": user.accessToken.tokenString,
+      "serverAuthCode": result?.serverAuthCode ?? "",
+      "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000,
+      "underlyingError": ""
+    ]
+    completion(data as NSDictionary, nil)
   }
 
   static func mapError(_ error: Error) -> String {
@@ -92,27 +99,7 @@ public class AuthAdapter: NSObject {
       }
       
       currentUser.addScopes(scopes, presenting: rootVC) { result, error in
-        if let error = error {
-          completion(nil, AuthAdapter.mapError(error))
-          return
-        }
-        
-        guard let user = result?.user else {
-          completion(nil, "unknown")
-          return
-        }
-        
-        let data: [String: Any] = [
-          "provider": "google",
-          "email": user.profile?.email ?? "",
-          "name": user.profile?.name ?? "",
-          "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
-          "idToken": user.idToken?.tokenString ?? "",
-          "accessToken": user.accessToken.tokenString,
-          "serverAuthCode": result?.serverAuthCode ?? "",
-          "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000
-        ]
-        completion(data as NSDictionary, nil)
+        self.handleGoogleResult(result, error: error, completion: completion)
       }
     }
   }
@@ -126,7 +113,7 @@ public class AuthAdapter: NSObject {
     
     currentUser.refreshTokensIfNeeded { user, error in
       if let error = error {
-        completion(nil, AuthAdapter.mapError(error))
+        completion(nil, error.localizedDescription)
         return
       }
       
@@ -138,9 +125,10 @@ public class AuthAdapter: NSObject {
       let data: [String: Any] = [
         "accessToken": user.accessToken.tokenString,
         "idToken": user.idToken?.tokenString ?? "",
-        "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000
+        "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000,
+        "underlyingError": error?.localizedDescription ?? ""
       ]
-      completion(data as NSDictionary, nil)
+      completion(data as NSDictionary, error?.localizedDescription)
     }
   }
 
@@ -196,13 +184,14 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
         "provider": "apple",
         "email": email ?? "",
         "name": name,
-        "idToken": idToken ?? ""
+        "idToken": idToken ?? "",
+        "underlyingError": ""
       ]
       completion(data as NSDictionary, nil)
     }
   }
   
   func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
-    completion(nil, AuthAdapter.mapError(error))
+    completion(nil, error.localizedDescription)
   }
 }
