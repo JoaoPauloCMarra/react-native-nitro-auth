@@ -47,7 +47,7 @@
     },
     "packages/react-native-nitro-auth": {
       "name": "react-native-nitro-auth",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "devDependencies": {
         "@expo/config-plugins": "^54.0.4",
         "@react-native/babel-preset": "^0.81.0",
@@ -58,6 +58,7 @@
         "react-native": "0.81.5",
         "react-native-nitro-modules": "^0.33.0",
         "react-native-web": "^0.21.2",
+        "typescript": "^5.9.3",
       },
       "peerDependencies": {
         "react": "*",

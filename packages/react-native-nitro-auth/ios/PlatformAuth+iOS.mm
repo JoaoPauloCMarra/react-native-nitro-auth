@@ -43,7 +43,12 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         useSheet = options->useSheet.value();
     }
     
-    [AuthAdapter loginWithProvider:providerStr scopes:scopesArray loginHint:hintStr useSheet:useSheet completion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
+    BOOL forceAccountPicker = NO;
+    if (options.has_value() && options->forceAccountPicker.has_value()) {
+        forceAccountPicker = options->forceAccountPicker.value();
+    }
+    
+    [AuthAdapter loginWithProvider:providerStr scopes:scopesArray loginHint:hintStr useSheet:useSheet forceAccountPicker:forceAccountPicker completion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
         if (error != nil) {
             promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
             return;

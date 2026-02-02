@@ -17,6 +17,8 @@ export interface LoginOptions {
   useOneTap?: boolean;
   /** (iOS only) Use native sign-in sheet */
   useSheet?: boolean;
+  /** Force account picker to show, ignoring any cached session or loginHint */
+  forceAccountPicker?: boolean;
 }
 
 export interface AuthTokens {
@@ -53,7 +55,7 @@ export interface Auth extends HybridObject<{ ios: "c++"; android: "c++" }> {
   logout(): void;
 
   onAuthStateChanged(
-    callback: (user: AuthUser | undefined) => void
+    callback: (user: AuthUser | undefined) => void,
   ): () => void;
   onTokensRefreshed(callback: (tokens: AuthTokens) => void): () => void;
   setLoggingEnabled(enabled: boolean): void;

@@ -232,9 +232,8 @@ Perfect for updating your API client (e.g., Axios/Fetch) whenever tokens are ref
 ```ts
 AuthService.onTokensRefreshed((tokens) => {
   console.log("Tokens were updated!", tokens.accessToken);
-  apiClient.defaults.headers.common[
-    "Authorization"
-  ] = `Bearer ${tokens.accessToken}`;
+  apiClient.defaults.headers.common["Authorization"] =
+    `Bearer ${tokens.accessToken}`;
 });
 ```
 
@@ -248,6 +247,23 @@ await login("google", {
   useSheet: true, // iOS
 });
 ```
+
+### Force Account Picker
+
+When connecting additional services (like Google Calendar), you may want to let users pick a different account than the one they signed in with. Use `forceAccountPicker` to clear any cached session and show the account picker:
+
+```ts
+await login("google", {
+  scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+  forceAccountPicker: true, // Always show account picker
+});
+```
+
+This is useful for scenarios where:
+
+- Users want to connect a different Google account for calendar integration
+- You need to ensure the user can select any account they've added to their device
+- The cached session is interfering with the expected account selection UX
 
 ## API Reference
 

@@ -18,12 +18,14 @@ class GoogleSignInActivity : ComponentActivity() {
         private const val EXTRA_CLIENT_ID = "client_id"
         private const val EXTRA_SCOPES = "scopes"
         private const val EXTRA_LOGIN_HINT = "login_hint"
+        private const val EXTRA_FORCE_PICKER = "force_picker"
         
-        fun createIntent(context: Context, clientId: String, scopes: Array<String>, loginHint: String?): Intent {
+        fun createIntent(context: Context, clientId: String, scopes: Array<String>, loginHint: String?, forcePicker: Boolean = false): Intent {
             return Intent(context, GoogleSignInActivity::class.java).apply {
                 putExtra(EXTRA_CLIENT_ID, clientId)
                 putExtra(EXTRA_SCOPES, scopes)
                 putExtra(EXTRA_LOGIN_HINT, loginHint)
+                putExtra(EXTRA_FORCE_PICKER, forcePicker)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         }
@@ -48,6 +50,7 @@ class GoogleSignInActivity : ComponentActivity() {
         val clientId = intent.getStringExtra(EXTRA_CLIENT_ID)
         val scopes = intent.getStringArrayExtra(EXTRA_SCOPES) ?: arrayOf("email", "profile")
         val loginHint = intent.getStringExtra(EXTRA_LOGIN_HINT)
+        val forcePicker = intent.getBooleanExtra(EXTRA_FORCE_PICKER, false)
         
         if (clientId == null) {
             AuthAdapter.onSignInError(8, "Missing client ID")
@@ -66,9 +69,21 @@ class GoogleSignInActivity : ComponentActivity() {
             }
         }
         
-        if (loginHint != null) gsoBuilder.setAccountName(loginHint)
+        // Only set account name if not forcing picker
+        if (!forcePicker && loginHint != null) {
+            gsoBuilder.setAccountName(loginHint)
+        }
         
         val client = GoogleSignIn.getClient(this, gsoBuilder.build())
-        signInLauncher.launch(client.signInIntent)
+        
+        if (forcePicker) {
+            // Sign out first to ensure account picker shows all accounts
+            client.signOut().addOnCompleteListener {
+                signInLauncher.launch(client.signInIntent)
+            }
+        } else {
+            signInLauncher.launch(client.signInIntent)
+        }
     }
 }
+
