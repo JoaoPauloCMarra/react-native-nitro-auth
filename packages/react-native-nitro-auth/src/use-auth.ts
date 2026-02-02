@@ -43,7 +43,7 @@ export function useAuth() {
         throw error;
       }
     },
-    []
+    [],
   );
 
   const logout = useCallback(() => {
@@ -124,6 +124,27 @@ export function useAuth() {
     }
   }, []);
 
+  const silentRestore = useCallback(async () => {
+    setState((prev) => ({ ...prev, loading: true, error: undefined }));
+    try {
+      await AuthService.silentRestore();
+      setState({
+        user: AuthService.currentUser,
+        scopes: AuthService.grantedScopes,
+        loading: false,
+        error: undefined,
+      });
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      setState((prev) => ({
+        ...prev,
+        loading: false,
+        error,
+      }));
+      throw error;
+    }
+  }, []);
+
   useEffect(() => {
     const unsubscribe = AuthService.onAuthStateChanged((currentUser) => {
       setState((prev) => ({
@@ -145,6 +166,7 @@ export function useAuth() {
       revokeScopes,
       getAccessToken,
       refreshToken,
+      silentRestore,
     }),
     [
       state,
@@ -154,6 +176,7 @@ export function useAuth() {
       revokeScopes,
       getAccessToken,
       refreshToken,
-    ]
+      silentRestore,
+    ],
   );
 }

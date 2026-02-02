@@ -7,7 +7,7 @@ import ObjectiveC
 @objc
 public class AuthAdapter: NSObject {
   @objc
-  public static func login(provider: String, scopes: [String], loginHint: String?, useSheet: Bool, completion: @escaping (NSDictionary?, String?) -> Void) {
+  public static func login(provider: String, scopes: [String], loginHint: String?, useSheet: Bool, forceAccountPicker: Bool = false, completion: @escaping (NSDictionary?, String?) -> Void) {
     if provider == "google" {
       guard let clientId = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String, !clientId.isEmpty else {
         completion(nil, "configuration_error")
@@ -27,10 +27,22 @@ public class AuthAdapter: NSObject {
         GIDSignIn.sharedInstance.configuration = config
         
         let additionalScopes = scopes.isEmpty ? nil : scopes
+        // Use nil hint when forcing picker to show all accounts
+        let effectiveHint = forceAccountPicker ? nil : loginHint
         
-        // Modern sheet-like API
-        GIDSignIn.sharedInstance.signIn(withPresenting: rootVC, hint: loginHint, additionalScopes: additionalScopes) { result, error in
-          self.handleGoogleResult(result, error: error, completion: completion)
+        let performSignIn = {
+          GIDSignIn.sharedInstance.signIn(withPresenting: rootVC, hint: effectiveHint, additionalScopes: additionalScopes) { result, error in
+            self.handleGoogleResult(result, error: error, completion: completion)
+          }
+        }
+        
+        if forceAccountPicker {
+          // Disconnect first to clear cached credentials and force picker
+          GIDSignIn.sharedInstance.disconnect { _ in
+            performSignIn()
+          }
+        } else {
+          performSignIn()
         }
       }
     } else if provider == "apple" {

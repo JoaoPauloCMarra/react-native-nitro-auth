@@ -21,7 +21,7 @@ const withNitroAuth = (config, props = {}) => {
       const existingSchemes = config.modResults.CFBundleURLTypes || [];
       if (
         !existingSchemes.some((scheme) =>
-          scheme.CFBundleURLSchemes.includes(ios.googleUrlScheme)
+          scheme.CFBundleURLSchemes.includes(ios.googleUrlScheme),
         )
       ) {
         config.modResults.CFBundleURLTypes = [
@@ -53,7 +53,7 @@ const withNitroAuth = (config, props = {}) => {
             _: android.googleClientId,
           },
         ],
-        config.modResults
+        config.modResults,
       );
     }
     return config;
@@ -65,5 +65,5 @@ const withNitroAuth = (config, props = {}) => {
 module.exports = createRunOncePlugin(
   withNitroAuth,
   "react-native-nitro-auth",
-  "0.1.6"
+  "0.4.0",
 );

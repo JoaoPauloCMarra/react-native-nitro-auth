@@ -96,7 +96,7 @@ object AuthAdapter {
     }
 
     @JvmStatic
-    fun loginSync(context: Context, provider: String, googleClientId: String?, scopes: Array<String>?, loginHint: String?, useOneTap: Boolean) {
+    fun loginSync(context: Context, provider: String, googleClientId: String?, scopes: Array<String>?, loginHint: String?, useOneTap: Boolean, forceAccountPicker: Boolean = false) {
         if (provider == "apple") {
             nativeOnLoginError("unsupported_provider", "Apple Sign-In is not supported on Android.")
             return
@@ -117,10 +117,10 @@ object AuthAdapter {
         val requestedScopes = scopes?.toList() ?: listOf("email", "profile")
         pendingScopes = requestedScopes
 
-        if (useOneTap) {
+        if (useOneTap && !forceAccountPicker) {
             loginOneTap(context, clientId, requestedScopes)
         } else {
-            val intent = GoogleSignInActivity.createIntent(ctx, clientId, requestedScopes.toTypedArray(), loginHint)
+            val intent = GoogleSignInActivity.createIntent(ctx, clientId, requestedScopes.toTypedArray(), loginHint, forceAccountPicker)
             intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             ctx.startActivity(intent)
         }

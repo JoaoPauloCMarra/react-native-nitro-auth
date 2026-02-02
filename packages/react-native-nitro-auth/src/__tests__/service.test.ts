@@ -1,4 +1,5 @@
 const mockHybridObject = {
+  name: "Auth",
   currentUser: undefined,
   grantedScopes: [],
   hasPlayServices: true,
@@ -8,6 +9,12 @@ const mockHybridObject = {
   revokeScopes: jest.fn(),
   getAccessToken: jest.fn(),
   refreshToken: jest.fn(),
+  onAuthStateChanged: jest.fn(() => jest.fn()),
+  onTokensRefreshed: jest.fn(() => jest.fn()),
+  setLoggingEnabled: jest.fn(),
+  setStorageAdapter: jest.fn(),
+  dispose: jest.fn(),
+  equals: jest.fn(),
 };
 
 jest.mock("react-native-nitro-modules", () => ({
@@ -26,7 +33,6 @@ describe("AuthService", () => {
 
   it("should export AuthService", () => {
     expect(AuthService).toBeDefined();
-    expect(AuthService).toBe(mockHybridObject);
   });
 
   it("should have all required methods", () => {
@@ -42,5 +48,9 @@ describe("AuthService", () => {
     expect("currentUser" in AuthService).toBe(true);
     expect("grantedScopes" in AuthService).toBe(true);
     expect("hasPlayServices" in AuthService).toBe(true);
+  });
+
+  it("should have JS storage adapter method", () => {
+    expect(AuthService.setJSStorageAdapter).toBeDefined();
   });
 });

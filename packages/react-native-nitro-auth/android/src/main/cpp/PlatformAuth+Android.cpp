@@ -41,11 +41,13 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     std::vector<std::string> scopes = {"email", "profile"};
     std::optional<std::string> loginHint;
     bool useOneTap = false;
+    bool forceAccountPicker = false;
 
     if (options) {
         if (options->scopes) scopes = *options->scopes;
         loginHint = options->loginHint;
         useOneTap = options->useOneTap.value_or(false);
+        forceAccountPicker = options->forceAccountPicker.value_or(false);
     }
 
     JNIEnv* env = Environment::current();
@@ -58,14 +60,15 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     jstring jLoginHint = loginHint.has_value() ? make_jstring(loginHint.value()).get() : nullptr;
     jclass adapterClass = env->FindClass("com/auth/AuthAdapter");
     jmethodID loginMethod = env->GetStaticMethodID(adapterClass, "loginSync", 
-        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Z)V");
+        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;ZZ)V");
     env->CallStaticVoidMethod(adapterClass, loginMethod, 
         contextPtr, 
         make_jstring(providerStr).get(),
         nullptr,
         jScopes,
         jLoginHint,
-        (jboolean)useOneTap);
+        (jboolean)useOneTap,
+        (jboolean)forceAccountPicker);
     
     return promise;
 }

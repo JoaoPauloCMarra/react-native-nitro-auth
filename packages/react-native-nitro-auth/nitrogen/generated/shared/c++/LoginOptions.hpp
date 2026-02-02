@@ -45,10 +45,11 @@ namespace margelo::nitro::NitroAuth {
     std::optional<std::string> loginHint     SWIFT_PRIVATE;
     std::optional<bool> useOneTap     SWIFT_PRIVATE;
     std::optional<bool> useSheet     SWIFT_PRIVATE;
+    std::optional<bool> forceAccountPicker     SWIFT_PRIVATE;
 
   public:
     LoginOptions() = default;
-    explicit LoginOptions(std::optional<std::vector<std::string>> scopes, std::optional<std::string> loginHint, std::optional<bool> useOneTap, std::optional<bool> useSheet): scopes(scopes), loginHint(loginHint), useOneTap(useOneTap), useSheet(useSheet) {}
+    explicit LoginOptions(std::optional<std::vector<std::string>> scopes, std::optional<std::string> loginHint, std::optional<bool> useOneTap, std::optional<bool> useSheet, std::optional<bool> forceAccountPicker): scopes(scopes), loginHint(loginHint), useOneTap(useOneTap), useSheet(useSheet), forceAccountPicker(forceAccountPicker) {}
 
   public:
     friend bool operator==(const LoginOptions& lhs, const LoginOptions& rhs) = default;
@@ -67,7 +68,8 @@ namespace margelo::nitro {
         JSIConverter<std::optional<std::vector<std::string>>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "scopes"))),
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "loginHint"))),
         JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useOneTap"))),
-        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useSheet")))
+        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useSheet"))),
+        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "forceAccountPicker")))
       );
     }
     static inline jsi::Value toJSI(jsi::Runtime& runtime, const margelo::nitro::NitroAuth::LoginOptions& arg) {
@@ -76,6 +78,7 @@ namespace margelo::nitro {
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "loginHint"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.loginHint));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "useOneTap"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.useOneTap));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "useSheet"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.useSheet));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "forceAccountPicker"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.forceAccountPicker));
       return obj;
     }
     static inline bool canConvert(jsi::Runtime& runtime, const jsi::Value& value) {
@@ -90,6 +93,7 @@ namespace margelo::nitro {
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "loginHint")))) return false;
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useOneTap")))) return false;
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useSheet")))) return false;
+      if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "forceAccountPicker")))) return false;
       return true;
     }
   };
