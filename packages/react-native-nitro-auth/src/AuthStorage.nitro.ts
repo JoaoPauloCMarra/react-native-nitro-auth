@@ -1,7 +1,16 @@
 import type { HybridObject } from "react-native-nitro-modules";
 
-export interface AuthStorageAdapter
-  extends HybridObject<{ ios: "c++"; android: "c++" }> {
+/**
+ * Custom storage adapter for persisting auth state.
+ *
+ * On native platforms, this must be a native HybridObject (Swift/Kotlin).
+ * For JS-based storage (AsyncStorage, MMKV), use the JS wrapper approach
+ * documented in the README.
+ */
+export interface AuthStorageAdapter extends HybridObject<{
+  ios: "c++";
+  android: "c++";
+}> {
   /**
    * Called to save a value to the custom storage.
    */

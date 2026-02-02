@@ -27,6 +27,7 @@ public:
   std::shared_ptr<Promise<AuthTokens>> refreshToken() override;
 
   void logout() override;
+  std::shared_ptr<Promise<void>> silentRestore() override;
   std::function<void()> onAuthStateChanged(const std::function<void(const std::optional<AuthUser>&)>& callback) override;
   std::function<void()> onTokensRefreshed(const std::function<void(const AuthTokens&)>& callback) override;
   void setLoggingEnabled(bool enabled) override;

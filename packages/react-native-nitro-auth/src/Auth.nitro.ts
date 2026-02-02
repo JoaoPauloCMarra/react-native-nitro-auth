@@ -53,6 +53,7 @@ export interface Auth extends HybridObject<{ ios: "c++"; android: "c++" }> {
   refreshToken(): Promise<AuthTokens>;
 
   logout(): void;
+  silentRestore(): Promise<void>;
 
   onAuthStateChanged(
     callback: (user: AuthUser | undefined) => void,

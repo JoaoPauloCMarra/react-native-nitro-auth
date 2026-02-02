@@ -2,8 +2,8 @@ import "dotenv/config";
 
 export default {
   expo: {
-    name: "Nitro Auth Example",
-    slug: "auth-example",
+    name: "Nitro Auth",
+    slug: "nitro-auth-example",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",

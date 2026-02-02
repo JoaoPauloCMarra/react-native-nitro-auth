@@ -12,6 +12,19 @@ const CACHE_KEY = "nitro_auth_user";
 const SCOPES_KEY = "nitro_auth_scopes";
 const DEFAULT_SCOPES = ["openid", "email", "profile"];
 
+type AppleAuthResponse = {
+  authorization: {
+    id_token: string;
+  };
+  user?: {
+    email?: string;
+    name?: {
+      firstName?: string;
+      lastName?: string;
+    };
+  };
+};
+
 const getConfig = () => {
   try {
     const Constants = require("expo-constants").default;
@@ -79,7 +92,7 @@ class AuthWeb implements Auth {
   }
 
   onAuthStateChanged(
-    callback: (user: AuthUser | undefined) => void
+    callback: (user: AuthUser | undefined) => void,
   ): () => void {
     this._listeners.push(callback);
     callback(this._currentUser);
@@ -136,12 +149,12 @@ class AuthWeb implements Auth {
   async revokeScopes(scopes: string[]): Promise<void> {
     logger.log("Revoking scopes:", scopes);
     this._grantedScopes = this._grantedScopes.filter(
-      (s) => !scopes.includes(s)
+      (s) => !scopes.includes(s),
     );
     if (this._storageAdapter) {
       this._storageAdapter.save(
         SCOPES_KEY,
-        JSON.stringify(this._grantedScopes)
+        JSON.stringify(this._grantedScopes),
       );
     } else {
       localStorage.setItem(SCOPES_KEY, JSON.stringify(this._grantedScopes));
@@ -172,7 +185,7 @@ class AuthWeb implements Auth {
     }
     logger.log("Refreshing tokens...");
     await this.loginGoogle(
-      this._grantedScopes.length > 0 ? this._grantedScopes : DEFAULT_SCOPES
+      this._grantedScopes.length > 0 ? this._grantedScopes : DEFAULT_SCOPES,
     );
     const tokens = {
       accessToken: this._currentUser.accessToken,
@@ -195,23 +208,19 @@ class AuthWeb implements Auth {
       mappedMsg = "configuration_error";
     }
 
-    const authError = new Error(mappedMsg) as Error & {
-      underlyingError?: string;
-    };
-    authError.underlyingError = rawMessage;
-    return authError;
+    return Object.assign(new Error(mappedMsg), { underlyingError: rawMessage });
   }
 
   private async loginGoogle(
     scopes: string[],
-    loginHint?: string
+    loginHint?: string,
   ): Promise<void> {
     const config = getConfig();
     const clientId = config.googleWebClientId;
 
     if (!clientId) {
       throw new Error(
-        "Google Web Client ID not configured. Add 'GOOGLE_WEB_CLIENT_ID' to your .env file."
+        "Google Web Client ID not configured. Add 'GOOGLE_WEB_CLIENT_ID' to your .env file.",
       );
     }
 
@@ -238,7 +247,7 @@ class AuthWeb implements Auth {
       const popup = window.open(
         authUrl.toString(),
         "google-auth",
-        `width=${width},height=${height},left=${left},top=${top}`
+        `width=${width},height=${height},left=${left},top=${top}`,
       );
 
       if (!popup) {
@@ -316,7 +325,7 @@ class AuthWeb implements Auth {
 
     if (!clientId) {
       throw new Error(
-        "Apple Web Client ID not configured. Add 'APPLE_WEB_CLIENT_ID' to your .env file."
+        "Apple Web Client ID not configured. Add 'APPLE_WEB_CLIENT_ID' to your .env file.",
       );
     }
 
@@ -338,7 +347,7 @@ class AuthWeb implements Auth {
         });
         window.AppleID.auth
           .signIn()
-          .then((response: any) => {
+          .then((response: AppleAuthResponse) => {
             const user: AuthUser = {
               provider: "apple",
               idToken: response.authorization.id_token,
@@ -355,6 +364,20 @@ class AuthWeb implements Auth {
       script.onerror = () => reject(new Error("Failed to load Apple SDK"));
       document.head.appendChild(script);
     });
+  }
+
+  async silentRestore(): Promise<void> {
+    logger.log("Attempting silent restore...");
+    this.loadFromCache();
+    if (this._currentUser) {
+      try {
+        await this.getAccessToken();
+        logger.log("Silent restore successful (token refreshed)");
+      } catch (e) {
+        logger.warn("Silent restore failed to refresh token:", e);
+      }
+    }
+    this.notify();
   }
 
   logout(): void {
@@ -389,7 +412,7 @@ class AuthWeb implements Auth {
 
   name = "Auth";
   dispose() {}
-  equals(other: any) {
+  equals(other: unknown) {
     return other === this;
   }
 }

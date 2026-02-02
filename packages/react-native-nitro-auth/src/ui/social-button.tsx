@@ -100,9 +100,22 @@ export const SocialButton: React.FC<SocialButtonProps> = ({
         {loading ? (
           <ActivityIndicator size="small" color={getTextColor()} />
         ) : (
-          <Text style={[styles.text, { color: getTextColor() }, textStyle]}>
-            Sign in with {provider.charAt(0).toUpperCase() + provider.slice(1)}
-          </Text>
+          <>
+            {provider === "google" && variant !== "primary" && (
+              <View style={styles.iconPlaceholder}>
+                <Text style={{ fontSize: 18 }}>G</Text>
+              </View>
+            )}
+            {provider === "apple" && variant !== "primary" && (
+              <View style={styles.iconPlaceholder}>
+                <Text style={{ fontSize: 18, color: getTextColor() }}></Text>
+              </View>
+            )}
+            <Text style={[styles.text, { color: getTextColor() }, textStyle]}>
+              Sign in with{" "}
+              {provider.charAt(0).toUpperCase() + provider.slice(1)}
+            </Text>
+          </>
         )}
       </View>
     </Pressable>
@@ -117,10 +130,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     width: "100%",
+    flexDirection: "row",
   },
   content: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+  },
+  iconPlaceholder: {
+    marginRight: 10,
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
   },
   text: {
     fontSize: 16,

@@ -1,20 +1,52 @@
 import { renderHook, act } from "@testing-library/react";
-import type { AuthUser } from "../Auth.nitro";
+import type { AuthProvider, AuthTokens, AuthUser, LoginOptions } from "../Auth.nitro";
+import type { AuthStorageAdapter } from "../AuthStorage.nitro";
 
 // Module-level mock state
 let mockCurrentUser: AuthUser | undefined = undefined;
 let mockScopes: string[] = [];
 
-// Mock functions
-const mockLogin = jest.fn();
+type LoginFn = (provider: AuthProvider, options?: LoginOptions) => Promise<void>;
+type RequestScopesFn = (scopes: string[]) => Promise<void>;
+type RevokeScopesFn = (scopes: string[]) => Promise<void>;
+type GetAccessTokenFn = () => Promise<string | undefined>;
+type RefreshTokenFn = () => Promise<AuthTokens>;
+type OnAuthStateChangedFn = (
+  callback: (user: AuthUser | undefined) => void
+) => () => void;
+type OnTokensRefreshedFn = (callback: (tokens: AuthTokens) => void) => () => void;
+type SetStorageAdapterFn = (adapter: AuthStorageAdapter | undefined) => void;
+
+const mockLogin = jest.fn<ReturnType<LoginFn>, Parameters<LoginFn>>();
 const mockLogout = jest.fn();
-const mockRequestScopes = jest.fn();
-const mockRevokeScopes = jest.fn();
-const mockGetAccessToken = jest.fn();
-const mockRefreshToken = jest.fn();
-const mockOnAuthStateChanged = jest.fn();
-const mockSetStorageAdapter = jest.fn();
-const mockOnTokensRefreshed = jest.fn();
+const mockRequestScopes = jest.fn<
+  ReturnType<RequestScopesFn>,
+  Parameters<RequestScopesFn>
+>();
+const mockRevokeScopes = jest.fn<
+  ReturnType<RevokeScopesFn>,
+  Parameters<RevokeScopesFn>
+>();
+const mockGetAccessToken = jest.fn<
+  ReturnType<GetAccessTokenFn>,
+  Parameters<GetAccessTokenFn>
+>();
+const mockRefreshToken = jest.fn<
+  ReturnType<RefreshTokenFn>,
+  Parameters<RefreshTokenFn>
+>();
+const mockOnAuthStateChanged = jest.fn<
+  ReturnType<OnAuthStateChangedFn>,
+  Parameters<OnAuthStateChangedFn>
+>();
+const mockSetStorageAdapter = jest.fn<
+  ReturnType<SetStorageAdapterFn>,
+  Parameters<SetStorageAdapterFn>
+>();
+const mockOnTokensRefreshed = jest.fn<
+  ReturnType<OnTokensRefreshedFn>,
+  Parameters<OnTokensRefreshedFn>
+>();
 
 // Mock the service module
 jest.mock("../service", () => ({
@@ -28,15 +60,22 @@ jest.mock("../service", () => ({
     get hasPlayServices() {
       return true;
     },
-    login: (...args: any[]) => mockLogin(...args),
-    logout: (...args: any[]) => mockLogout(...args),
-    requestScopes: (...args: any[]) => mockRequestScopes(...args),
-    revokeScopes: (...args: any[]) => mockRevokeScopes(...args),
-    getAccessToken: (...args: any[]) => mockGetAccessToken(...args),
-    refreshToken: (...args: any[]) => mockRefreshToken(...args),
-    onAuthStateChanged: (...args: any[]) => mockOnAuthStateChanged(...args),
-    setStorageAdapter: (...args: any[]) => mockSetStorageAdapter(...args),
-    onTokensRefreshed: (...args: any[]) => mockOnTokensRefreshed(...args),
+    login: (...args: Parameters<LoginFn>) => mockLogin(...args),
+    logout: (...args: []) => mockLogout(...args),
+    requestScopes: (...args: Parameters<RequestScopesFn>) =>
+      mockRequestScopes(...args),
+    revokeScopes: (...args: Parameters<RevokeScopesFn>) =>
+      mockRevokeScopes(...args),
+    getAccessToken: (...args: Parameters<GetAccessTokenFn>) =>
+      mockGetAccessToken(...args),
+    refreshToken: (...args: Parameters<RefreshTokenFn>) =>
+      mockRefreshToken(...args),
+    onAuthStateChanged: (...args: Parameters<OnAuthStateChangedFn>) =>
+      mockOnAuthStateChanged(...args),
+    setStorageAdapter: (...args: Parameters<SetStorageAdapterFn>) =>
+      mockSetStorageAdapter(...args),
+    onTokensRefreshed: (...args: Parameters<OnTokensRefreshedFn>) =>
+      mockOnTokensRefreshed(...args),
   },
 }));
 
@@ -148,26 +187,24 @@ describe("useAuth", () => {
     });
 
     it("sets error when login fails", async () => {
-      const error = new Error("network_error");
-      // @ts-ignore
+      const error = new Error("network_error") as Error & {
+        underlyingError?: string;
+      };
       error.underlyingError = "Detailed native error";
       mockLogin.mockRejectedValueOnce(error);
 
       const { result } = renderHook(() => useAuth());
 
       await act(async () => {
-        try {
-          await result.current.login("google");
-        } catch (e) {
-          // ignore
-        }
+        await result.current.login("google").catch(() => undefined);
       });
 
       expect(result.current.loading).toBe(false);
       expect(result.current.error?.message).toBe("network_error");
-      expect((result.current.error as any)?.underlyingError).toBe(
-        "Detailed native error"
-      );
+      const underlyingError = (
+        result.current.error as Error & { underlyingError?: string }
+      )?.underlyingError;
+      expect(underlyingError).toBe("Detailed native error");
     });
 
     it("should handle login error", async () => {
@@ -177,9 +214,7 @@ describe("useAuth", () => {
       const { result } = renderHook(() => useAuth());
 
       await act(async () => {
-        try {
-          await result.current.login("google");
-        } catch {}
+        await result.current.login("google").catch(() => undefined);
       });
 
       expect(result.current.loading).toBe(false);
@@ -192,9 +227,7 @@ describe("useAuth", () => {
       const { result } = renderHook(() => useAuth());
 
       await act(async () => {
-        try {
-          await result.current.login("google");
-        } catch {}
+        await result.current.login("google").catch(() => undefined);
       });
 
       expect(result.current.error).toBeInstanceOf(Error);
@@ -298,7 +331,7 @@ describe("useAuth", () => {
 
       const { result } = renderHook(() => useAuth());
 
-      let refreshedTokens: any;
+      let refreshedTokens: AuthTokens | undefined;
       await act(async () => {
         refreshedTokens = await result.current.refreshToken();
       });
@@ -367,11 +400,19 @@ describe("useAuth", () => {
 
   describe("setStorageAdapter", () => {
     it("should set storage adapter", () => {
-      const adapter = { save: jest.fn(), load: jest.fn(), remove: jest.fn() };
-      const { result } = renderHook(() => useAuth());
+      const adapter: AuthStorageAdapter = {
+        name: "MockStorageAdapter",
+        save: jest.fn(),
+        load: jest.fn(),
+        remove: jest.fn(),
+        dispose: jest.fn(),
+        equals: () => false,
+        toString: () => "MockStorageAdapter",
+      };
+      renderHook(() => useAuth());
 
       act(() => {
-        AuthService.setStorageAdapter(adapter as any);
+        AuthService.setStorageAdapter(adapter);
       });
 
       expect(mockSetStorageAdapter).toHaveBeenCalledWith(adapter);

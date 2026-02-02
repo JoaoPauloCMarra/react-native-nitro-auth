@@ -110,6 +110,26 @@ void HybridAuth::logout() {
   notifyAuthStateChanged();
 }
 
+std::shared_ptr<Promise<void>> HybridAuth::silentRestore() {
+  auto promise = Promise<void>::create();
+  auto silentPromise = PlatformAuth::silentRestore();
+  silentPromise->addOnResolvedListener([this, promise](const std::optional<AuthUser>& user) {
+    if (user) {
+      std::lock_guard<std::mutex> lock(_mutex);
+      _currentUser = user;
+      if (user->scopes) _grantedScopes = *user->scopes;
+      saveToCache(_currentUser);
+    }
+    notifyAuthStateChanged();
+    promise->resolve();
+  });
+  
+  silentPromise->addOnRejectedListener([promise](const std::exception_ptr& error) {
+    promise->reject(error);
+  });
+  return promise;
+}
+
 std::shared_ptr<Promise<void>> HybridAuth::login(AuthProvider provider, const std::optional<LoginOptions>& options) {
   auto promise = Promise<void>::create();
   

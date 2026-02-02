@@ -75,6 +75,7 @@ namespace margelo::nitro::NitroAuth {
       virtual std::shared_ptr<Promise<std::optional<std::string>>> getAccessToken() = 0;
       virtual std::shared_ptr<Promise<AuthTokens>> refreshToken() = 0;
       virtual void logout() = 0;
+      virtual std::shared_ptr<Promise<void>> silentRestore() = 0;
       virtual std::function<void()> onAuthStateChanged(const std::function<void(const std::optional<AuthUser>& /* user */)>& callback) = 0;
       virtual std::function<void()> onTokensRefreshed(const std::function<void(const AuthTokens& /* tokens */)>& callback) = 0;
       virtual void setLoggingEnabled(bool enabled) = 0;
