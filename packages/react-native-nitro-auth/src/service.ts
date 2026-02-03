@@ -6,6 +6,7 @@ import type {
   AuthUser,
   LoginOptions,
 } from "./Auth.nitro";
+import type { AuthStorageAdapter } from "./AuthStorage.nitro";
 
 const STORAGE_KEY = "nitro_auth_user";
 const SCOPES_KEY = "nitro_auth_scopes";
@@ -145,7 +146,7 @@ export const AuthService: Auth & {
     nitroAuth.setLoggingEnabled(enabled);
   },
 
-  setStorageAdapter(adapter) {
+  setStorageAdapter(adapter: AuthStorageAdapter | undefined): void {
     nitroAuth.setStorageAdapter(adapter);
   },
 
@@ -163,7 +164,7 @@ export const AuthService: Auth & {
     nitroAuth.dispose();
   },
 
-  equals(other) {
-    return nitroAuth.equals(other);
+  equals(other: unknown): boolean {
+    return (nitroAuth as { equals(o: unknown): boolean }).equals(other);
   },
 };

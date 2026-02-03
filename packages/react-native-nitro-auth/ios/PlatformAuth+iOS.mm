@@ -12,6 +12,7 @@
 #endif
 
 #include "LoginOptions.hpp"
+#include "MicrosoftPrompt.hpp"
 
 namespace margelo::nitro::NitroAuth {
  
@@ -22,10 +23,17 @@ namespace margelo::nitro::NitroAuth {
 
 std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, const std::optional<LoginOptions>& options) {
     auto promise = Promise<AuthUser>::create();
-    NSString* providerStr = provider == AuthProvider::GOOGLE ? @"google" : @"apple";
+    NSString* providerStr;
+    switch (provider) {
+        case AuthProvider::GOOGLE: providerStr = @"google"; break;
+        case AuthProvider::APPLE: providerStr = @"apple"; break;
+        case AuthProvider::MICROSOFT: providerStr = @"microsoft"; break;
+    }
     
     NSMutableArray* scopesArray = [NSMutableArray array];
     NSString* hintStr = nil;
+    NSString* tenantStr = nil;
+    NSString* promptStr = nil;
     
     if (options.has_value()) {
         if (options->scopes.has_value()) {
@@ -35,6 +43,17 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         }
         if (options->loginHint.has_value()) {
             hintStr = [NSString stringWithUTF8String:options->loginHint->c_str()];
+        }
+        if (options->tenant.has_value()) {
+            tenantStr = [NSString stringWithUTF8String:options->tenant->c_str()];
+        }
+        if (options->prompt.has_value()) {
+            switch (options->prompt.value()) {
+                case MicrosoftPrompt::LOGIN: promptStr = @"login"; break;
+                case MicrosoftPrompt::CONSENT: promptStr = @"consent"; break;
+                case MicrosoftPrompt::SELECT_ACCOUNT: promptStr = @"select_account"; break;
+                case MicrosoftPrompt::NONE: promptStr = @"none"; break;
+            }
         }
     }
     
@@ -48,7 +67,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         forceAccountPicker = options->forceAccountPicker.value();
     }
     
-    [AuthAdapter loginWithProvider:providerStr scopes:scopesArray loginHint:hintStr useSheet:useSheet forceAccountPicker:forceAccountPicker completion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
+    [AuthAdapter loginWithProvider:providerStr scopes:scopesArray loginHint:hintStr useSheet:useSheet forceAccountPicker:forceAccountPicker tenant:tenantStr prompt:promptStr completion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
         if (error != nil) {
             promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
             return;
@@ -128,7 +147,14 @@ std::shared_ptr<Promise<std::optional<AuthUser>>> PlatformAuth::silentRestore() 
             return;
         }
         AuthUser user;
-        user.provider = [[data objectForKey:@"provider"] isEqualToString:@"google"] ? AuthProvider::GOOGLE : AuthProvider::APPLE;
+        NSString* providerStr = [data objectForKey:@"provider"];
+        if ([providerStr isEqualToString:@"google"]) {
+            user.provider = AuthProvider::GOOGLE;
+        } else if ([providerStr isEqualToString:@"microsoft"]) {
+            user.provider = AuthProvider::MICROSOFT;
+        } else {
+            user.provider = AuthProvider::APPLE;
+        }
         user.email = nsToStd([data objectForKey:@"email"]);
         user.name = nsToStd([data objectForKey:@"name"]);
         user.photo = nsToStd([data objectForKey:@"photo"]);

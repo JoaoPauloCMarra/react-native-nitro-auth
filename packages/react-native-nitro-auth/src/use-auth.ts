@@ -14,7 +14,18 @@ interface AuthState {
   error: Error | undefined;
 }
 
-export function useAuth() {
+export interface UseAuthReturn extends AuthState {
+  hasPlayServices: boolean;
+  login: (provider: AuthProvider, options?: LoginOptions) => Promise<void>;
+  logout: () => void;
+  requestScopes: (scopes: string[]) => Promise<void>;
+  revokeScopes: (scopes: string[]) => Promise<void>;
+  getAccessToken: () => Promise<string | undefined>;
+  refreshToken: () => Promise<AuthTokens>;
+  silentRestore: () => Promise<void>;
+}
+
+export function useAuth(): UseAuthReturn {
   const [state, setState] = useState<AuthState>({
     user: AuthService.currentUser,
     scopes: AuthService.grantedScopes,

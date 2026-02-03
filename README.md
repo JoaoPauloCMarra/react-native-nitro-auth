@@ -6,7 +6,7 @@
 
 🚀 **High-performance, JSI-powered Authentication for React Native.**
 
-Nitro Auth is a modern authentication library for React Native built on top of [Nitro Modules](https://github.com/mrousavy/nitro). It provides a unified, type-safe API for Google and Apple Sign-In with zero-bridge overhead.
+Nitro Auth is a modern authentication library for React Native built on top of [Nitro Modules](https://github.com/mrousavy/nitro). It provides a unified, type-safe API for Google, Apple, and Microsoft Sign-In with zero-bridge overhead.
 
 ## Why Nitro Auth?
 
@@ -50,6 +50,50 @@ For Expo projects, rebuild native code after installation:
 bunx expo prebuild
 ```
 
+### Testing locally (example app + Microsoft login)
+
+Fastest way to confirm the package and Microsoft login work:
+
+1. **Azure app (one-time)**  
+   In [Azure Portal](https://portal.azure.com) → **Azure Active Directory** → **App registrations** → **New registration**:
+   - Name: e.g. `Nitro Auth Example`
+   - Supported account types: **Accounts in any organizational directory and personal Microsoft accounts**
+   - Redirect URI (add after creation):  
+     - **Mobile/Desktop**: `msauth://com.auth.example` (Android) or `msauth.com.auth.example://auth` (iOS, use your bundle id)
+   - Under **Authentication** → **Platform configurations** → add **Mobile and desktop applications** with redirect URI `msauth://com.auth.example` (Android) and the iOS one if testing on iOS.  
+   Copy the **Application (client) ID**.
+
+2. **Env file**  
+   From the repo root:
+   ```bash
+   cd apps/example
+   cp .env.example .env.local
+   ```
+   Edit `.env.local` and set at least:
+   ```bash
+   MICROSOFT_CLIENT_ID=<your-application-client-id>
+   MICROSOFT_TENANT=common
+   ```
+   (Google/Apple can stay placeholder if you only care about Microsoft.)
+
+3. **Run the app**  
+   From the **monorepo root**:
+   ```bash
+   bun install
+   bun run start
+   ```
+   In a second terminal:
+   ```bash
+   bun run example:android
+   # or
+   bun run example:ios
+   ```
+   Wait for the app to install and open.
+
+4. **Test Microsoft**  
+   In the app, tap **Sign in with Microsoft**. A browser or in-app tab opens; sign in with a Microsoft/personal account, then you should return to the app with the user shown (email, name, provider MICROSOFT).  
+   If you see "configuration_error", check `MICROSOFT_CLIENT_ID` and that the redirect URI in Azure matches your app (e.g. `msauth://com.auth.example` for the example app).
+
 ### Expo Setup
 
 Add the plugin to `app.json` or `app.config.js`:
@@ -64,16 +108,22 @@ Add the plugin to `app.json` or `app.config.js`:
           "ios": {
             "googleClientId": "YOUR_IOS_CLIENT_ID.apps.googleusercontent.com",
             "googleUrlScheme": "com.googleusercontent.apps.YOUR_IOS_CLIENT_ID",
-            "appleSignIn": true
+            "appleSignIn": true,
+            "microsoftClientId": "YOUR_AZURE_AD_CLIENT_ID",
+            "microsoftTenant": "common"
           },
           "android": {
-            "googleClientId": "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"
+            "googleClientId": "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com",
+            "microsoftClientId": "YOUR_AZURE_AD_CLIENT_ID",
+            "microsoftTenant": "common"
           }
         }
       ]
     ],
     "extra": {
-      "googleWebClientId": "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"
+      "googleWebClientId": "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com",
+      "microsoftClientId": "YOUR_AZURE_AD_CLIENT_ID",
+      "microsoftTenant": "common"
     }
   }
 }
@@ -90,6 +140,10 @@ GOOGLE_IOS_URL_SCHEME=com.googleusercontent.apps.your-ios-client-id
 
 # Web Client ID (used for Android OAuth flow)
 GOOGLE_WEB_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
+
+# Microsoft/Azure AD (optional)
+MICROSOFT_CLIENT_ID=your-azure-ad-application-id
+MICROSOFT_TENANT=common
 ```
 
 Then reference them in `app.config.js`:
@@ -107,15 +161,21 @@ export default {
             googleClientId: process.env.GOOGLE_IOS_CLIENT_ID,
             googleUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME,
             appleSignIn: true,
+            microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
+            microsoftTenant: process.env.MICROSOFT_TENANT,
           },
           android: {
             googleClientId: process.env.GOOGLE_WEB_CLIENT_ID,
+            microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
+            microsoftTenant: process.env.MICROSOFT_TENANT,
           },
         },
       ],
     ],
     extra: {
       googleWebClientId: process.env.GOOGLE_WEB_CLIENT_ID,
+      microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
+      microsoftTenant: process.env.MICROSOFT_TENANT,
     },
   },
 };
@@ -127,12 +187,33 @@ export default {
 > - For Android, use your **Web Client ID** (not Android Client ID) for proper OAuth flow.
 > - Add `googleWebClientId` to `expo.extra` for web platform support.
 > - The `serverAuthCode` is automatically included in `AuthUser` when available (requires backend integration setup in Google Cloud Console).
+> - For Microsoft Sign-In, use `common` tenant for multi-tenant apps, or specify your Azure AD tenant ID for single-tenant apps.
+
+### Microsoft Azure AD Setup
+
+To enable Microsoft Sign-In, you need to register an application in the Azure Portal:
+
+1. Go to [Azure Portal](https://portal.azure.com) > Azure Active Directory > App registrations
+2. Click "New registration"
+3. Set the redirect URIs:
+   - **iOS**: `msauth://{bundle-identifier}/{client-id}` (e.g., `msauth://com.myapp/00000000-0000-0000-0000-000000000000`)
+   - **Android**: `msauth://{package-name}/{client-id}` (e.g., `msauth://com.myapp/00000000-0000-0000-0000-000000000000`)
+   - **Web**: `https://your-domain.com` (the page that loads the app)
+4. Under "API permissions", add `openid`, `email`, `profile`, and `User.Read` (Microsoft Graph)
+5. Copy the Application (client) ID for use in your config
+
+**Tenant Options:**
+
+- `common` - Any Azure AD or personal Microsoft account
+- `organizations` - Any Azure AD account (work/school)
+- `consumers` - Personal Microsoft accounts only
+- `{tenant-id}` - Specific Azure AD tenant
 
 ### Bare React Native
 
-**iOS:** Add `GIDClientID` (and optionally `GIDServerClientID`) to `Info.plist` and enable "Sign in with Apple" capability.
+**iOS:** Add `GIDClientID` (and optionally `GIDServerClientID`) to `Info.plist` and enable "Sign in with Apple" capability. For Microsoft, add `MSALClientID` and optionally `MSALTenant`.
 
-**Android:** Add `nitro_auth_google_client_id` string resource in `res/values/strings.xml`.
+**Android:** Add `nitro_auth_google_client_id` string resource in `res/values/strings.xml`. For Microsoft, add `nitro_auth_microsoft_client_id` and `nitro_auth_microsoft_tenant`.
 
 ## Quick Start
 
@@ -164,9 +245,30 @@ function LoginScreen() {
         onPress={() => login("google")}
         disabled={loading || !hasPlayServices}
       />
+      <SocialButton
+        provider="apple"
+        onPress={() => login("apple")}
+        disabled={loading}
+      />
+      <SocialButton
+        provider="microsoft"
+        onPress={() => login("microsoft")}
+        disabled={loading}
+      />
     </View>
   );
 }
+```
+
+### Microsoft Login Options
+
+```tsx
+// Login with specific tenant
+await login("microsoft", {
+  tenant: "your-tenant-id",
+  prompt: "select_account", // 'login' | 'consent' | 'select_account' | 'none'
+  scopes: ["openid", "email", "profile", "User.Read"],
+});
 ```
 
 ## Migration from @react-native-google-signin/google-signin
@@ -343,6 +445,18 @@ import { KeychainStorage } from "./native/KeychainStorage";
 
 AuthService.setStorageAdapter(KeychainStorage);
 ```
+
+**Production recommendation:** For apps handling sensitive data or subject to compliance (e.g. health, finance), use an encrypted storage adapter (Keychain on iOS, EncryptedSharedPreferences on Android, or a secure JS store) instead of the default. See [Pluggable Storage Adapters](#pluggable-storage-adapters) above.
+
+### Production Readiness
+
+Nitro Auth is suitable for production use:
+
+- **Google Sign-In**: Full support including One-Tap / Sheet, incremental scopes, and token refresh on iOS, Android, and Web.
+- **Apple Sign-In**: Supported on iOS and Web (not available on Android).
+- **Microsoft (Azure AD / B2C)**: Login, incremental scopes, and token refresh are supported on all platforms. Uses PKCE, state, and nonce for security.
+
+**Token storage:** By default, tokens are stored in standard platform storage (UserDefaults / SharedPreferences / localStorage). For high-security requirements, configure a [custom storage adapter](#pluggable-storage-adapters) (e.g. Keychain, EncryptedSharedPreferences, or secure JS storage).
 
 ### Logging & Debugging
 

@@ -2,6 +2,7 @@
 #include "AuthUser.hpp"
 #include "AuthTokens.hpp"
 #include "AuthCache.hpp"
+#include "MicrosoftPrompt.hpp"
 #include <fbjni/fbjni.h>
 #include <NitroModules/NitroLogger.hpp>
 #include <NitroModules/Promise.hpp>
@@ -37,15 +38,32 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         gLoginPromise = promise;
     }
     
-    std::string providerStr = (provider == AuthProvider::GOOGLE) ? "google" : "apple";
+    std::string providerStr;
+    switch (provider) {
+        case AuthProvider::GOOGLE: providerStr = "google"; break;
+        case AuthProvider::APPLE: providerStr = "apple"; break;
+        case AuthProvider::MICROSOFT: providerStr = "microsoft"; break;
+    }
+    
     std::vector<std::string> scopes = {"email", "profile"};
     std::optional<std::string> loginHint;
+    std::optional<std::string> tenant;
+    std::optional<std::string> prompt;
     bool useOneTap = false;
     bool forceAccountPicker = false;
 
     if (options) {
         if (options->scopes) scopes = *options->scopes;
         loginHint = options->loginHint;
+        tenant = options->tenant;
+        if (options->prompt.has_value()) {
+            switch (options->prompt.value()) {
+                case MicrosoftPrompt::LOGIN: prompt = "login"; break;
+                case MicrosoftPrompt::CONSENT: prompt = "consent"; break;
+                case MicrosoftPrompt::SELECT_ACCOUNT: prompt = "select_account"; break;
+                case MicrosoftPrompt::NONE: prompt = "none"; break;
+            }
+        }
         useOneTap = options->useOneTap.value_or(false);
         forceAccountPicker = options->forceAccountPicker.value_or(false);
     }
@@ -58,9 +76,12 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     }
     
     jstring jLoginHint = loginHint.has_value() ? make_jstring(loginHint.value()).get() : nullptr;
+    jstring jTenant = tenant.has_value() ? make_jstring(tenant.value()).get() : nullptr;
+    jstring jPrompt = prompt.has_value() ? make_jstring(prompt.value()).get() : nullptr;
+    
     jclass adapterClass = env->FindClass("com/auth/AuthAdapter");
     jmethodID loginMethod = env->GetStaticMethodID(adapterClass, "loginSync", 
-        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;ZZ)V");
+        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;ZZLjava/lang/String;Ljava/lang/String;)V");
     env->CallStaticVoidMethod(adapterClass, loginMethod, 
         contextPtr, 
         make_jstring(providerStr).get(),
@@ -68,7 +89,9 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         jScopes,
         jLoginHint,
         (jboolean)useOneTap,
-        (jboolean)forceAccountPicker);
+        (jboolean)forceAccountPicker,
+        jTenant,
+        jPrompt);
     
     return promise;
 }
@@ -179,7 +202,14 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess
     
     AuthUser user;
     const char* providerCStr = env->GetStringUTFChars(provider, nullptr);
-    user.provider = (std::string(providerCStr) == "google") ? AuthProvider::GOOGLE : AuthProvider::APPLE;
+    std::string providerStr(providerCStr);
+    if (providerStr == "google") {
+        user.provider = AuthProvider::GOOGLE;
+    } else if (providerStr == "microsoft") {
+        user.provider = AuthProvider::MICROSOFT;
+    } else {
+        user.provider = AuthProvider::APPLE;
+    }
     env->ReleaseStringUTFChars(provider, providerCStr);
     
     if (email) {

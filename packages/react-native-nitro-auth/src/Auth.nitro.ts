@@ -2,7 +2,7 @@ import type { HybridObject } from "react-native-nitro-modules";
 
 import type { AuthStorageAdapter } from "./AuthStorage.nitro";
 
-export type AuthProvider = "google" | "apple";
+export type AuthProvider = "google" | "apple" | "microsoft";
 
 export type AuthErrorCode =
   | "cancelled"
@@ -10,6 +10,8 @@ export type AuthErrorCode =
   | "configuration_error"
   | "unsupported_provider"
   | "unknown";
+
+export type MicrosoftPrompt = "login" | "consent" | "select_account" | "none";
 
 export interface LoginOptions {
   scopes?: string[];
@@ -19,6 +21,10 @@ export interface LoginOptions {
   useSheet?: boolean;
   /** Force account picker to show, ignoring any cached session or loginHint */
   forceAccountPicker?: boolean;
+  /** (Microsoft only) Azure AD tenant - "common", "organizations", "consumers", or tenant ID */
+  tenant?: string;
+  /** (Microsoft only) Prompt behavior for login */
+  prompt?: MicrosoftPrompt;
 }
 
 export interface AuthTokens {

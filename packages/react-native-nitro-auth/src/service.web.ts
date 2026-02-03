@@ -1,11 +1,7 @@
 import { AuthModule } from "./Auth.web";
+import type { AuthStorageAdapter } from "./AuthStorage.nitro";
 import type { JSStorageAdapter } from "./service";
 
-/**
- * Web AuthService with JSStorageAdapter support.
- * On web, setStorageAdapter already accepts plain JS objects,
- * so setJSStorageAdapter is just an alias.
- */
 export const AuthService = {
   ...AuthModule,
 
@@ -39,12 +35,7 @@ export const AuthService = {
   dispose: AuthModule.dispose.bind(AuthModule),
   equals: AuthModule.equals.bind(AuthModule),
 
-  // JS storage adapter - on web this is the same as setStorageAdapter
-  // since web already accepts plain JS objects
-  setJSStorageAdapter(adapter: JSStorageAdapter | undefined) {
-    // Web implementation directly accepts JS objects as storage adapters
-    AuthModule.setStorageAdapter(
-      adapter as Parameters<typeof AuthModule.setStorageAdapter>[0],
-    );
+  setJSStorageAdapter(adapter: JSStorageAdapter | undefined): void {
+    AuthModule.setStorageAdapter(adapter as AuthStorageAdapter | undefined);
   },
 };

@@ -20,6 +20,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import android.app.Activity
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
+import androidx.browser.customtabs.CustomTabsIntent
+import java.util.UUID
+import org.json.JSONObject
+import android.util.Base64
 
 object AuthAdapter {
     private const val TAG = "AuthAdapter"
@@ -29,6 +35,14 @@ object AuthAdapter {
     private var currentActivity: Activity? = null
     private var googleSignInClient: GoogleSignInClient? = null
     private var pendingScopes: List<String> = emptyList()
+    private var pendingMicrosoftScopes: List<String> = emptyList()
+    
+    private var pendingPkceVerifier: String? = null
+    private var pendingState: String? = null
+    private var pendingNonce: String? = null
+    private var pendingMicrosoftTenant: String? = null
+    private var pendingMicrosoftClientId: String? = null
+    private var pendingMicrosoftB2cDomain: String? = null
 
     @JvmStatic
     private external fun nativeInitialize(context: Context)
@@ -96,9 +110,14 @@ object AuthAdapter {
     }
 
     @JvmStatic
-    fun loginSync(context: Context, provider: String, googleClientId: String?, scopes: Array<String>?, loginHint: String?, useOneTap: Boolean, forceAccountPicker: Boolean = false) {
+    fun loginSync(context: Context, provider: String, googleClientId: String?, scopes: Array<String>?, loginHint: String?, useOneTap: Boolean, forceAccountPicker: Boolean = false, tenant: String? = null, prompt: String? = null) {
         if (provider == "apple") {
             nativeOnLoginError("unsupported_provider", "Apple Sign-In is not supported on Android.")
+            return
+        }
+
+        if (provider == "microsoft") {
+            loginMicrosoft(context, scopes, loginHint, tenant, prompt)
             return
         }
 
@@ -123,6 +142,284 @@ object AuthAdapter {
             val intent = GoogleSignInActivity.createIntent(ctx, clientId, requestedScopes.toTypedArray(), loginHint, forceAccountPicker)
             intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             ctx.startActivity(intent)
+        }
+    }
+
+    private fun loginMicrosoft(context: Context, scopes: Array<String>?, loginHint: String?, tenant: String?, prompt: String?) {
+        val ctx = appContext ?: context.applicationContext
+        val clientId = getMicrosoftClientIdFromResources(ctx)
+        if (clientId == null) {
+            nativeOnLoginError("configuration_error", "Microsoft Client ID is required. Set it in app.json plugins.")
+            return
+        }
+
+        val effectiveTenant = tenant ?: getMicrosoftTenantFromResources(ctx) ?: "common"
+        val effectiveScopes = scopes?.toList() ?: listOf("openid", "email", "profile", "offline_access", "User.Read")
+        val effectivePrompt = prompt ?: "select_account"
+        pendingMicrosoftScopes = effectiveScopes
+
+        val codeVerifier = generateCodeVerifier()
+        val codeChallenge = generateCodeChallenge(codeVerifier)
+        val state = UUID.randomUUID().toString()
+        val nonce = UUID.randomUUID().toString()
+        pendingPkceVerifier = codeVerifier
+        pendingState = state
+        pendingNonce = nonce
+        pendingMicrosoftTenant = effectiveTenant
+        pendingMicrosoftClientId = clientId
+
+        val b2cDomain = getMicrosoftB2cDomainFromResources(ctx)
+        pendingMicrosoftB2cDomain = b2cDomain
+        val authBaseUrl = getMicrosoftAuthBaseUrl(effectiveTenant, b2cDomain)
+        val redirectUri = "msauth://${ctx.packageName}"
+
+        val authUrl = Uri.parse("${authBaseUrl}oauth2/v2.0/authorize").buildUpon()
+            .appendQueryParameter("client_id", clientId)
+            .appendQueryParameter("redirect_uri", redirectUri)
+            .appendQueryParameter("response_type", "code")
+            .appendQueryParameter("response_mode", "query")
+            .appendQueryParameter("scope", effectiveScopes.joinToString(" "))
+            .appendQueryParameter("state", state)
+            .appendQueryParameter("nonce", nonce)
+            .appendQueryParameter("code_challenge", codeChallenge)
+            .appendQueryParameter("code_challenge_method", "S256")
+            .appendQueryParameter("prompt", effectivePrompt)
+            .apply { if (loginHint != null) appendQueryParameter("login_hint", loginHint) }
+            .build()
+
+        try {
+            val activity = currentActivity
+            if (activity != null) {
+                val customTabsIntent = CustomTabsIntent.Builder().build()
+                customTabsIntent.launchUrl(activity, authUrl)
+            } else {
+                val browserIntent = Intent(Intent.ACTION_VIEW, authUrl)
+                browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                ctx.startActivity(browserIntent)
+            }
+        } catch (e: Exception) {
+            nativeOnLoginError("unknown", e.message)
+        }
+    }
+
+    private fun generateCodeVerifier(): String {
+        val bytes = ByteArray(32)
+        java.security.SecureRandom().nextBytes(bytes)
+        return Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+    }
+
+    private fun generateCodeChallenge(verifier: String): String {
+        val bytes = java.security.MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII))
+        return Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+    }
+
+    @JvmStatic
+    fun handleMicrosoftRedirect(uri: Uri) {
+        val code = uri.getQueryParameter("code")
+        val state = uri.getQueryParameter("state")
+        val error = uri.getQueryParameter("error")
+        val errorDescription = uri.getQueryParameter("error_description")
+
+        if (error != null) {
+            clearPkceState()
+            nativeOnLoginError(error, errorDescription)
+            return
+        }
+
+        if (state != pendingState) {
+            clearPkceState()
+            nativeOnLoginError("invalid_state", "State mismatch - possible CSRF attack")
+            return
+        }
+
+        if (code == null) {
+            clearPkceState()
+            nativeOnLoginError("unknown", "No authorization code in response")
+            return
+        }
+
+        exchangeCodeForTokens(code)
+    }
+
+    private fun exchangeCodeForTokens(code: String) {
+        val ctx = appContext
+        val clientId = pendingMicrosoftClientId
+        val tenant = pendingMicrosoftTenant
+        val verifier = pendingPkceVerifier
+
+        if (ctx == null || clientId == null || tenant == null || verifier == null) {
+            clearPkceState()
+            nativeOnLoginError("invalid_state", "Missing PKCE state for token exchange")
+            return
+        }
+
+        val redirectUri = "msauth://${ctx.packageName}"
+        val authBaseUrl = getMicrosoftAuthBaseUrl(tenant, pendingMicrosoftB2cDomain)
+        val tokenUrl = "${authBaseUrl}oauth2/v2.0/token"
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val url = java.net.URL(tokenUrl)
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                connection.doOutput = true
+
+                val postData = buildString {
+                    append("client_id=${java.net.URLEncoder.encode(clientId, "UTF-8")}")
+                    append("&code=${java.net.URLEncoder.encode(code, "UTF-8")}")
+                    append("&redirect_uri=${java.net.URLEncoder.encode(redirectUri, "UTF-8")}")
+                    append("&grant_type=authorization_code")
+                    append("&code_verifier=${java.net.URLEncoder.encode(verifier, "UTF-8")}")
+                }
+
+                connection.outputStream.use { it.write(postData.toByteArray()) }
+
+                val responseCode = connection.responseCode
+                val responseBody = if (responseCode == 200) {
+                    connection.inputStream.bufferedReader().readText()
+                } else {
+                    connection.errorStream?.bufferedReader()?.readText() ?: ""
+                }
+
+                CoroutineScope(Dispatchers.Main).launch {
+                    handleTokenResponse(responseCode, responseBody)
+                }
+            } catch (e: Exception) {
+                CoroutineScope(Dispatchers.Main).launch {
+                    clearPkceState()
+                    nativeOnLoginError("network_error", e.message)
+                }
+            }
+        }
+    }
+
+    private fun handleTokenResponse(responseCode: Int, responseBody: String) {
+        if (responseCode != 200) {
+            try {
+                val json = JSONObject(responseBody)
+                val error = json.optString("error", "token_error")
+                val desc = json.optString("error_description", "Failed to exchange code for tokens")
+                clearPkceState()
+                nativeOnLoginError(error, desc)
+            } catch (e: Exception) {
+                clearPkceState()
+                nativeOnLoginError("token_error", "Failed to exchange code for tokens")
+            }
+            return
+        }
+
+        try {
+            val json = JSONObject(responseBody)
+            val idToken = json.optString("id_token")
+            val accessToken = json.optString("access_token")
+            val refreshToken = json.optString("refresh_token")
+            val expiresIn = json.optLong("expires_in", 0)
+            val expirationTime = if (expiresIn > 0) System.currentTimeMillis() + expiresIn * 1000 else null
+
+            if (idToken.isEmpty()) {
+                clearPkceState()
+                nativeOnLoginError("no_id_token", "No id_token in token response")
+                return
+            }
+
+            val claims = decodeJwt(idToken)
+            val tokenNonce = claims["nonce"]
+            if (tokenNonce != pendingNonce) {
+                clearPkceState()
+                nativeOnLoginError("invalid_nonce", "Nonce mismatch - token may be replayed")
+                return
+            }
+
+            val email = claims["preferred_username"] ?: claims["email"]
+            val name = claims["name"]
+
+            val ctx = appContext
+            if (ctx != null) {
+                saveUser(ctx, "microsoft", email, name, null, idToken, refreshToken, pendingMicrosoftScopes)
+                if (refreshToken.isNotEmpty()) {
+                    saveMicrosoftRefreshToken(ctx, refreshToken)
+                }
+            }
+
+            clearPkceState()
+            nativeOnLoginSuccess(
+                "microsoft",
+                email,
+                name,
+                null,
+                idToken,
+                accessToken,
+                null,
+                pendingMicrosoftScopes.toTypedArray(),
+                expirationTime
+            )
+        } catch (e: Exception) {
+            clearPkceState()
+            nativeOnLoginError("parse_error", e.message)
+        }
+    }
+
+    private fun saveMicrosoftRefreshToken(context: Context, refreshToken: String) {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString("microsoft_refresh_token", refreshToken).apply()
+    }
+
+    private fun getMicrosoftRefreshToken(context: Context): String? {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        return prefs.getString("microsoft_refresh_token", null)
+    }
+
+    private fun clearPkceState() {
+        pendingPkceVerifier = null
+        pendingState = null
+        pendingNonce = null
+        pendingMicrosoftTenant = null
+        pendingMicrosoftClientId = null
+        pendingMicrosoftB2cDomain = null
+    }
+
+    private fun decodeJwt(token: String): Map<String, String> {
+        return try {
+            val parts = token.split(".")
+            if (parts.size < 2) return emptyMap()
+            val payload = String(Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP))
+            val json = JSONObject(payload)
+            val result = mutableMapOf<String, String>()
+            json.keys().forEach { key ->
+                val value = json.optString(key)
+                if (value.isNotEmpty()) result[key] = value
+            }
+            result
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun getMicrosoftClientIdFromResources(context: Context): String? {
+        val resId = context.resources.getIdentifier("nitro_auth_microsoft_client_id", "string", context.packageName)
+        return if (resId != 0) context.getString(resId) else null
+    }
+
+    private fun getMicrosoftTenantFromResources(context: Context): String? {
+        val resId = context.resources.getIdentifier("nitro_auth_microsoft_tenant", "string", context.packageName)
+        return if (resId != 0) context.getString(resId) else null
+    }
+
+    private fun getMicrosoftB2cDomainFromResources(context: Context): String? {
+        val resId = context.resources.getIdentifier("nitro_auth_microsoft_b2c_domain", "string", context.packageName)
+        return if (resId != 0) context.getString(resId) else null
+    }
+
+    private fun getMicrosoftAuthBaseUrl(tenant: String, b2cDomain: String?): String {
+        if (tenant.startsWith("https://")) {
+            return if (tenant.endsWith("/")) tenant else "$tenant/"
+        }
+        
+        return if (b2cDomain != null) {
+            "https://$b2cDomain/tfp/$tenant/"
+        } else {
+            "https://login.microsoftonline.com/$tenant/"
         }
     }
 
@@ -199,58 +496,72 @@ object AuthAdapter {
     fun requestScopesSync(context: Context, scopes: Array<String>) {
         val ctx = appContext ?: context.applicationContext
         val account = GoogleSignIn.getLastSignedInAccount(ctx)
-        if (account == null) {
-            nativeOnLoginError("unknown", "No user logged in")
+        if (account != null) {
+            val newScopes = scopes.map { Scope(it) }
+            if (GoogleSignIn.hasPermissions(account, *newScopes.toTypedArray())) {
+                onSignInSuccess(account, (pendingScopes + scopes.toList()).distinct())
+                return
+            }
+            val clientId = getClientIdFromResources(ctx)
+            if (clientId == null) {
+                nativeOnLoginError("configuration_error", "Google Client ID not configured")
+                return
+            }
+            val allScopes = (pendingScopes + scopes.toList()).distinct()
+            val intent = GoogleSignInActivity.createIntent(ctx, clientId, allScopes.toTypedArray(), account.email)
+            ctx.startActivity(intent)
             return
         }
-
-        val newScopes = scopes.map { Scope(it) }
-        if (GoogleSignIn.hasPermissions(account, *newScopes.toTypedArray())) {
-            onSignInSuccess(account, (pendingScopes + scopes.toList()).distinct())
+        val userJson = getUserJson(ctx)
+        if (userJson != null && userJson.contains("\"provider\":\"microsoft\"")) {
+            val currentScopes = extractScopesFromUserJson(userJson)
+            val defaultMicrosoftScopes = listOf("openid", "email", "profile", "offline_access", "User.Read")
+            val existing = if (currentScopes.isEmpty()) defaultMicrosoftScopes else currentScopes
+            val mergedScopes = (existing + scopes.toList()).distinct()
+            val tenant = getMicrosoftTenantFromResources(ctx)
+            loginMicrosoft(ctx, mergedScopes.toTypedArray(), null, tenant, null)
             return
         }
-
-        val clientId = getClientIdFromResources(ctx)
-        if (clientId == null) {
-            nativeOnLoginError("configuration_error", "Google Client ID not configured")
-            return
-        }
-
-        val allScopes = (pendingScopes + scopes.toList()).distinct()
-        val intent = GoogleSignInActivity.createIntent(ctx, clientId, allScopes.toTypedArray(), account.email)
-        ctx.startActivity(intent)
+        nativeOnLoginError("unknown", "No user logged in")
     }
 
     @JvmStatic
     fun refreshTokenSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
-        if (googleSignInClient == null) {
-            val account = GoogleSignIn.getLastSignedInAccount(ctx)
-            if (account == null) {
-                nativeOnRefreshError("unknown", "No user logged in")
+        val account = GoogleSignIn.getLastSignedInAccount(ctx)
+        if (account != null) {
+            if (googleSignInClient == null) {
+                val clientId = getClientIdFromResources(ctx)
+                if (clientId == null) {
+                    nativeOnRefreshError("configuration_error", "Google Client ID not configured")
+                    return
+                }
+                val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                    .requestIdToken(clientId)
+                    .requestServerAuthCode(clientId)
+                    .requestEmail()
+                    .build()
+                googleSignInClient = GoogleSignIn.getClient(ctx, gso)
+            }
+            googleSignInClient!!.silentSignIn().addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    val acc = task.result
+                    nativeOnRefreshSuccess(acc?.idToken, null, null)
+                } else {
+                    nativeOnRefreshError("network_error", task.exception?.message ?: "Silent sign-in failed")
+                }
+            }
+            return
+        }
+        val userJson = getUserJson(ctx)
+        if (userJson != null && userJson.contains("\"provider\":\"microsoft\"")) {
+            val refreshToken = getMicrosoftRefreshToken(ctx)
+            if (refreshToken != null) {
+                refreshMicrosoftTokenForRefresh(ctx, refreshToken)
                 return
             }
-            val clientId = getClientIdFromResources(ctx)
-            if (clientId == null) {
-                nativeOnRefreshError("configuration_error", "Google Client ID not configured")
-                return
-            }
-            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestIdToken(clientId)
-                .requestServerAuthCode(clientId)
-                .requestEmail()
-                .build()
-            googleSignInClient = GoogleSignIn.getClient(ctx, gso)
         }
-
-        googleSignInClient!!.silentSignIn().addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                val account = task.result
-                nativeOnRefreshSuccess(account?.idToken, null, null)
-            } else {
-                nativeOnRefreshError("network_error", task.exception?.message ?: "Silent sign-in failed")
-            }
-        }
+        nativeOnRefreshError("unknown", "No user logged in")
     }
 
     @JvmStatic
@@ -325,15 +636,160 @@ object AuthAdapter {
         } else {
             val json = getUserJson(ctx)
             if (json != null) {
-                val provider = if (json.contains("\"provider\":\"google\"")) "google" else "apple"
-                val email = extractJsonValue(json, "email")
-                val name = extractJsonValue(json, "name")
-                val photo = extractJsonValue(json, "photo")
-                val idToken = extractJsonValue(json, "idToken")
-                val serverAuthCode = extractJsonValue(json, "serverAuthCode")
-                nativeOnLoginSuccess(provider, email, name, photo, idToken, null, serverAuthCode, null, null)
+                val provider = when {
+                    json.contains("\"provider\":\"google\"") -> "google"
+                    json.contains("\"provider\":\"microsoft\"") -> "microsoft"
+                    else -> "apple"
+                }
+                
+                if (provider == "microsoft") {
+                    val refreshToken = getMicrosoftRefreshToken(ctx)
+                    if (refreshToken != null) {
+                        refreshMicrosoftToken(ctx, refreshToken)
+                    } else {
+                        val email = extractJsonValue(json, "email")
+                        val name = extractJsonValue(json, "name")
+                        val idToken = extractJsonValue(json, "idToken")
+                        nativeOnLoginSuccess(provider, email, name, null, idToken, null, null, null, null)
+                    }
+                } else {
+                    val email = extractJsonValue(json, "email")
+                    val name = extractJsonValue(json, "name")
+                    val photo = extractJsonValue(json, "photo")
+                    val idToken = extractJsonValue(json, "idToken")
+                    val serverAuthCode = extractJsonValue(json, "serverAuthCode")
+                    nativeOnLoginSuccess(provider, email, name, photo, idToken, null, serverAuthCode, null, null)
+                }
             } else {
                 nativeOnLoginError("unknown", "No session")
+            }
+        }
+    }
+
+    private fun refreshMicrosoftToken(context: Context, refreshToken: String) {
+        val clientId = getMicrosoftClientIdFromResources(context)
+        val tenant = getMicrosoftTenantFromResources(context) ?: "common"
+        val b2cDomain = getMicrosoftB2cDomainFromResources(context)
+        
+        if (clientId == null) {
+            nativeOnLoginError("configuration_error", "Microsoft Client ID is required for refresh")
+            return
+        }
+
+        val authBaseUrl = getMicrosoftAuthBaseUrl(tenant, b2cDomain)
+        val tokenUrl = "${authBaseUrl}oauth2/v2.0/token"
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val url = java.net.URL(tokenUrl)
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                connection.doOutput = true
+
+                val postData = buildString {
+                    append("client_id=${java.net.URLEncoder.encode(clientId, "UTF-8")}")
+                    append("&grant_type=refresh_token")
+                    append("&refresh_token=${java.net.URLEncoder.encode(refreshToken, "UTF-8")}")
+                }
+
+                connection.outputStream.use { it.write(postData.toByteArray()) }
+
+                val responseCode = connection.responseCode
+                val responseBody = if (responseCode == 200) {
+                    connection.inputStream.bufferedReader().readText()
+                } else {
+                    connection.errorStream?.bufferedReader()?.readText() ?: ""
+                }
+
+                CoroutineScope(Dispatchers.Main).launch {
+                    if (responseCode == 200) {
+                        val json = JSONObject(responseBody)
+                        val newIdToken = json.optString("id_token")
+                        val newAccessToken = json.optString("access_token")
+                        val newRefreshToken = json.optString("refresh_token")
+                        val expiresIn = json.optLong("expires_in", 0)
+                        val expirationTime = if (expiresIn > 0) System.currentTimeMillis() + expiresIn * 1000 else null
+
+                        val claims = decodeJwt(newIdToken)
+                        val email = claims["preferred_username"] ?: claims["email"]
+                        val name = claims["name"]
+
+                        if (newRefreshToken.isNotEmpty()) {
+                            saveMicrosoftRefreshToken(context, newRefreshToken)
+                        }
+                        saveUser(context, "microsoft", email, name, null, newIdToken, newRefreshToken, null)
+
+                        nativeOnLoginSuccess("microsoft", email, name, null, newIdToken, newAccessToken, null, null, expirationTime)
+                    } else {
+                        nativeOnLoginError("refresh_failed", "Microsoft token refresh failed")
+                    }
+                }
+            } catch (e: Exception) {
+                CoroutineScope(Dispatchers.Main).launch {
+                    nativeOnLoginError("network_error", e.message)
+                }
+            }
+        }
+    }
+
+    private fun refreshMicrosoftTokenForRefresh(context: Context, refreshToken: String) {
+        val clientId = getMicrosoftClientIdFromResources(context)
+        val tenant = getMicrosoftTenantFromResources(context) ?: "common"
+        val b2cDomain = getMicrosoftB2cDomainFromResources(context)
+        if (clientId == null) {
+            nativeOnRefreshError("configuration_error", "Microsoft Client ID not configured")
+            return
+        }
+        val authBaseUrl = getMicrosoftAuthBaseUrl(tenant, b2cDomain)
+        val tokenUrl = "${authBaseUrl}oauth2/v2.0/token"
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val url = java.net.URL(tokenUrl)
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                connection.doOutput = true
+                val postData = buildString {
+                    append("client_id=${java.net.URLEncoder.encode(clientId, "UTF-8")}")
+                    append("&grant_type=refresh_token")
+                    append("&refresh_token=${java.net.URLEncoder.encode(refreshToken, "UTF-8")}")
+                }
+                connection.outputStream.use { it.write(postData.toByteArray()) }
+                val responseCode = connection.responseCode
+                val responseBody = if (responseCode == 200) {
+                    connection.inputStream.bufferedReader().readText()
+                } else {
+                    connection.errorStream?.bufferedReader()?.readText() ?: ""
+                }
+                CoroutineScope(Dispatchers.Main).launch {
+                    if (responseCode == 200) {
+                        val json = JSONObject(responseBody)
+                        val newIdToken = json.optString("id_token")
+                        val newAccessToken = json.optString("access_token")
+                        val newRefreshToken = json.optString("refresh_token")
+                        val expiresIn = json.optLong("expires_in", 0)
+                        val expirationTime = if (expiresIn > 0) System.currentTimeMillis() + expiresIn * 1000 else null
+                        val claims = decodeJwt(newIdToken)
+                        val email = claims["preferred_username"] ?: claims["email"]
+                        val name = claims["name"]
+                        if (newRefreshToken.isNotEmpty()) {
+                            saveMicrosoftRefreshToken(context, newRefreshToken)
+                        }
+                        saveUser(context, "microsoft", email, name, null, newIdToken, newRefreshToken, null)
+                        nativeOnRefreshSuccess(
+                            newIdToken.ifEmpty { null },
+                            newAccessToken.ifEmpty { null },
+                            expirationTime
+                        )
+                    } else {
+                        nativeOnRefreshError("refresh_failed", "Microsoft token refresh failed")
+                    }
+                }
+            } catch (e: Exception) {
+                CoroutineScope(Dispatchers.Main).launch {
+                    nativeOnRefreshError("network_error", e.message)
+                }
             }
         }
     }
@@ -342,6 +798,16 @@ object AuthAdapter {
         val pattern = "\"$key\":\"([^\"]*)\""
         val regex = Regex(pattern)
         return regex.find(json)?.groupValues?.get(1)
+    }
+
+    private fun extractScopesFromUserJson(json: String): List<String> {
+        return try {
+            val jsonObj = JSONObject(json)
+            val arr = jsonObj.optJSONArray("scopes") ?: return emptyList()
+            (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotEmpty() } }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     private fun saveUser(context: Context, provider: String, email: String?, name: String?, 
