@@ -49,6 +49,7 @@ export const FeatureDemo = () => {
 
   const [status, setStatus] = useState("Ready");
   const [useOneTap, setUseOneTap] = useState(false);
+  const [useLegacyGoogleSignIn, setUseLegacyGoogleSignIn] = useState(false);
   const [useCustomStorage, setUseCustomStorage] = useState(false);
   const [loggingEnabled, setLoggingEnabled] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -75,7 +76,7 @@ export const FeatureDemo = () => {
 
   const hasCalendarScope = scopes.includes(CALENDAR_SCOPE);
 
-  const handleLogin = async (provider: "google" | "apple") => {
+  const handleLogin = async (provider: "google" | "apple" | "microsoft") => {
     if (
       provider === "google" &&
       !hasPlayServices &&
@@ -88,12 +89,16 @@ export const FeatureDemo = () => {
       setStatus(`Logging in with ${provider}...`);
       await login(provider, {
         useOneTap:
-          provider === "google" && Platform.OS === "android"
+          provider === "google" && Platform.OS === "android" && !useLegacyGoogleSignIn
             ? useOneTap
             : undefined,
         useSheet:
           provider === "google" && Platform.OS === "ios"
             ? useOneTap
+            : undefined,
+        useLegacyGoogleSignIn:
+          provider === "google" && Platform.OS === "android"
+            ? useLegacyGoogleSignIn
             : undefined,
       });
       setStatus(`Logged in as ${AuthService.currentUser?.email}`);
@@ -106,7 +111,11 @@ export const FeatureDemo = () => {
   const handleLoginWithHint = async () => {
     try {
       setStatus("Login with hint...");
-      await login("google", { loginHint: "user@gmail.com" });
+      await login("google", {
+        loginHint: "user@gmail.com",
+        useLegacyGoogleSignIn:
+          Platform.OS === "android" ? useLegacyGoogleSignIn : undefined,
+      });
     } catch (e: unknown) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -118,6 +127,8 @@ export const FeatureDemo = () => {
       await login("google", {
         forceAccountPicker: true,
         scopes: scopes.length > 0 ? scopes : undefined,
+        useLegacyGoogleSignIn:
+          Platform.OS === "android" ? useLegacyGoogleSignIn : undefined,
       });
     } catch (e: unknown) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -139,6 +150,22 @@ export const FeatureDemo = () => {
       setStatus("Revoking Calendar scope...");
       await revokeScopes([CALENDAR_SCOPE]);
       setStatus("Calendar scope revoked!");
+    } catch (e: unknown) {
+      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const handleMicrosoftB2CLogin = async () => {
+    try {
+      setStatus("Logging into Microsoft B2C...");
+      await login("microsoft", {
+        scopes: [
+          "https://stashcafe.onmicrosoft.com/api/user_impersonation",
+          "openid",
+          "offline_access",
+        ],
+      });
+      setStatus("Logged in with Microsoft B2C!");
     } catch (e: unknown) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -177,6 +204,16 @@ export const FeatureDemo = () => {
     setStatus(`Logging ${enabled ? "enabled" : "disabled"}`);
   };
 
+  const handleToggleLegacyGoogleSignIn = (enabled: boolean) => {
+    setUseLegacyGoogleSignIn(enabled);
+    if (enabled) {
+      setUseOneTap(false);
+      setStatus("Legacy Google Sign-In enabled (serverAuthCode available)");
+    } else {
+      setStatus("Credential Manager enabled (recommended)");
+    }
+  };
+
   const cycleVariant = () => {
     const variants: (typeof variant)[] = [
       "primary",
@@ -202,7 +239,7 @@ export const FeatureDemo = () => {
       <View style={styles.header}>
         <Text style={styles.title}>Nitro Auth</Text>
         <Text style={styles.subtitle}>Feature Demo (JSI)</Text>
-        <Text style={styles.version}>v0.4.0</Text>
+        <Text style={styles.version}>v0.5.0</Text>
       </View>
 
       <View style={styles.statusCard}>
@@ -295,7 +332,6 @@ export const FeatureDemo = () => {
             )}
           </View>
 
-          {/* Scope Management */}
           {user.provider === "google" && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Incremental Auth</Text>
@@ -318,7 +354,6 @@ export const FeatureDemo = () => {
             </View>
           )}
 
-          {/* Logout */}
           <ActionButton
             label="Sign Out"
             onPress={handleLogout}
@@ -329,12 +364,18 @@ export const FeatureDemo = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Login Options</Text>
 
-          {/* Platform-specific toggles */}
           {Platform.OS === "android" && (
             <ToggleRow
-              label="Use One-Tap Login"
+              label="Use Credential Manager (One-Tap)"
               value={useOneTap}
               onChange={setUseOneTap}
+            />
+          )}
+          {Platform.OS === "android" && (
+            <ToggleRow
+              label="Use Legacy Google Sign-In (serverAuthCode)"
+              value={useLegacyGoogleSignIn}
+              onChange={handleToggleLegacyGoogleSignIn}
             />
           )}
           {Platform.OS === "ios" && (
@@ -345,7 +386,6 @@ export const FeatureDemo = () => {
             />
           )}
 
-          {/* SocialButton Variants Demo */}
           <View style={styles.variantDemo}>
             <Text style={styles.variantLabel}>Button Variant: {variant}</Text>
             <Pressable onPress={cycleVariant} style={styles.cycleBtn}>
@@ -353,7 +393,6 @@ export const FeatureDemo = () => {
             </Pressable>
           </View>
 
-          {/* Login Buttons */}
           <View style={styles.loginButtons}>
             <SocialButton
               provider="google"
@@ -366,11 +405,22 @@ export const FeatureDemo = () => {
               variant={variant === "primary" ? "black" : variant}
               onPress={() => handleLogin("apple")}
             />
+            <View style={styles.spacer} />
+            <SocialButton
+              provider="microsoft"
+              variant={variant === "primary" ? "black" : variant}
+              onPress={() => handleLogin("microsoft")}
+            />
           </View>
 
-          {/* Advanced Login Options */}
           <View style={styles.advancedSection}>
             <Text style={styles.advancedTitle}>Advanced Options</Text>
+            <ActionButton
+              label="Microsoft B2C Login"
+              onPress={handleMicrosoftB2CLogin}
+              variant="secondary"
+            />
+            <View style={styles.spacer} />
             <ActionButton
               label="Login with Hint"
               onPress={handleLoginWithHint}
@@ -380,7 +430,6 @@ export const FeatureDemo = () => {
         </View>
       )}
 
-      {/* Settings */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Settings</Text>
 
@@ -397,7 +446,6 @@ export const FeatureDemo = () => {
         />
       </View>
 
-      {/* System Info */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>System Info</Text>
         <View style={styles.infoCard}>
@@ -412,12 +460,12 @@ export const FeatureDemo = () => {
         </View>
       </View>
 
-      {/* Feature Checklist */}
       <View style={[styles.section, styles.lastSection]}>
         <Text style={styles.sectionTitle}>Feature Coverage</Text>
         <View style={styles.checklistCard}>
           <CheckItem label="Google Sign-In" checked />
           <CheckItem label="Apple Sign-In" checked />
+          <CheckItem label="Microsoft Sign-In" checked />
           <CheckItem label="One-Tap / Sheet" checked />
           <CheckItem label="Incremental Auth (Scopes)" checked />
           <CheckItem label="Token Refresh" checked />
@@ -428,6 +476,7 @@ export const FeatureDemo = () => {
           <CheckItem label="Login Hint" checked />
           <CheckItem label="Logging Toggle" checked />
           <CheckItem label="SocialButton Variants" checked />
+          <CheckItem label="Legacy Google Sign-In Toggle" checked />
           <CheckItem label="Server Auth Code" checked />
           <CheckItem label="Error Metadata" checked />
         </View>

@@ -2,14 +2,22 @@ import type { HybridObject } from "react-native-nitro-modules";
 
 import type { AuthStorageAdapter } from "./AuthStorage.nitro";
 
-export type AuthProvider = "google" | "apple";
+export type AuthProvider = "google" | "apple" | "microsoft";
 
 export type AuthErrorCode =
   | "cancelled"
   | "network_error"
   | "configuration_error"
   | "unsupported_provider"
+  | "invalid_state"
+  | "invalid_nonce"
+  | "token_error"
+  | "no_id_token"
+  | "parse_error"
+  | "refresh_failed"
   | "unknown";
+
+export type MicrosoftPrompt = "login" | "consent" | "select_account" | "none";
 
 export interface LoginOptions {
   scopes?: string[];
@@ -19,6 +27,12 @@ export interface LoginOptions {
   useSheet?: boolean;
   /** Force account picker to show, ignoring any cached session or loginHint */
   forceAccountPicker?: boolean;
+  /** (Android only) Use legacy Google Sign-In flow (e.g. for serverAuthCode) */
+  useLegacyGoogleSignIn?: boolean;
+  /** (Microsoft only) Azure AD tenant - "common", "organizations", "consumers", or tenant ID */
+  tenant?: string;
+  /** (Microsoft only) Prompt behavior for login */
+  prompt?: MicrosoftPrompt;
 }
 
 export interface AuthTokens {

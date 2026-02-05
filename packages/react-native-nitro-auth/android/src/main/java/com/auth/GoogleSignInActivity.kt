@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.auth
 
 import android.app.Activity
@@ -68,8 +70,7 @@ class GoogleSignInActivity : ComponentActivity() {
                 gsoBuilder.requestScopes(Scope(scopeStr))
             }
         }
-        
-        // Only set account name if not forcing picker
+
         if (!forcePicker && loginHint != null) {
             gsoBuilder.setAccountName(loginHint)
         }
@@ -77,7 +78,6 @@ class GoogleSignInActivity : ComponentActivity() {
         val client = GoogleSignIn.getClient(this, gsoBuilder.build())
         
         if (forcePicker) {
-            // Sign out first to ensure account picker shows all accounts
             client.signOut().addOnCompleteListener {
                 signInLauncher.launch(client.signInIntent)
             }
@@ -86,4 +86,3 @@ class GoogleSignInActivity : ComponentActivity() {
         }
     }
 }
-

@@ -11,6 +11,7 @@ import { logger } from "./utils/logger";
 const CACHE_KEY = "nitro_auth_user";
 const SCOPES_KEY = "nitro_auth_scopes";
 const DEFAULT_SCOPES = ["openid", "email", "profile"];
+const MS_DEFAULT_SCOPES = ["openid", "email", "profile", "User.Read"];
 
 type AppleAuthResponse = {
   authorization: {
@@ -113,12 +114,20 @@ class AuthWeb implements Auth {
   }
 
   async login(provider: AuthProvider, options?: LoginOptions): Promise<void> {
-    const scopes = options?.scopes ?? DEFAULT_SCOPES;
     const loginHint = options?.loginHint;
-    logger.log(`Starting login with ${provider}`, { scopes });
+    logger.log(`Starting login with ${provider}`, { scopes: options?.scopes });
     try {
       if (provider === "google") {
+        const scopes = options?.scopes ?? DEFAULT_SCOPES;
         await this.loginGoogle(scopes, loginHint);
+      } else if (provider === "microsoft") {
+        const scopes = options?.scopes ?? MS_DEFAULT_SCOPES;
+        await this.loginMicrosoft(
+          scopes,
+          loginHint,
+          options?.tenant,
+          options?.prompt,
+        );
       } else {
         await this.loginApple();
       }
@@ -134,16 +143,25 @@ class AuthWeb implements Auth {
     if (!this._currentUser) {
       throw new Error("No user logged in");
     }
-    if (this._currentUser.provider !== "google") {
-      throw new Error("Scope management only supported for Google");
+    const provider = this._currentUser.provider;
+    if (provider !== "google" && provider !== "microsoft") {
+      throw new Error(
+        "Scope management only supported for Google and Microsoft",
+      );
     }
     logger.log("Requesting additional scopes:", scopes);
     const newScopes = [...new Set([...this._grantedScopes, ...scopes])];
-    return this.loginGoogle(newScopes).catch((e) => {
+    try {
+      if (provider === "google") {
+        await this.loginGoogle(newScopes);
+      } else {
+        await this.loginMicrosoft(newScopes);
+      }
+    } catch (e) {
       const error = this.mapError(e);
       logger.error("Requesting scopes failed:", error.message);
       throw error;
-    });
+    }
   }
 
   async revokeScopes(scopes: string[]): Promise<void> {
@@ -180,9 +198,84 @@ class AuthWeb implements Auth {
     if (!this._currentUser) {
       throw new Error("No user logged in");
     }
-    if (this._currentUser.provider !== "google") {
-      throw new Error("Token refresh only supported for Google");
+
+    if (this._currentUser.provider === "microsoft") {
+      logger.log("Refreshing Microsoft tokens...");
+      const refreshToken = this._storageAdapter
+        ? this._storageAdapter.load("microsoft_refresh_token")
+        : localStorage.getItem("nitro_auth_microsoft_refresh_token");
+
+      if (!refreshToken) {
+        throw new Error("No refresh token available");
+      }
+
+      const config = getConfig();
+      const clientId = config.microsoftClientId;
+      const tenant = config.microsoftTenant ?? "common";
+      const b2cDomain = config.microsoftB2cDomain;
+
+      const authBaseUrl = this.getMicrosoftAuthBaseUrl(tenant, b2cDomain);
+      const tokenUrl = `${authBaseUrl}oauth2/v2.0/token`;
+      const body = new URLSearchParams({
+        client_id: clientId,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      });
+
+      const response = await fetch(tokenUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+
+      const json = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          json.error_description ?? json.error ?? "Token refresh failed",
+        );
+      }
+
+      const idToken = json.id_token;
+      const accessToken = json.access_token;
+      const newRefreshToken = json.refresh_token;
+      const expiresIn = json.expires_in;
+
+      if (newRefreshToken) {
+        if (this._storageAdapter) {
+          this._storageAdapter.save("microsoft_refresh_token", newRefreshToken);
+        } else {
+          localStorage.setItem(
+            "nitro_auth_microsoft_refresh_token",
+            newRefreshToken,
+          );
+        }
+      }
+
+      const claims = this.decodeMicrosoftJwt(idToken);
+      const user: AuthUser = {
+        ...this._currentUser,
+        idToken,
+        accessToken: accessToken ?? undefined,
+        expirationTime: expiresIn
+          ? Date.now() + parseInt(expiresIn) * 1000
+          : undefined,
+        ...claims,
+      };
+      this.updateUser(user);
+
+      const tokens = { accessToken, idToken };
+      this._tokenListeners.forEach((l) => l(tokens));
+      return tokens;
     }
+
+    if (this._currentUser.provider !== "google") {
+      throw new Error(
+        `Token refresh not supported for ${this._currentUser.provider}`,
+      );
+    }
+
     logger.log("Refreshing tokens...");
     await this.loginGoogle(
       this._grantedScopes.length > 0 ? this._grantedScopes : DEFAULT_SCOPES,
@@ -319,6 +412,255 @@ class AuthWeb implements Auth {
     }
   }
 
+  private async loginMicrosoft(
+    scopes: string[],
+    loginHint?: string,
+    tenant?: string,
+    prompt?: string,
+  ): Promise<void> {
+    const config = getConfig();
+    const clientId = config.microsoftClientId;
+
+    if (!clientId) {
+      throw new Error(
+        "Microsoft Client ID not configured. Add 'microsoftClientId' to expo.extra in your app.config.js",
+      );
+    }
+
+    const effectiveTenant = tenant ?? config.microsoftTenant ?? "common";
+    const b2cDomain = config.microsoftB2cDomain;
+    const authBaseUrl = this.getMicrosoftAuthBaseUrl(
+      effectiveTenant,
+      b2cDomain,
+    );
+
+    const effectiveScopes = scopes.length
+      ? scopes
+      : ["openid", "email", "profile", "offline_access", "User.Read"];
+
+    const codeVerifier = this.generateCodeVerifier();
+    const codeChallenge = await this.generateCodeChallenge(codeVerifier);
+    const state = crypto.randomUUID();
+    const nonce = crypto.randomUUID();
+
+    return new Promise((resolve, reject) => {
+      const redirectUri = window.location.origin;
+      const authUrl = new URL(`${authBaseUrl}oauth2/v2.0/authorize`);
+      authUrl.searchParams.set("client_id", clientId);
+      authUrl.searchParams.set("redirect_uri", redirectUri);
+      authUrl.searchParams.set("response_type", "code");
+      authUrl.searchParams.set("response_mode", "query");
+      authUrl.searchParams.set("scope", effectiveScopes.join(" "));
+      authUrl.searchParams.set("state", state);
+      authUrl.searchParams.set("nonce", nonce);
+      authUrl.searchParams.set("code_challenge", codeChallenge);
+      authUrl.searchParams.set("code_challenge_method", "S256");
+      authUrl.searchParams.set("prompt", prompt ?? "select_account");
+
+      if (loginHint) {
+        authUrl.searchParams.set("login_hint", loginHint);
+      }
+
+      const width = 500;
+      const height = 600;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+
+      const popup = window.open(
+        authUrl.toString(),
+        "microsoft-auth",
+        `width=${width},height=${height},left=${left},top=${top}`,
+      );
+
+      if (!popup) {
+        reject(new Error("Popup blocked. Please allow popups for this site."));
+        return;
+      }
+
+      const checkInterval = setInterval(async () => {
+        try {
+          if (popup.closed) {
+            clearInterval(checkInterval);
+            reject(new Error("cancelled"));
+            return;
+          }
+
+          const url = popup.location.href;
+          if (url.startsWith(redirectUri)) {
+            clearInterval(checkInterval);
+            popup.close();
+
+            const urlObj = new URL(url);
+            const code = urlObj.searchParams.get("code");
+            const returnedState = urlObj.searchParams.get("state");
+            const error = urlObj.searchParams.get("error");
+            const errorDescription =
+              urlObj.searchParams.get("error_description");
+
+            if (error) {
+              reject(new Error(errorDescription ?? error));
+              return;
+            }
+
+            if (returnedState !== state) {
+              reject(new Error("State mismatch - possible CSRF attack"));
+              return;
+            }
+
+            if (!code) {
+              reject(new Error("No authorization code in response"));
+              return;
+            }
+
+            try {
+              await this.exchangeMicrosoftCodeForTokens(
+                code,
+                codeVerifier,
+                clientId,
+                redirectUri,
+                effectiveTenant,
+                nonce,
+                effectiveScopes,
+              );
+              resolve();
+            } catch (e) {
+              reject(e);
+            }
+          }
+        } catch {}
+      }, 100);
+    });
+  }
+
+  private generateCodeVerifier(): string {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    return this.base64UrlEncode(array);
+  }
+
+  private async generateCodeChallenge(verifier: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const hash = await crypto.subtle.digest("SHA-256", data);
+    return this.base64UrlEncode(new Uint8Array(hash));
+  }
+
+  private base64UrlEncode(bytes: Uint8Array): string {
+    const base64 = btoa(String.fromCharCode(...bytes));
+    return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  private async exchangeMicrosoftCodeForTokens(
+    code: string,
+    codeVerifier: string,
+    clientId: string,
+    redirectUri: string,
+    tenant: string,
+    expectedNonce: string,
+    scopes: string[],
+  ): Promise<void> {
+    const config = getConfig();
+    const authBaseUrl = this.getMicrosoftAuthBaseUrl(
+      tenant,
+      config.microsoftB2cDomain,
+    );
+    const tokenUrl = `${authBaseUrl}oauth2/v2.0/token`;
+
+    const body = new URLSearchParams({
+      client_id: clientId,
+      code,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+      code_verifier: codeVerifier,
+    });
+
+    const response = await fetch(tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    });
+
+    const json = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        json.error_description ?? json.error ?? "Token exchange failed",
+      );
+    }
+
+    const idToken = json.id_token;
+    if (!idToken) {
+      throw new Error("No id_token in token response");
+    }
+
+    const claims = this.decodeMicrosoftJwt(idToken);
+    const payload = JSON.parse(atob(idToken.split(".")[1]));
+    if (payload.nonce !== expectedNonce) {
+      throw new Error("Nonce mismatch - token may be replayed");
+    }
+
+    const accessToken = json.access_token;
+    const refreshToken = json.refresh_token;
+    const expiresIn = json.expires_in;
+
+    if (refreshToken) {
+      if (this._storageAdapter) {
+        this._storageAdapter.save("microsoft_refresh_token", refreshToken);
+      } else {
+        localStorage.setItem(
+          "nitro_auth_microsoft_refresh_token",
+          refreshToken,
+        );
+      }
+    }
+
+    this._grantedScopes = scopes;
+    if (this._storageAdapter) {
+      this._storageAdapter.save(SCOPES_KEY, JSON.stringify(scopes));
+    } else {
+      localStorage.setItem(SCOPES_KEY, JSON.stringify(scopes));
+    }
+
+    const user: AuthUser = {
+      provider: "microsoft",
+      idToken,
+      accessToken: accessToken ?? undefined,
+      scopes,
+      expirationTime: expiresIn
+        ? Date.now() + parseInt(expiresIn) * 1000
+        : undefined,
+      ...claims,
+    };
+    this.updateUser(user);
+  }
+
+  private getMicrosoftAuthBaseUrl(tenant: string, b2cDomain?: string): string {
+    if (tenant.startsWith("https://")) {
+      return tenant.endsWith("/") ? tenant : `${tenant}/`;
+    }
+
+    if (b2cDomain) {
+      return `https://${b2cDomain}/tfp/${tenant}/`;
+    } else {
+      return `https://login.microsoftonline.com/${tenant}/`;
+    }
+  }
+
+  private decodeMicrosoftJwt(token: string): Partial<AuthUser> {
+    try {
+      const payload = token.split(".")[1];
+      const decoded = JSON.parse(atob(payload));
+      return {
+        email: decoded.preferred_username ?? decoded.email,
+        name: decoded.name,
+      };
+    } catch {
+      return {};
+    }
+  }
+
   private async loginApple(): Promise<void> {
     const config = getConfig();
     const clientId = config.appleWebClientId;
@@ -385,6 +727,7 @@ class AuthWeb implements Auth {
     this._grantedScopes = [];
     this.removeFromCache(CACHE_KEY);
     this.removeFromCache(SCOPES_KEY);
+    this.removeFromCache("microsoft_refresh_token");
     this.notify();
   }
 

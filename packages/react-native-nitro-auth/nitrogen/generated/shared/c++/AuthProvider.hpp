@@ -31,6 +31,7 @@ namespace margelo::nitro::NitroAuth {
   enum class AuthProvider {
     GOOGLE      SWIFT_NAME(google) = 0,
     APPLE      SWIFT_NAME(apple) = 1,
+    MICROSOFT      SWIFT_NAME(microsoft) = 2,
   } CLOSED_ENUM;
 
 } // namespace margelo::nitro::NitroAuth
@@ -45,6 +46,7 @@ namespace margelo::nitro {
       switch (hashString(unionValue.c_str(), unionValue.size())) {
         case hashString("google"): return margelo::nitro::NitroAuth::AuthProvider::GOOGLE;
         case hashString("apple"): return margelo::nitro::NitroAuth::AuthProvider::APPLE;
+        case hashString("microsoft"): return margelo::nitro::NitroAuth::AuthProvider::MICROSOFT;
         default: [[unlikely]]
           throw std::invalid_argument("Cannot convert \"" + unionValue + "\" to enum AuthProvider - invalid value!");
       }
@@ -53,6 +55,7 @@ namespace margelo::nitro {
       switch (arg) {
         case margelo::nitro::NitroAuth::AuthProvider::GOOGLE: return JSIConverter<std::string>::toJSI(runtime, "google");
         case margelo::nitro::NitroAuth::AuthProvider::APPLE: return JSIConverter<std::string>::toJSI(runtime, "apple");
+        case margelo::nitro::NitroAuth::AuthProvider::MICROSOFT: return JSIConverter<std::string>::toJSI(runtime, "microsoft");
         default: [[unlikely]]
           throw std::invalid_argument("Cannot convert AuthProvider to JS - invalid value: "
                                     + std::to_string(static_cast<int>(arg)) + "!");
@@ -66,6 +69,7 @@ namespace margelo::nitro {
       switch (hashString(unionValue.c_str(), unionValue.size())) {
         case hashString("google"):
         case hashString("apple"):
+        case hashString("microsoft"):
           return true;
         default:
           return false;

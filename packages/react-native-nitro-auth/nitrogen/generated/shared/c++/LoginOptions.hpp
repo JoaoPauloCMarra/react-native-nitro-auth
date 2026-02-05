@@ -28,11 +28,13 @@
 #error NitroModules cannot be found! Are you sure you installed NitroModules properly?
 #endif
 
-
+// Forward declaration of `MicrosoftPrompt` to properly resolve imports.
+namespace margelo::nitro::NitroAuth { enum class MicrosoftPrompt; }
 
 #include <string>
 #include <vector>
 #include <optional>
+#include "MicrosoftPrompt.hpp"
 
 namespace margelo::nitro::NitroAuth {
 
@@ -46,10 +48,13 @@ namespace margelo::nitro::NitroAuth {
     std::optional<bool> useOneTap     SWIFT_PRIVATE;
     std::optional<bool> useSheet     SWIFT_PRIVATE;
     std::optional<bool> forceAccountPicker     SWIFT_PRIVATE;
+    std::optional<bool> useLegacyGoogleSignIn     SWIFT_PRIVATE;
+    std::optional<std::string> tenant     SWIFT_PRIVATE;
+    std::optional<MicrosoftPrompt> prompt     SWIFT_PRIVATE;
 
   public:
     LoginOptions() = default;
-    explicit LoginOptions(std::optional<std::vector<std::string>> scopes, std::optional<std::string> loginHint, std::optional<bool> useOneTap, std::optional<bool> useSheet, std::optional<bool> forceAccountPicker): scopes(scopes), loginHint(loginHint), useOneTap(useOneTap), useSheet(useSheet), forceAccountPicker(forceAccountPicker) {}
+    explicit LoginOptions(std::optional<std::vector<std::string>> scopes, std::optional<std::string> loginHint, std::optional<bool> useOneTap, std::optional<bool> useSheet, std::optional<bool> forceAccountPicker, std::optional<bool> useLegacyGoogleSignIn, std::optional<std::string> tenant, std::optional<MicrosoftPrompt> prompt): scopes(scopes), loginHint(loginHint), useOneTap(useOneTap), useSheet(useSheet), forceAccountPicker(forceAccountPicker), useLegacyGoogleSignIn(useLegacyGoogleSignIn), tenant(tenant), prompt(prompt) {}
 
   public:
     friend bool operator==(const LoginOptions& lhs, const LoginOptions& rhs) = default;
@@ -69,7 +74,10 @@ namespace margelo::nitro {
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "loginHint"))),
         JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useOneTap"))),
         JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useSheet"))),
-        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "forceAccountPicker")))
+        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "forceAccountPicker"))),
+        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useLegacyGoogleSignIn"))),
+        JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "tenant"))),
+        JSIConverter<std::optional<margelo::nitro::NitroAuth::MicrosoftPrompt>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "prompt")))
       );
     }
     static inline jsi::Value toJSI(jsi::Runtime& runtime, const margelo::nitro::NitroAuth::LoginOptions& arg) {
@@ -79,6 +87,9 @@ namespace margelo::nitro {
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "useOneTap"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.useOneTap));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "useSheet"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.useSheet));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "forceAccountPicker"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.forceAccountPicker));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "useLegacyGoogleSignIn"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.useLegacyGoogleSignIn));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "tenant"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.tenant));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "prompt"), JSIConverter<std::optional<margelo::nitro::NitroAuth::MicrosoftPrompt>>::toJSI(runtime, arg.prompt));
       return obj;
     }
     static inline bool canConvert(jsi::Runtime& runtime, const jsi::Value& value) {
@@ -94,6 +105,9 @@ namespace margelo::nitro {
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useOneTap")))) return false;
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useSheet")))) return false;
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "forceAccountPicker")))) return false;
+      if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useLegacyGoogleSignIn")))) return false;
+      if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "tenant")))) return false;
+      if (!JSIConverter<std::optional<margelo::nitro::NitroAuth::MicrosoftPrompt>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "prompt")))) return false;
       return true;
     }
   };

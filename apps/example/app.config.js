@@ -19,7 +19,20 @@ export default {
     },
     plugins: [
       "expo-router",
-      "expo-build-properties",
+      [
+        "expo-build-properties",
+        {
+          android: {
+            compileSdkVersion: 35,
+            targetSdkVersion: 35,
+            minSdkVersion: 24,
+            buildToolsVersion: "35.0.0",
+          },
+          ios: {
+            deploymentTarget: "15.1",
+          },
+        },
+      ],
       [
         "react-native-nitro-auth",
         {
@@ -27,9 +40,15 @@ export default {
             googleClientId: process.env.GOOGLE_IOS_CLIENT_ID,
             googleUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME,
             appleSignIn: true,
+            microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
+            microsoftTenant: process.env.MICROSOFT_TENANT,
+            microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,
           },
           android: {
             googleClientId: process.env.GOOGLE_WEB_CLIENT_ID,
+            microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
+            microsoftTenant: process.env.MICROSOFT_TENANT,
+            microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,
           },
         },
       ],
@@ -39,6 +58,9 @@ export default {
       // Web config - accessible via expo-constants
       googleWebClientId: process.env.GOOGLE_WEB_CLIENT_ID,
       appleWebClientId: process.env.APPLE_WEB_CLIENT_ID,
+      microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
+      microsoftTenant: process.env.MICROSOFT_TENANT,
+      microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,
     },
     experiments: {
       typedRoutes: true,

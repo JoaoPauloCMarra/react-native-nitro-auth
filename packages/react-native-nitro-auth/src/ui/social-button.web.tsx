@@ -60,6 +60,7 @@ export const SocialButton: React.FC<SocialButtonProps> = ({
   };
 
   const isGoogle = provider === "google";
+  const isMicrosoft = provider === "microsoft";
   const isDisabled = loading || disabled;
 
   const getBackgroundColor = () => {
@@ -67,7 +68,9 @@ export const SocialButton: React.FC<SocialButtonProps> = ({
     if (variant === "black") return "#000000";
     if (variant === "white") return "#FFFFFF";
     if (variant === "outline") return "transparent";
-    return isGoogle ? "#4285F4" : "#000000";
+    if (isGoogle) return "#4285F4";
+    if (isMicrosoft) return "#2F2F2F";
+    return "#000000";
   };
 
   const getTextColor = () => {
@@ -107,7 +110,12 @@ export const SocialButton: React.FC<SocialButtonProps> = ({
             )}
             {provider === "apple" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
-                <Text style={{ fontSize: 18, color: getTextColor() }}></Text>
+                <Text style={{ fontSize: 18, color: getTextColor() }}></Text>
+              </View>
+            )}
+            {provider === "microsoft" && variant !== "primary" && (
+              <View style={styles.iconPlaceholder}>
+                <Text style={{ fontSize: 16 }}>⊞</Text>
               </View>
             )}
             <Text style={[styles.text, { color: getTextColor() }, textStyle]}>

@@ -89,17 +89,23 @@ repositories {
 
 dependencies {
   implementation "com.facebook.react:react-native:+"
-  implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.24"
+  implementation "org.jetbrains.kotlin:kotlin-stdlib:2.1.0"
   implementation project(":react-native-nitro-modules")
   
   // Google Sign-In SDK (full scope support)
-  implementation "com.google.android.gms:play-services-auth:21.5.0"
+  implementation "com.google.android.gms:play-services-auth:21.2.0"
   
   // Activity result APIs
   implementation "androidx.activity:activity-ktx:1.9.3"
+  
+  // Custom Tabs (Microsoft OAuth in-app browser)
+  implementation "androidx.browser:browser:1.8.0"
   
   // Google Credential Manager (One-Tap / Passkeys)
   implementation "androidx.credentials:credentials:1.5.0"
   implementation "androidx.credentials:credentials-play-services-auth:1.5.0"
   implementation "com.google.android.libraries.identity.googleid:googleid:1.1.1"
+
+  // Secure storage (EncryptedSharedPreferences)
+  implementation "androidx.security:security-crypto:1.0.0"
 }

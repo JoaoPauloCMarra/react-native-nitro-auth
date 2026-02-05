@@ -6,7 +6,7 @@
 
 🚀 **High-performance, JSI-powered Authentication for React Native.**
 
-Nitro Auth is a modern authentication library for React Native built on top of [Nitro Modules](https://github.com/mrousavy/nitro). It provides a unified, type-safe API for Google and Apple Sign-In with zero-bridge overhead.
+Nitro Auth is a modern authentication library for React Native built on top of [Nitro Modules](https://github.com/mrousavy/nitro). It provides a unified, type-safe API for Google, Apple, and Microsoft Sign-In with zero-bridge overhead.
 
 ## Why Nitro Auth?
 
@@ -50,6 +50,54 @@ For Expo projects, rebuild native code after installation:
 bunx expo prebuild
 ```
 
+### Testing locally (example app + Microsoft login)
+
+Fastest way to confirm the package and Microsoft login work:
+
+1. **Azure app (one-time)**  
+   In [Azure Portal](https://portal.azure.com) → **Azure Active Directory** → **App registrations** → **New registration**:
+   - Name: e.g. `Nitro Auth Example`
+   - Supported account types: **Accounts in any organizational directory and personal Microsoft accounts**
+   - Redirect URI (add after creation):  
+     - **Android**: `msauth://com.auth.example/<client-id>`  
+     - **iOS**: `msauth.com.auth.example://auth` (use your bundle id)
+   - Under **Authentication** → **Platform configurations** → add **Mobile and desktop applications** with the Android redirect URI above and the iOS one if testing on iOS.  
+   Copy the **Application (client) ID**.
+
+2. **Env file**  
+   From the repo root:
+   ```bash
+   cd apps/example
+   cp .env.example .env.local
+   ```
+   Edit `.env.local` and set at least:
+   ```bash
+   MICROSOFT_CLIENT_ID=<your-application-client-id>
+   MICROSOFT_TENANT=common
+   ```
+   (Google/Apple can stay placeholder if you only care about Microsoft.)
+
+3. **Run the app**  
+   From the **monorepo root**:
+   ```bash
+   bun install
+   bun run start
+   ```
+   In a second terminal:
+   ```bash
+   bun run example:android
+   # or
+   bun run example:ios
+   ```
+   Wait for the app to install and open.
+
+4. **Test Microsoft**  
+   In the app, tap **Sign in with Microsoft**. A browser or in-app tab opens; sign in with a Microsoft/personal account, then you should return to the app with the user shown (email, name, provider MICROSOFT).  
+   If you see "configuration_error", check `MICROSOFT_CLIENT_ID` and that the redirect URI in Azure matches your app (e.g. `msauth://com.auth.example/<client-id>` for the example app).
+
+> [!TIP]
+> In the example app on Android, you can toggle **Legacy Google Sign-In** to compare Credential Manager vs legacy GoogleSignIn (and to get `serverAuthCode`).
+
 ### Expo Setup
 
 Add the plugin to `app.json` or `app.config.js`:
@@ -63,17 +111,28 @@ Add the plugin to `app.json` or `app.config.js`:
         {
           "ios": {
             "googleClientId": "YOUR_IOS_CLIENT_ID.apps.googleusercontent.com",
+            "googleServerClientId": "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com",
             "googleUrlScheme": "com.googleusercontent.apps.YOUR_IOS_CLIENT_ID",
-            "appleSignIn": true
+            "appleSignIn": true,
+            "microsoftClientId": "YOUR_AZURE_AD_CLIENT_ID",
+            "microsoftTenant": "common",
+            "microsoftB2cDomain": "your-tenant.b2clogin.com"
           },
           "android": {
-            "googleClientId": "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"
+            "googleClientId": "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com",
+            "microsoftClientId": "YOUR_AZURE_AD_CLIENT_ID",
+            "microsoftTenant": "common",
+            "microsoftB2cDomain": "your-tenant.b2clogin.com"
           }
         }
       ]
     ],
     "extra": {
-      "googleWebClientId": "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"
+      "googleWebClientId": "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com",
+      "microsoftClientId": "YOUR_AZURE_AD_CLIENT_ID",
+      "microsoftTenant": "common",
+      "microsoftB2cDomain": "your-tenant.b2clogin.com",
+      "appleWebClientId": "com.example.web"
     }
   }
 }
@@ -87,9 +146,18 @@ Create a `.env.local` file:
 # iOS Client ID
 GOOGLE_IOS_CLIENT_ID=your-ios-client-id.apps.googleusercontent.com
 GOOGLE_IOS_URL_SCHEME=com.googleusercontent.apps.your-ios-client-id
+GOOGLE_SERVER_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
 
 # Web Client ID (used for Android OAuth flow)
 GOOGLE_WEB_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
+
+# Microsoft/Azure AD (optional)
+MICROSOFT_CLIENT_ID=your-azure-ad-application-id
+MICROSOFT_TENANT=common
+MICROSOFT_B2C_DOMAIN=your-tenant.b2clogin.com
+
+# Apple (web only)
+APPLE_WEB_CLIENT_ID=com.example.web
 ```
 
 Then reference them in `app.config.js`:
@@ -105,17 +173,28 @@ export default {
         {
           ios: {
             googleClientId: process.env.GOOGLE_IOS_CLIENT_ID,
+            googleServerClientId: process.env.GOOGLE_SERVER_CLIENT_ID,
             googleUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME,
             appleSignIn: true,
+            microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
+            microsoftTenant: process.env.MICROSOFT_TENANT,
+            microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,
           },
           android: {
             googleClientId: process.env.GOOGLE_WEB_CLIENT_ID,
+            microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
+            microsoftTenant: process.env.MICROSOFT_TENANT,
+            microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,
           },
         },
       ],
     ],
     extra: {
       googleWebClientId: process.env.GOOGLE_WEB_CLIENT_ID,
+      microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
+      microsoftTenant: process.env.MICROSOFT_TENANT,
+      microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,
+      appleWebClientId: process.env.APPLE_WEB_CLIENT_ID,
     },
   },
 };
@@ -125,14 +204,106 @@ export default {
 >
 > - `appleSignIn` on iOS is `false` by default to avoid unnecessary entitlements. Set it to `true` to enable Apple Sign-In.
 > - For Android, use your **Web Client ID** (not Android Client ID) for proper OAuth flow.
+> - If you need `serverAuthCode`, set `googleServerClientId` to your Web Client ID.
 > - Add `googleWebClientId` to `expo.extra` for web platform support.
 > - The `serverAuthCode` is automatically included in `AuthUser` when available (requires backend integration setup in Google Cloud Console).
+> - For Microsoft Sign-In, use `common` tenant for multi-tenant apps, or specify your Azure AD tenant ID for single-tenant apps.
+> - For Azure AD B2C, set `microsoftB2cDomain` and pass the B2C tenant in `microsoftTenant`.
+
+### Google OAuth Setup
+
+1. Create OAuth client IDs in Google Cloud Console:
+   - **iOS client ID** (used by iOS)
+   - **Web client ID** (used by Android and for `serverAuthCode`)
+2. Configure your app:
+   - Expo: set `googleClientId`, `googleServerClientId`, and `googleUrlScheme`
+   - Bare iOS: add `GIDClientID`, `GIDServerClientID`, and URL scheme in `Info.plist`
+   - Bare Android: set `nitro_auth_google_client_id` to your **Web client ID**
+3. If you use `serverAuthCode`, make sure OAuth consent screen is configured in Google Cloud.
+
+### Apple Sign-In Setup
+
+1. **iOS**: enable the “Sign in with Apple” capability in Xcode and in your Apple Developer account.
+2. **Web**: create a Service ID and configure the domain + return URL in Apple Developer.
+3. Configure your app:
+   - Expo: set `appleSignIn: true` for iOS.
+   - Web: set `appleWebClientId` in `expo.extra` (or `.env`).
+
+### Microsoft Azure AD Setup
+
+To enable Microsoft Sign-In, you need to register an application in the Azure Portal:
+
+1. Go to [Azure Portal](https://portal.azure.com) > Azure Active Directory > App registrations
+2. Click "New registration"
+3. Set the redirect URIs:
+   - **iOS**: `msauth.{bundle-identifier}://auth` (e.g., `msauth.com.myapp://auth`)
+   - **Android**: `msauth://{package-name}/{client-id}` (e.g., `msauth://com.myapp/00000000-0000-0000-0000-000000000000`)
+   - **Web**: `https://your-domain.com` (the page that loads the app)
+4. Under "API permissions", add `openid`, `email`, `profile`, and `User.Read` (Microsoft Graph)
+5. Copy the Application (client) ID for use in your config
+
+**Tenant Options:**
+
+- `common` - Any Azure AD or personal Microsoft account
+- `organizations` - Any Azure AD account (work/school)
+- `consumers` - Personal Microsoft accounts only
+- `{tenant-id}` - Specific Azure AD tenant
+- **B2C**: set `microsoftB2cDomain` (e.g. `your-tenant.b2clogin.com`) and use a tenant value like `your-tenant.onmicrosoft.com/B2C_1_signin` (or pass a full `https://.../` authority URL).
 
 ### Bare React Native
 
-**iOS:** Add `GIDClientID` (and optionally `GIDServerClientID`) to `Info.plist` and enable "Sign in with Apple" capability.
+**iOS**
 
-**Android:** Add `nitro_auth_google_client_id` string resource in `res/values/strings.xml`.
+- Add to `Info.plist`: `GIDClientID`, `GIDServerClientID` (optional), `MSALClientID`, `MSALTenant` (optional), `MSALB2cDomain` (optional).
+- Add URL schemes in `Info.plist`:
+  - Google: `com.googleusercontent.apps.<YOUR_IOS_CLIENT_ID>`
+  - Microsoft: `msauth.<your.bundle.id>` (used for `msauth.<bundle.id>://auth`)
+- Enable the “Sign in with Apple” capability if you use Apple Sign-In.
+
+**Android**
+
+- Add string resources in `res/values/strings.xml`:
+  - `nitro_auth_google_client_id` (Web client ID)
+  - `nitro_auth_microsoft_client_id`
+  - `nitro_auth_microsoft_tenant` (optional)
+  - `nitro_auth_microsoft_b2c_domain` (optional)
+- Add the Microsoft redirect activity to `AndroidManifest.xml`:
+
+```xml
+<activity
+  android:name="com.auth.MicrosoftAuthActivity"
+  android:exported="true">
+  <intent-filter>
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data
+      android:scheme="msauth"
+      android:host="${applicationId}"
+      android:path="/YOUR_MICROSOFT_CLIENT_ID" />
+  </intent-filter>
+</activity>
+```
+
+### Web Setup
+
+Nitro Auth reads web configuration from `expo.extra`:
+
+```json
+{
+  "expo": {
+    "extra": {
+      "googleWebClientId": "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com",
+      "microsoftClientId": "YOUR_AZURE_AD_CLIENT_ID",
+      "microsoftTenant": "common",
+      "microsoftB2cDomain": "your-tenant.b2clogin.com",
+      "appleWebClientId": "com.example.web"
+    }
+  }
+}
+```
+
+For Apple web sign-in, `appleWebClientId` must be your Apple Service ID. For Microsoft web, make sure your Azure app includes a Web redirect URI matching your site.
 
 ## Quick Start
 
@@ -164,9 +335,40 @@ function LoginScreen() {
         onPress={() => login("google")}
         disabled={loading || !hasPlayServices}
       />
+      <SocialButton
+        provider="apple"
+        onPress={() => login("apple")}
+        disabled={loading}
+      />
+      <SocialButton
+        provider="microsoft"
+        onPress={() => login("microsoft")}
+        disabled={loading}
+      />
     </View>
   );
 }
+```
+
+### Microsoft Login Options
+
+```tsx
+// Login with specific tenant
+await login("microsoft", {
+  tenant: "your-tenant-id",
+  prompt: "select_account", // 'login' | 'consent' | 'select_account' | 'none'
+  scopes: ["openid", "email", "profile", "User.Read"],
+  loginHint: "user@example.com",
+});
+```
+
+**B2C example:**
+
+```tsx
+await login("microsoft", {
+  tenant: "your-tenant.onmicrosoft.com/B2C_1_signin",
+  scopes: ["openid", "email", "profile", "offline_access"],
+});
 ```
 
 ## Migration from @react-native-google-signin/google-signin
@@ -310,7 +512,7 @@ const handleCalendar = async () => {
 
 ### Pluggable Storage Adapters
 
-Nitro Auth persists the session automatically. By default, it uses simple file-based storage on native and `localStorage` on web.
+Nitro Auth persists the session automatically. By default, it uses secure storage on native (Keychain on iOS, EncryptedSharedPreferences on Android) and `localStorage` on web.
 
 #### 1) JS Storage (AsyncStorage, MMKV, etc.)
 
@@ -332,6 +534,9 @@ const mmkvAdapter: JSStorageAdapter = {
 AuthService.setJSStorageAdapter(mmkvAdapter);
 ```
 
+> [!NOTE]
+> Call `setJSStorageAdapter` before your first `useAuth()` or `AuthService` call so cached values are loaded before UI renders.
+
 #### 2) Native Storage (Keychain, etc.)
 
 For maximum security, you can implement a native HybridObject (C++, Swift, or Kotlin) and pass it to Nitro. This runs directly in memory at the C++ layer.
@@ -343,6 +548,18 @@ import { KeychainStorage } from "./native/KeychainStorage";
 
 AuthService.setStorageAdapter(KeychainStorage);
 ```
+
+**Production recommendation:** If you need custom storage policies, auditability, or a different encryption model, provide your own adapter (Keychain, EncryptedSharedPreferences, or a secure JS store). See [Pluggable Storage Adapters](#pluggable-storage-adapters) above.
+
+### Production Readiness
+
+Nitro Auth is suitable for production use:
+
+- **Google Sign-In**: Full support including One-Tap / Sheet, incremental scopes, and token refresh on iOS, Android, and Web.
+- **Apple Sign-In**: Supported on iOS and Web (not available on Android).
+- **Microsoft (Azure AD / B2C)**: Login, incremental scopes, and token refresh are supported on all platforms. Uses PKCE, state, and nonce for security.
+
+**Token storage:** By default, tokens are stored in secure platform storage on native (Keychain / EncryptedSharedPreferences) and in `localStorage` on web. On Android API < 23, storage falls back to unencrypted `SharedPreferences`. For high-security web requirements or custom storage needs, configure a [custom storage adapter](#pluggable-storage-adapters).
 
 ### Logging & Debugging
 
@@ -369,7 +586,7 @@ const freshToken = await AuthService.getAccessToken();
 
 ### Standardized Error Codes
 
-Handle failures reliably with predictable error strings:
+Handle failures reliably with predictable error strings. Some flows can surface provider-specific codes (listed below):
 
 ```ts
 try {
@@ -390,6 +607,12 @@ try {
 | `network_error`        | A network error occurred                       |
 | `configuration_error`  | Missing client IDs or invalid setup            |
 | `unsupported_provider` | The provider is not supported on this platform |
+| `invalid_state`        | PKCE state mismatch (possible CSRF)            |
+| `invalid_nonce`        | Nonce mismatch in token response               |
+| `token_error`          | Token exchange failed                          |
+| `no_id_token`          | No `id_token` in token response                |
+| `parse_error`          | Failed to parse token response                 |
+| `refresh_failed`       | Refresh token flow failed                      |
 | `unknown`              | An unknown error occurred                      |
 
 ### Native Error Metadata
@@ -412,6 +635,13 @@ try {
 }
 ```
 
+### Troubleshooting
+
+- `configuration_error`: verify client IDs, URL schemes, and redirect URIs are set for the current platform.
+- `invalid_state` or `invalid_nonce`: ensure the redirect URI in your provider console matches your app config exactly.
+- `hasPlayServices` is false: prompt the user to install/update Google Play Services or disable One-Tap.
+- Apple web login fails: confirm `appleWebClientId` is set and your domain is registered with Apple.
+
 ### Automatic Token Refresh
 
 The `getAccessToken()` method automatically checks if the current token is expired (or about to expire) and triggers a silent refresh if possible:
@@ -421,23 +651,6 @@ const { getAccessToken } = useAuth();
 
 // This will silently refresh if needed!
 const token = await getAccessToken();
-```
-
-### Incremental Authorization
-
-Add more scopes after initial login — no need to re-authenticate:
-
-```tsx
-const { requestScopes, revokeScopes, scopes } = useAuth();
-
-// Request additional scope
-await requestScopes(["https://www.googleapis.com/auth/calendar.readonly"]);
-
-// Check granted scopes
-console.log("Granted:", scopes);
-
-// Revoke specific scopes
-await revokeScopes(["https://www.googleapis.com/auth/calendar.readonly"]);
 ```
 
 ### Offline Access (Server Auth Code)
@@ -455,7 +668,7 @@ if (user?.serverAuthCode) {
 
 ### Custom Storage Adapter
 
-By default, Nitro Auth uses standard local storage. You can provide a custom adapter for better security.
+By default, Nitro Auth uses secure native storage on iOS/Android and `localStorage` on web. You can provide a custom adapter for different security or storage requirements.
 
 > [!IMPORTANT]
 > `AuthStorageAdapter` must be implemented as a **native Nitro HybridObject** in C++, Swift, or Kotlin. Plain JavaScript objects are not supported due to Nitro's type system. See [Nitro Hybrid Objects documentation](https://nitro.margelo.com/docs/hybrid-objects) for implementation details.
@@ -512,6 +725,18 @@ await login("google", {
 });
 ```
 
+> [!NOTE]
+> One-Tap requires Google Play Services. You can check `hasPlayServices` from `useAuth()` and show a fallback UI if needed.
+
+### Android Legacy Google Sign-In (Server Auth Code)
+
+Credential Manager is the recommended default on Android, but it **does not return** `serverAuthCode`.
+If your backend requires `serverAuthCode`, opt into the legacy flow:
+
+```ts
+await login("google", { useLegacyGoogleSignIn: true });
+```
+
 ### Force Account Picker
 
 When connecting additional services (like Google Calendar), you may want to let users pick a different account than the one they signed in with. Use `forceAccountPicker` to clear any cached session and show the account picker:
@@ -548,6 +773,38 @@ This is useful for scenarios where:
 | `getAccessToken`  | `() => Promise<string?>`          | Get current access token (auto-refreshes)              |
 | `refreshToken`    | `() => Promise<AuthTokens>`       | Explicitly refresh and return new tokens               |
 
+### AuthService
+
+| Method                     | Type                                      | Description                                        |
+| -------------------------- | ----------------------------------------- | -------------------------------------------------- |
+| `login`                    | `(provider, options?) => Promise<void>`   | Start login flow                                   |
+| `logout`                   | `() => void`                              | Clear session                                      |
+| `silentRestore`            | `() => Promise<void>`                     | Restore session on startup                         |
+| `requestScopes`            | `(scopes) => Promise<void>`               | Request additional OAuth scopes                    |
+| `revokeScopes`             | `(scopes) => Promise<void>`               | Revoke previously granted scopes                   |
+| `getAccessToken`           | `() => Promise<string \| undefined>`      | Get current access token (auto-refreshes)          |
+| `refreshToken`             | `() => Promise<AuthTokens>`               | Explicitly refresh and return new tokens           |
+| `onAuthStateChanged`       | `(callback) => () => void`                | Subscribe to auth state changes                    |
+| `onTokensRefreshed`        | `(callback) => () => void`                | Subscribe to token refresh events                  |
+| `setLoggingEnabled`        | `(enabled: boolean) => void`              | Enable or disable verbose logging                  |
+| `setStorageAdapter`        | `(adapter?: AuthStorageAdapter) => void`  | Set native storage adapter                         |
+| `setJSStorageAdapter`      | `(adapter?: JSStorageAdapter) => Promise<void>` | Set JS storage adapter                       |
+
+### AuthUser
+
+| Field            | Type                 | Description                                      |
+| --------------- | -------------------- | ------------------------------------------------ |
+| `provider`      | `"google" \| "apple" \| "microsoft"` | Provider that authenticated the user |
+| `email`         | `string?`            | User email (if provided)                         |
+| `name`          | `string?`            | User display name                                |
+| `photo`         | `string?`            | Profile image URL (Google only)                  |
+| `idToken`       | `string?`            | OIDC ID token                                    |
+| `accessToken`   | `string?`            | Access token (if available)                      |
+| `serverAuthCode`| `string?`            | Google server auth code (if configured)          |
+| `scopes`        | `string[]?`          | Granted OAuth scopes                             |
+| `expirationTime`| `number?`            | Token expiration time (ms since epoch)           |
+| `underlyingError` | `string?`          | Raw native error message                         |
+
 ### LoginOptions
 
 | Option               | Type       | Platform | Description                                     |
@@ -557,13 +814,15 @@ This is useful for scenarios where:
 | `useOneTap`          | `boolean`  | Android  | Enable Google One-Tap (Credential Manager)      |
 | `useSheet`           | `boolean`  | iOS      | Enable iOS Google Sign-In Sheet                 |
 | `forceAccountPicker` | `boolean`  | All      | Always show the account selection screen        |
-| `webClientId`        | `string`   | Web      | Override the default Google Web Client ID       |
+| `useLegacyGoogleSignIn` | `boolean` | Android | Use legacy Google Sign-In (supports `serverAuthCode`) |
+| `tenant`             | `string`   | Microsoft | Azure AD tenant (`common`, `organizations`, etc.) |
+| `prompt`             | `string`   | Microsoft | Prompt behavior (`login`, `consent`, `select_account`, `none`) |
 
 ### SocialButton Props
 
 | Prop           | Type                                           | Default     | Description                                   |
 | -------------- | ---------------------------------------------- | ----------- | --------------------------------------------- |
-| `provider`     | `"google" \| "apple"`                          | required    | Authentication provider                       |
+| `provider`     | `"google" \| "apple" \| "microsoft"`           | required    | Authentication provider                       |
 | `variant`      | `"primary" \| "outline" \| "white" \| "black"` | `"primary"` | Button style variant                          |
 | `onPress`      | `() => void`                                   | —           | Custom handler (disables default login)       |
 | `onSuccess`    | `(user: AuthUser) => void`                     | —           | Called with user data on success (auto-login) |
@@ -579,6 +838,7 @@ This is useful for scenarios where:
 | ------------------------- | --- | ------- | --- |
 | Google Sign-In            | ✅  | ✅      | ✅  |
 | Apple Sign-In             | ✅  | ❌      | ✅  |
+| Microsoft Sign-In         | ✅  | ✅      | ✅  |
 | Custom OAuth Scopes       | ✅  | ✅      | ✅  |
 | Incremental Authorization | ✅  | ✅      | ✅  |
 | Token Refresh             | ✅  | ✅      | ✅  |

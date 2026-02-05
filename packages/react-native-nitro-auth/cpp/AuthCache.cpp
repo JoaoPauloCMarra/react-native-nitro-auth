@@ -2,6 +2,7 @@
 
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
 #endif
 
 #ifdef __ANDROID__
@@ -11,25 +12,28 @@
 
 namespace margelo::nitro::NitroAuth {
 
-static const char* CACHE_KEY = "nitro_auth_user";
-
 #ifdef __APPLE__
-void AuthCache::setUserJson(const std::string& json) {
-    CFStringRef key = CFStringCreateWithCString(nullptr, CACHE_KEY, kCFStringEncodingUTF8);
-    CFStringRef value = CFStringCreateWithCString(nullptr, json.c_str(), kCFStringEncodingUTF8);
-    CFPreferencesSetAppValue(key, value, kCFPreferencesCurrentApplication);
-    CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication);
-    CFRelease(key);
-    CFRelease(value);
+static CFStringRef kService = CFSTR("react-native-nitro-auth");
+static CFStringRef kAccount = CFSTR("nitro_auth_user");
+static CFStringRef kLegacyCacheKey = CFSTR("nitro_auth_user");
+
+static CFMutableDictionaryRef createKeychainQuery() {
+    CFMutableDictionaryRef query = CFDictionaryCreateMutable(
+        kCFAllocatorDefault,
+        0,
+        &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks
+    );
+    CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
+    CFDictionarySetValue(query, kSecAttrService, kService);
+    CFDictionarySetValue(query, kSecAttrAccount, kAccount);
+    return query;
 }
 
-std::optional<std::string> AuthCache::getUserJson() {
-    CFStringRef key = CFStringCreateWithCString(nullptr, CACHE_KEY, kCFStringEncodingUTF8);
-    CFPropertyListRef value = CFPreferencesCopyAppValue(key, kCFPreferencesCurrentApplication);
-    CFRelease(key);
-
+static std::optional<std::string> getLegacyUserJson() {
+    CFPropertyListRef value = CFPreferencesCopyAppValue(kLegacyCacheKey, kCFPreferencesCurrentApplication);
     if (value && CFGetTypeID(value) == CFStringGetTypeID()) {
-        CFStringRef cfStr = (CFStringRef)value;
+        CFStringRef cfStr = static_cast<CFStringRef>(value);
         char buffer[4096];
         if (CFStringGetCString(cfStr, buffer, sizeof(buffer), kCFStringEncodingUTF8)) {
             CFRelease(value);
@@ -40,11 +44,60 @@ std::optional<std::string> AuthCache::getUserJson() {
     return std::nullopt;
 }
 
-void AuthCache::clear() {
-    CFStringRef key = CFStringCreateWithCString(nullptr, CACHE_KEY, kCFStringEncodingUTF8);
-    CFPreferencesSetAppValue(key, nullptr, kCFPreferencesCurrentApplication);
+static void clearLegacyUserJson() {
+    CFPreferencesSetAppValue(kLegacyCacheKey, nullptr, kCFPreferencesCurrentApplication);
     CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication);
-    CFRelease(key);
+}
+
+void AuthCache::setUserJson(const std::string& json) {
+    CFMutableDictionaryRef query = createKeychainQuery();
+    SecItemDelete(query);
+
+    CFDataRef data = CFDataCreate(
+        kCFAllocatorDefault,
+        reinterpret_cast<const UInt8*>(json.data()),
+        static_cast<CFIndex>(json.size())
+    );
+    CFDictionarySetValue(query, kSecValueData, data);
+    CFDictionarySetValue(query, kSecAttrAccessible, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly);
+
+    SecItemAdd(query, nullptr);
+    CFRelease(data);
+    CFRelease(query);
+}
+
+std::optional<std::string> AuthCache::getUserJson() {
+    CFMutableDictionaryRef query = createKeychainQuery();
+    CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
+    CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
+
+    CFTypeRef result = nullptr;
+    OSStatus status = SecItemCopyMatching(query, &result);
+    CFRelease(query);
+
+    if (status != errSecSuccess || result == nullptr) {
+        if (result) CFRelease(result);
+        auto legacy = getLegacyUserJson();
+        if (legacy) {
+            AuthCache::setUserJson(*legacy);
+            clearLegacyUserJson();
+            return legacy;
+        }
+        return std::nullopt;
+    }
+
+    CFDataRef data = static_cast<CFDataRef>(result);
+    const UInt8* bytes = CFDataGetBytePtr(data);
+    const CFIndex length = CFDataGetLength(data);
+    std::string value(reinterpret_cast<const char*>(bytes), static_cast<size_t>(length));
+    CFRelease(result);
+    return value;
+}
+
+void AuthCache::clear() {
+    CFMutableDictionaryRef query = createKeychainQuery();
+    SecItemDelete(query);
+    CFRelease(query);
 }
 #endif
 
