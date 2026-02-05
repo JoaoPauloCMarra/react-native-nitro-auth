@@ -38,7 +38,7 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
-    "react-native-nitro-modules": "^0.33.5",
+    "react-native-nitro-modules": "^0.33.7",
     "react-native-web": "^0.21.2"
   },
   "packageManager": "bun@1.1.38"

@@ -7,6 +7,8 @@ const {
   createRunOncePlugin,
 } = require("@expo/config-plugins");
 
+const pkg = require("./package.json");
+
 const withNitroAuth = (config, props = {}) => {
   const { ios = {}, android = {} } = props;
 
@@ -123,6 +125,11 @@ const withNitroAuth = (config, props = {}) => {
     config = withAndroidManifest(config, (config) => {
       const manifest = config.modResults.manifest;
       const application = manifest.application?.[0];
+      const packageName =
+        config.android?.package || AndroidConfig.Package.getPackageName(config);
+      if (!packageName) {
+        return config;
+      }
       if (application) {
         application.activity = application.activity || [];
         const msalActivity = {
@@ -141,7 +148,7 @@ const withNitroAuth = (config, props = {}) => {
                 {
                   $: {
                     "android:scheme": "msauth",
-                    "android:host": config.android?.package || "",
+                    "android:host": packageName,
                     "android:path": `/${android.microsoftClientId}`,
                   },
                 },
@@ -152,7 +159,7 @@ const withNitroAuth = (config, props = {}) => {
         const existingMsalActivity = application.activity.find(
           (a) =>
             a.$?.["android:name"] ===
-            "com.microsoft.identity.client.BrowserTabActivity",
+            "com.auth.MicrosoftAuthActivity",
         );
         if (!existingMsalActivity) {
           application.activity.push(msalActivity);
@@ -167,6 +174,6 @@ const withNitroAuth = (config, props = {}) => {
 
 module.exports = createRunOncePlugin(
   withNitroAuth,
-  "react-native-nitro-auth",
-  "0.5.0",
+  pkg.name,
+  pkg.version,
 );

@@ -79,20 +79,20 @@
   },
   "devDependencies": {
     "@expo/config-plugins": "^54.0.4",
-    "@react-native/babel-preset": "^0.81.0",
-    "@testing-library/react": "^16.1.0",
-    "@types/node": "^22.14.0",
-    "jest-environment-jsdom": "^29.7.0",
-    "react": "19.1.0",
-    "react-native": "0.81.5",
-    "react-native-nitro-modules": "^0.33.5",
+    "@react-native/babel-preset": "^0.83.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^25.2.1",
+    "jest-environment-jsdom": "^30.2.0",
+    "react": "19.2.4",
+    "react-native": "0.83.1",
+    "react-native-nitro-modules": "^0.33.7",
     "react-native-web": "^0.21.2",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "react": "*",
     "react-native": ">=0.75.0",
-    "react-native-nitro-modules": ">=0.33.5"
+    "react-native-nitro-modules": ">=0.33.0"
   },
   "react-native-builder-bob": {
     "source": "src",

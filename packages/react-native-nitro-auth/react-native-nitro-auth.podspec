@@ -32,6 +32,8 @@ Pod::Spec.new do |s|
     ].join(" ")
   }
 
+  s.frameworks = ["Security"]
+
   s.dependency "React-Core"
   s.dependency "GoogleSignIn", "~> 9.0"
   

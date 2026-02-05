@@ -9,6 +9,12 @@ export type AuthErrorCode =
   | "network_error"
   | "configuration_error"
   | "unsupported_provider"
+  | "invalid_state"
+  | "invalid_nonce"
+  | "token_error"
+  | "no_id_token"
+  | "parse_error"
+  | "refresh_failed"
   | "unknown";
 
 export type MicrosoftPrompt = "login" | "consent" | "select_account" | "none";

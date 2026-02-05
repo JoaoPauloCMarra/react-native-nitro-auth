@@ -1,7 +1,9 @@
 package com.auth
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Bundle
+import android.os.Build
 import android.util.Log
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
@@ -23,13 +25,17 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKeys
 import java.util.UUID
+import org.json.JSONArray
 import org.json.JSONObject
 import android.util.Base64
 
 object AuthAdapter {
     private const val TAG = "AuthAdapter"
     private const val PREF_NAME = "nitro_auth"
+    private const val SECURE_PREF_NAME = "nitro_auth_secure"
     
     private var appContext: Context? = null
     private var currentActivity: Activity? = null
@@ -43,6 +49,47 @@ object AuthAdapter {
     private var pendingMicrosoftTenant: String? = null
     private var pendingMicrosoftClientId: String? = null
     private var pendingMicrosoftB2cDomain: String? = null
+
+    private fun getPrefs(context: Context): SharedPreferences {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+                val securePrefs = EncryptedSharedPreferences.create(
+                    SECURE_PREF_NAME,
+                    masterKeyAlias,
+                    context,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+                migrateLegacyPrefsIfNeeded(context, securePrefs)
+                securePrefs
+            } else {
+                context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to initialize encrypted storage, falling back to SharedPreferences", e)
+            context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        }
+    }
+
+    private fun migrateLegacyPrefsIfNeeded(context: Context, securePrefs: SharedPreferences) {
+        val legacyPrefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        if (legacyPrefs.all.isEmpty() || securePrefs.all.isNotEmpty()) {
+            return
+        }
+        val editor = securePrefs.edit()
+        for ((key, value) in legacyPrefs.all) {
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+            }
+        }
+        editor.apply()
+        legacyPrefs.edit().clear().apply()
+    }
 
     @JvmStatic
     private external fun nativeInitialize(context: Context)
@@ -171,7 +218,7 @@ object AuthAdapter {
         val b2cDomain = getMicrosoftB2cDomainFromResources(ctx)
         pendingMicrosoftB2cDomain = b2cDomain
         val authBaseUrl = getMicrosoftAuthBaseUrl(effectiveTenant, b2cDomain)
-        val redirectUri = "msauth://${ctx.packageName}"
+        val redirectUri = "msauth://${ctx.packageName}/${clientId}"
 
         val authUrl = Uri.parse("${authBaseUrl}oauth2/v2.0/authorize").buildUpon()
             .appendQueryParameter("client_id", clientId)
@@ -253,7 +300,7 @@ object AuthAdapter {
             return
         }
 
-        val redirectUri = "msauth://${ctx.packageName}"
+        val redirectUri = "msauth://${ctx.packageName}/${clientId}"
         val authBaseUrl = getMicrosoftAuthBaseUrl(tenant, pendingMicrosoftB2cDomain)
         val tokenUrl = "${authBaseUrl}oauth2/v2.0/token"
 
@@ -361,12 +408,12 @@ object AuthAdapter {
     }
 
     private fun saveMicrosoftRefreshToken(context: Context, refreshToken: String) {
-        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefs = getPrefs(context)
         prefs.edit().putString("microsoft_refresh_token", refreshToken).apply()
     }
 
     private fun getMicrosoftRefreshToken(context: Context): String? {
-        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefs = getPrefs(context)
         return prefs.getString("microsoft_refresh_token", null)
     }
 
@@ -609,19 +656,19 @@ object AuthAdapter {
 
     @JvmStatic
     fun getUserJson(context: Context): String? {
-        val pref = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val pref = getPrefs(context)
         return pref.getString("user_json", null)
     }
 
     @JvmStatic
     fun setUserJson(context: Context, json: String) {
-        val pref = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val pref = getPrefs(context)
         pref.edit().putString("user_json", json).apply()
     }
 
     @JvmStatic
     fun clearUser(context: Context) {
-        val pref = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val pref = getPrefs(context)
         pref.edit().clear().apply()
     }
 
@@ -636,13 +683,20 @@ object AuthAdapter {
         } else {
             val json = getUserJson(ctx)
             if (json != null) {
-                val provider = when {
-                    json.contains("\"provider\":\"google\"") -> "google"
-                    json.contains("\"provider\":\"microsoft\"") -> "microsoft"
+                val provider = try {
+                    val parsed = JSONObject(json)
+                    parsed.optString("provider")
+                } catch (_: Exception) {
+                    ""
+                }
+                val effectiveProvider = when (provider) {
+                    "google" -> "google"
+                    "microsoft" -> "microsoft"
+                    "apple" -> "apple"
                     else -> "apple"
                 }
                 
-                if (provider == "microsoft") {
+                if (effectiveProvider == "microsoft") {
                     val refreshToken = getMicrosoftRefreshToken(ctx)
                     if (refreshToken != null) {
                         refreshMicrosoftToken(ctx, refreshToken)
@@ -650,7 +704,7 @@ object AuthAdapter {
                         val email = extractJsonValue(json, "email")
                         val name = extractJsonValue(json, "name")
                         val idToken = extractJsonValue(json, "idToken")
-                        nativeOnLoginSuccess(provider, email, name, null, idToken, null, null, null, null)
+                        nativeOnLoginSuccess(effectiveProvider, email, name, null, idToken, null, null, null, null)
                     }
                 } else {
                     val email = extractJsonValue(json, "email")
@@ -658,7 +712,7 @@ object AuthAdapter {
                     val photo = extractJsonValue(json, "photo")
                     val idToken = extractJsonValue(json, "idToken")
                     val serverAuthCode = extractJsonValue(json, "serverAuthCode")
-                    nativeOnLoginSuccess(provider, email, name, photo, idToken, null, serverAuthCode, null, null)
+                    nativeOnLoginSuccess(effectiveProvider, email, name, photo, idToken, null, serverAuthCode, null, null)
                 }
             } else {
                 nativeOnLoginError("unknown", "No session")
@@ -795,9 +849,12 @@ object AuthAdapter {
     }
 
     private fun extractJsonValue(json: String, key: String): String? {
-        val pattern = "\"$key\":\"([^\"]*)\""
-        val regex = Regex(pattern)
-        return regex.find(json)?.groupValues?.get(1)
+        return try {
+            val value = JSONObject(json).optString(key, "")
+            if (value.isEmpty()) null else value
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun extractScopesFromUserJson(json: String): List<String> {
@@ -812,21 +869,15 @@ object AuthAdapter {
 
     private fun saveUser(context: Context, provider: String, email: String?, name: String?, 
                           photo: String?, idToken: String?, serverAuthCode: String?, scopes: List<String>?) {
-        val pref = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val json = StringBuilder()
-        json.append("{")
-        json.append("\"provider\":\"$provider\"")
-        if (email != null) json.append(",\"email\":\"$email\"")
-        if (name != null) json.append(",\"name\":\"$name\"")
-        if (photo != null) json.append(",\"photo\":\"$photo\"")
-        if (idToken != null) json.append(",\"idToken\":\"$idToken\"")
-        if (serverAuthCode != null) json.append(",\"serverAuthCode\":\"$serverAuthCode\"")
-        if (scopes != null) {
-            json.append(",\"scopes\":[")
-            json.append(scopes.joinToString(",") { "\"$it\"" })
-            json.append("]")
-        }
-        json.append("}")
+        val pref = getPrefs(context)
+        val json = JSONObject()
+        json.put("provider", provider)
+        if (email != null) json.put("email", email)
+        if (name != null) json.put("name", name)
+        if (photo != null) json.put("photo", photo)
+        if (idToken != null) json.put("idToken", idToken)
+        if (serverAuthCode != null) json.put("serverAuthCode", serverAuthCode)
+        if (scopes != null) json.put("scopes", JSONArray(scopes))
         pref.edit().putString("user_json", json.toString()).apply()
     }
 }

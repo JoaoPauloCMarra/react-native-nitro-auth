@@ -258,7 +258,7 @@ public class AuthAdapter: NSObject {
         let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
         
         if !refreshToken.isEmpty {
-          UserDefaults.standard.set(refreshToken, forKey: "nitro_auth_microsoft_refresh_token")
+          KeychainStore.set(refreshToken, for: "nitro_auth_microsoft_refresh_token")
         }
         UserDefaults.standard.set(scopes, forKey: "nitro_auth_microsoft_scopes")
         
@@ -353,7 +353,7 @@ public class AuthAdapter: NSObject {
       }
       return
     }
-    guard UserDefaults.standard.string(forKey: "nitro_auth_microsoft_refresh_token") != nil else {
+    guard getStoredMicrosoftRefreshToken() != nil else {
       completion(nil, "No user logged in")
       return
     }
@@ -413,7 +413,7 @@ public class AuthAdapter: NSObject {
   }
 
   private static func tryMicrosoftSilentRefresh(completion: @escaping (NSDictionary?) -> Void) {
-    guard let refreshToken = UserDefaults.standard.string(forKey: "nitro_auth_microsoft_refresh_token") else {
+    guard let refreshToken = getStoredMicrosoftRefreshToken() else {
       completion(nil)
       return
     }
@@ -459,7 +459,7 @@ public class AuthAdapter: NSObject {
         let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
         
         if !newRefreshToken.isEmpty {
-          UserDefaults.standard.set(newRefreshToken, forKey: "nitro_auth_microsoft_refresh_token")
+          KeychainStore.set(newRefreshToken, for: "nitro_auth_microsoft_refresh_token")
         }
         
         let resultData: [String: Any] = [
@@ -478,7 +478,7 @@ public class AuthAdapter: NSObject {
   }
 
   private static func tryMicrosoftRefreshForTokenRefresh(completion: @escaping (NSDictionary?, String?) -> Void) {
-    guard let refreshToken = UserDefaults.standard.string(forKey: "nitro_auth_microsoft_refresh_token") else {
+    guard let refreshToken = getStoredMicrosoftRefreshToken() else {
       completion(nil, "No user logged in")
       return
     }
@@ -523,7 +523,7 @@ public class AuthAdapter: NSObject {
         let expiresIn = json["expires_in"] as? Double ?? 0
         let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
         if !newRefreshToken.isEmpty {
-          UserDefaults.standard.set(newRefreshToken, forKey: "nitro_auth_microsoft_refresh_token")
+          KeychainStore.set(newRefreshToken, for: "nitro_auth_microsoft_refresh_token")
         }
         let tokensData: [String: Any] = [
           "accessToken": accessToken,
@@ -551,8 +551,20 @@ public class AuthAdapter: NSObject {
   @objc
   public static func logout() {
     GIDSignIn.sharedInstance.signOut()
-    UserDefaults.standard.removeObject(forKey: "nitro_auth_microsoft_refresh_token")
+    KeychainStore.remove("nitro_auth_microsoft_refresh_token")
     UserDefaults.standard.removeObject(forKey: "nitro_auth_microsoft_scopes")
+  }
+
+  private static func getStoredMicrosoftRefreshToken() -> String? {
+    if let token = KeychainStore.get("nitro_auth_microsoft_refresh_token") {
+      return token
+    }
+    if let legacy = UserDefaults.standard.string(forKey: "nitro_auth_microsoft_refresh_token") {
+      KeychainStore.set(legacy, for: "nitro_auth_microsoft_refresh_token")
+      UserDefaults.standard.removeObject(forKey: "nitro_auth_microsoft_refresh_token")
+      return legacy
+    }
+    return nil
   }
 }
 
