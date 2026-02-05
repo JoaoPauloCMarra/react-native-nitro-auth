@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.auth
 
 import android.app.Activity
@@ -84,4 +86,3 @@ class GoogleSignInActivity : ComponentActivity() {
         }
     }
 }
-

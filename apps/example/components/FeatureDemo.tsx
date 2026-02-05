@@ -49,6 +49,7 @@ export const FeatureDemo = () => {
 
   const [status, setStatus] = useState("Ready");
   const [useOneTap, setUseOneTap] = useState(false);
+  const [useLegacyGoogleSignIn, setUseLegacyGoogleSignIn] = useState(false);
   const [useCustomStorage, setUseCustomStorage] = useState(false);
   const [loggingEnabled, setLoggingEnabled] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -88,12 +89,16 @@ export const FeatureDemo = () => {
       setStatus(`Logging in with ${provider}...`);
       await login(provider, {
         useOneTap:
-          provider === "google" && Platform.OS === "android"
+          provider === "google" && Platform.OS === "android" && !useLegacyGoogleSignIn
             ? useOneTap
             : undefined,
         useSheet:
           provider === "google" && Platform.OS === "ios"
             ? useOneTap
+            : undefined,
+        useLegacyGoogleSignIn:
+          provider === "google" && Platform.OS === "android"
+            ? useLegacyGoogleSignIn
             : undefined,
       });
       setStatus(`Logged in as ${AuthService.currentUser?.email}`);
@@ -106,7 +111,11 @@ export const FeatureDemo = () => {
   const handleLoginWithHint = async () => {
     try {
       setStatus("Login with hint...");
-      await login("google", { loginHint: "user@gmail.com" });
+      await login("google", {
+        loginHint: "user@gmail.com",
+        useLegacyGoogleSignIn:
+          Platform.OS === "android" ? useLegacyGoogleSignIn : undefined,
+      });
     } catch (e: unknown) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -118,6 +127,8 @@ export const FeatureDemo = () => {
       await login("google", {
         forceAccountPicker: true,
         scopes: scopes.length > 0 ? scopes : undefined,
+        useLegacyGoogleSignIn:
+          Platform.OS === "android" ? useLegacyGoogleSignIn : undefined,
       });
     } catch (e: unknown) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -191,6 +202,16 @@ export const FeatureDemo = () => {
     AuthService.setLoggingEnabled(enabled);
     setLoggingEnabled(enabled);
     setStatus(`Logging ${enabled ? "enabled" : "disabled"}`);
+  };
+
+  const handleToggleLegacyGoogleSignIn = (enabled: boolean) => {
+    setUseLegacyGoogleSignIn(enabled);
+    if (enabled) {
+      setUseOneTap(false);
+      setStatus("Legacy Google Sign-In enabled (serverAuthCode available)");
+    } else {
+      setStatus("Credential Manager enabled (recommended)");
+    }
   };
 
   const cycleVariant = () => {
@@ -345,9 +366,16 @@ export const FeatureDemo = () => {
 
           {Platform.OS === "android" && (
             <ToggleRow
-              label="Use One-Tap Login"
+              label="Use Credential Manager (One-Tap)"
               value={useOneTap}
               onChange={setUseOneTap}
+            />
+          )}
+          {Platform.OS === "android" && (
+            <ToggleRow
+              label="Use Legacy Google Sign-In (serverAuthCode)"
+              value={useLegacyGoogleSignIn}
+              onChange={handleToggleLegacyGoogleSignIn}
             />
           )}
           {Platform.OS === "ios" && (
@@ -448,6 +476,7 @@ export const FeatureDemo = () => {
           <CheckItem label="Login Hint" checked />
           <CheckItem label="Logging Toggle" checked />
           <CheckItem label="SocialButton Variants" checked />
+          <CheckItem label="Legacy Google Sign-In Toggle" checked />
           <CheckItem label="Server Auth Code" checked />
           <CheckItem label="Error Metadata" checked />
         </View>

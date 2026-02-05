@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.auth
 
 import android.content.Context
@@ -157,7 +159,18 @@ object AuthAdapter {
     }
 
     @JvmStatic
-    fun loginSync(context: Context, provider: String, googleClientId: String?, scopes: Array<String>?, loginHint: String?, useOneTap: Boolean, forceAccountPicker: Boolean = false, tenant: String? = null, prompt: String? = null) {
+    fun loginSync(
+        context: Context,
+        provider: String,
+        googleClientId: String?,
+        scopes: Array<String>?,
+        loginHint: String?,
+        useOneTap: Boolean,
+        forceAccountPicker: Boolean = false,
+        useLegacyGoogleSignIn: Boolean = false,
+        tenant: String? = null,
+        prompt: String? = null
+    ) {
         if (provider == "apple") {
             nativeOnLoginError("unsupported_provider", "Apple Sign-In is not supported on Android.")
             return
@@ -183,13 +196,12 @@ object AuthAdapter {
         val requestedScopes = scopes?.toList() ?: listOf("email", "profile")
         pendingScopes = requestedScopes
 
-        if (useOneTap && !forceAccountPicker) {
-            loginOneTap(context, clientId, requestedScopes)
-        } else {
-            val intent = GoogleSignInActivity.createIntent(ctx, clientId, requestedScopes.toTypedArray(), loginHint, forceAccountPicker)
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            ctx.startActivity(intent)
+        if (useLegacyGoogleSignIn) {
+            loginLegacy(context, clientId, requestedScopes, loginHint, forceAccountPicker)
+            return
         }
+
+        loginOneTap(context, clientId, requestedScopes, loginHint, forceAccountPicker, useOneTap)
     }
 
     private fun loginMicrosoft(context: Context, scopes: Array<String>?, loginHint: String?, tenant: String?, prompt: String?) {
@@ -470,18 +482,25 @@ object AuthAdapter {
         }
     }
 
-    private fun loginOneTap(context: Context, clientId: String, scopes: List<String>) {
+    private fun loginOneTap(
+        context: Context,
+        clientId: String,
+        scopes: List<String>,
+        loginHint: String?,
+        forceAccountPicker: Boolean,
+        useOneTap: Boolean
+    ) {
         val activity = currentActivity ?: context as? Activity
         if (activity == null) {
             Log.w(TAG, "No Activity context available for One-Tap, falling back to legacy")
-            return loginLegacy(context, clientId, scopes)
+            return loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker)
         }
         
         val credentialManager = CredentialManager.create(activity)
         val googleIdOption = GetGoogleIdOption.Builder()
             .setFilterByAuthorizedAccounts(false)
             .setServerClientId(clientId)
-            .setAutoSelectEnabled(false)
+            .setAutoSelectEnabled(useOneTap && !forceAccountPicker)
             .build()
 
         val request = GetCredentialRequest.Builder()
@@ -494,14 +513,26 @@ object AuthAdapter {
                 handleCredentialResponse(result, scopes)
             } catch (e: Exception) {
                 Log.w(TAG, "One-Tap failed, falling back to legacy: ${e.message}")
-                loginLegacy(context, clientId, scopes)
+                loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker)
             }
         }
     }
 
-    private fun loginLegacy(context: Context, clientId: String, scopes: List<String>) {
+    private fun loginLegacy(
+        context: Context,
+        clientId: String,
+        scopes: List<String>,
+        loginHint: String?,
+        forceAccountPicker: Boolean
+    ) {
         val ctx = appContext ?: context.applicationContext
-        val intent = GoogleSignInActivity.createIntent(ctx, clientId, scopes.toTypedArray(), null)
+        val intent = GoogleSignInActivity.createIntent(
+            ctx,
+            clientId,
+            scopes.toTypedArray(),
+            loginHint,
+            forceAccountPicker
+        )
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         ctx.startActivity(intent)
     }

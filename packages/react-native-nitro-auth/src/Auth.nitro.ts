@@ -27,6 +27,8 @@ export interface LoginOptions {
   useSheet?: boolean;
   /** Force account picker to show, ignoring any cached session or loginHint */
   forceAccountPicker?: boolean;
+  /** (Android only) Use legacy Google Sign-In flow (e.g. for serverAuthCode) */
+  useLegacyGoogleSignIn?: boolean;
   /** (Microsoft only) Azure AD tenant - "common", "organizations", "consumers", or tenant ID */
   tenant?: string;
   /** (Microsoft only) Prompt behavior for login */

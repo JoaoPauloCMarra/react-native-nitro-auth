@@ -95,6 +95,9 @@ Fastest way to confirm the package and Microsoft login work:
    In the app, tap **Sign in with Microsoft**. A browser or in-app tab opens; sign in with a Microsoft/personal account, then you should return to the app with the user shown (email, name, provider MICROSOFT).  
    If you see "configuration_error", check `MICROSOFT_CLIENT_ID` and that the redirect URI in Azure matches your app (e.g. `msauth://com.auth.example/<client-id>` for the example app).
 
+> [!TIP]
+> In the example app on Android, you can toggle **Legacy Google Sign-In** to compare Credential Manager vs legacy GoogleSignIn (and to get `serverAuthCode`).
+
 ### Expo Setup
 
 Add the plugin to `app.json` or `app.config.js`:
@@ -725,6 +728,15 @@ await login("google", {
 > [!NOTE]
 > One-Tap requires Google Play Services. You can check `hasPlayServices` from `useAuth()` and show a fallback UI if needed.
 
+### Android Legacy Google Sign-In (Server Auth Code)
+
+Credential Manager is the recommended default on Android, but it **does not return** `serverAuthCode`.
+If your backend requires `serverAuthCode`, opt into the legacy flow:
+
+```ts
+await login("google", { useLegacyGoogleSignIn: true });
+```
+
 ### Force Account Picker
 
 When connecting additional services (like Google Calendar), you may want to let users pick a different account than the one they signed in with. Use `forceAccountPicker` to clear any cached session and show the account picker:
@@ -802,6 +814,7 @@ This is useful for scenarios where:
 | `useOneTap`          | `boolean`  | Android  | Enable Google One-Tap (Credential Manager)      |
 | `useSheet`           | `boolean`  | iOS      | Enable iOS Google Sign-In Sheet                 |
 | `forceAccountPicker` | `boolean`  | All      | Always show the account selection screen        |
+| `useLegacyGoogleSignIn` | `boolean` | Android | Use legacy Google Sign-In (supports `serverAuthCode`) |
 | `tenant`             | `string`   | Microsoft | Azure AD tenant (`common`, `organizations`, etc.) |
 | `prompt`             | `string`   | Microsoft | Prompt behavior (`login`, `consent`, `select_account`, `none`) |
 

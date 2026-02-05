@@ -51,6 +51,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     std::optional<std::string> prompt;
     bool useOneTap = false;
     bool forceAccountPicker = false;
+    bool useLegacyGoogleSignIn = false;
 
     if (options) {
         if (options->scopes) scopes = *options->scopes;
@@ -66,6 +67,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         }
         useOneTap = options->useOneTap.value_or(false);
         forceAccountPicker = options->forceAccountPicker.value_or(false);
+        useLegacyGoogleSignIn = options->useLegacyGoogleSignIn.value_or(false);
     }
 
     JNIEnv* env = Environment::current();
@@ -81,7 +83,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     
     jclass adapterClass = env->FindClass("com/auth/AuthAdapter");
     jmethodID loginMethod = env->GetStaticMethodID(adapterClass, "loginSync", 
-        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;ZZLjava/lang/String;Ljava/lang/String;)V");
+        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;ZZZLjava/lang/String;Ljava/lang/String;)V");
     env->CallStaticVoidMethod(adapterClass, loginMethod, 
         contextPtr, 
         make_jstring(providerStr).get(),
@@ -90,6 +92,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         jLoginHint,
         (jboolean)useOneTap,
         (jboolean)forceAccountPicker,
+        (jboolean)useLegacyGoogleSignIn,
         jTenant,
         jPrompt);
     

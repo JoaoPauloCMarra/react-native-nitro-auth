@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.auth
 
 import com.facebook.react.ReactPackage
