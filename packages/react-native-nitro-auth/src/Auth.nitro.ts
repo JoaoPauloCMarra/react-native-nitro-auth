@@ -1,11 +1,11 @@
 import type { HybridObject } from "react-native-nitro-modules";
 
-import type { AuthStorageAdapter } from "./AuthStorage.nitro";
-
 export type AuthProvider = "google" | "apple" | "microsoft";
 
 export type AuthErrorCode =
   | "cancelled"
+  | "timeout"
+  | "popup_blocked"
   | "network_error"
   | "configuration_error"
   | "unsupported_provider"
@@ -38,6 +38,7 @@ export interface LoginOptions {
 export interface AuthTokens {
   accessToken?: string;
   idToken?: string;
+  refreshToken?: string;
   expirationTime?: number;
 }
 
@@ -48,6 +49,7 @@ export interface AuthUser {
   photo?: string;
   idToken?: string;
   accessToken?: string;
+  refreshToken?: string;
   serverAuthCode?: string;
   scopes?: string[];
   expirationTime?: number;
@@ -74,5 +76,4 @@ export interface Auth extends HybridObject<{ ios: "c++"; android: "c++" }> {
   ): () => void;
   onTokensRefreshed(callback: (tokens: AuthTokens) => void): () => void;
   setLoggingEnabled(enabled: boolean): void;
-  setStorageAdapter(adapter: AuthStorageAdapter | undefined): void;
 }

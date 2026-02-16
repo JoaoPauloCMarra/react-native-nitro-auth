@@ -14,23 +14,30 @@ import {
   SocialButton,
   useAuth,
   AuthService,
-  JSStorageAdapter,
   type AuthUser,
-  type AuthTokens,
 } from "react-native-nitro-auth";
+import {
+  createStorageItem,
+  StorageScope,
+  useStorage,
+} from "react-native-nitro-storage";
 
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
-const memoryStore = new Map<string, string>();
-
-const memoryStorageAdapter: JSStorageAdapter = {
-  save: (key, value) => {
-    memoryStore.set(key, value);
-  },
-  load: (key) => memoryStore.get(key),
-  remove: (key) => {
-    memoryStore.delete(key);
-  },
+type AuthSnapshot = {
+  user: AuthUser | undefined;
+  scopes: string[];
+  updatedAt: number | undefined;
 };
+
+const authSnapshotItem = createStorageItem<AuthSnapshot>({
+  key: "demo_auth_snapshot",
+  scope: StorageScope.Disk,
+  defaultValue: {
+    user: undefined,
+    scopes: [],
+    updatedAt: undefined,
+  },
+});
 
 export const FeatureDemo = () => {
   const {
@@ -50,12 +57,23 @@ export const FeatureDemo = () => {
   const [status, setStatus] = useState("Ready");
   const [useOneTap, setUseOneTap] = useState(false);
   const [useLegacyGoogleSignIn, setUseLegacyGoogleSignIn] = useState(false);
-  const [useCustomStorage, setUseCustomStorage] = useState(false);
+  const [persistAuthSnapshot, setPersistAuthSnapshot] = useState(true);
   const [loggingEnabled, setLoggingEnabled] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [authSnapshot, setAuthSnapshot] = useStorage(authSnapshotItem);
   const [variant, setVariant] = useState<
     "primary" | "outline" | "white" | "black"
   >("primary");
+  const displayUser =
+    user ?? (persistAuthSnapshot ? authSnapshot.user : undefined);
+  const displayScopes =
+    scopes.length > 0 ? scopes : persistAuthSnapshot ? authSnapshot.scopes : [];
+  const isUsingPersistedSnapshot =
+    !user && persistAuthSnapshot && Boolean(authSnapshot.user);
+
+  useEffect(() => {
+    void AuthService.silentRestore();
+  }, []);
 
   useEffect(() => {
     const unsubscribeAuth = AuthService.onAuthStateChanged((u) => {
@@ -74,6 +92,27 @@ export const FeatureDemo = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!persistAuthSnapshot) {
+      setAuthSnapshot({
+        user: undefined,
+        scopes: [],
+        updatedAt: undefined,
+      });
+      return;
+    }
+
+    if (!user) {
+      return;
+    }
+
+    setAuthSnapshot({
+      user,
+      scopes,
+      updatedAt: Date.now(),
+    });
+  }, [persistAuthSnapshot, scopes, setAuthSnapshot, user]);
+
   const hasCalendarScope = scopes.includes(CALENDAR_SCOPE);
 
   const handleLogin = async (provider: "google" | "apple" | "microsoft") => {
@@ -89,7 +128,9 @@ export const FeatureDemo = () => {
       setStatus(`Logging in with ${provider}...`);
       await login(provider, {
         useOneTap:
-          provider === "google" && Platform.OS === "android" && !useLegacyGoogleSignIn
+          provider === "google" &&
+          Platform.OS === "android" &&
+          !useLegacyGoogleSignIn
             ? useOneTap
             : undefined,
         useSheet:
@@ -193,9 +234,12 @@ export const FeatureDemo = () => {
   };
 
   const handleToggleStorage = (enabled: boolean) => {
-    AuthService.setJSStorageAdapter(enabled ? memoryStorageAdapter : undefined);
-    setUseCustomStorage(enabled);
-    setStatus(enabled ? "Memory storage enabled" : "Default storage restored");
+    setPersistAuthSnapshot(enabled);
+    setStatus(
+      enabled
+        ? "Disk snapshot persistence enabled"
+        : "Disk snapshot persistence disabled",
+    );
   };
 
   const handleToggleLogging = (enabled: boolean) => {
@@ -228,6 +272,11 @@ export const FeatureDemo = () => {
   const handleLogout = () => {
     logout();
     setAccessToken(null);
+    setAuthSnapshot({
+      user: undefined,
+      scopes: [],
+      updatedAt: undefined,
+    });
     setStatus("Logged out");
   };
 
@@ -239,7 +288,7 @@ export const FeatureDemo = () => {
       <View style={styles.header}>
         <Text style={styles.title}>Nitro Auth</Text>
         <Text style={styles.subtitle}>Feature Demo (JSI)</Text>
-        <Text style={styles.version}>v0.5.0</Text>
+        <Text style={styles.version}>v0.5.2</Text>
       </View>
 
       <View style={styles.statusCard}>
@@ -264,75 +313,102 @@ export const FeatureDemo = () => {
         </View>
       )}
 
-      {user ? (
+      {displayUser ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Authenticated User</Text>
           <View style={styles.profileCard}>
-            {user.photo ? (
-              <Image source={{ uri: user.photo }} style={styles.avatar} />
+            {displayUser.photo ? (
+              <Image
+                source={{ uri: displayUser.photo }}
+                style={styles.avatar}
+              />
             ) : (
               <View style={[styles.avatar, styles.avatarPlaceholder]}>
                 <Text style={styles.avatarText}>
-                  {user.name?.charAt(0) || user.email?.charAt(0) || "?"}
+                  {displayUser.name?.charAt(0) ||
+                    displayUser.email?.charAt(0) ||
+                    "?"}
                 </Text>
               </View>
             )}
-            <Text style={styles.userName}>{user.name || "User"}</Text>
-            <Text style={styles.userEmail}>{user.email}</Text>
+            <Text style={styles.userName}>{displayUser.name || "User"}</Text>
+            <Text style={styles.userEmail}>{displayUser.email}</Text>
             <View style={styles.badge}>
               <Text style={styles.badgeText}>
-                {user.provider.toUpperCase()}
+                {displayUser.provider.toUpperCase()}
               </Text>
             </View>
+            {isUsingPersistedSnapshot && (
+              <Text style={styles.snapshotHint}>
+                Showing persisted Disk snapshot
+              </Text>
+            )}
           </View>
 
           <View style={styles.detailsCard}>
             <Text style={styles.detailsTitle}>AuthUser Details</Text>
-            <DetailRow label="Provider" value={user.provider} />
+            <DetailRow label="Provider" value={displayUser.provider} />
             <DetailRow
               label="ID Token"
-              value={user.idToken ? `${user.idToken.slice(0, 25)}...` : "N/A"}
+              value={
+                displayUser.idToken
+                  ? `${displayUser.idToken.slice(0, 25)}...`
+                  : "N/A"
+              }
             />
             <DetailRow
               label="Access Token"
               value={
-                user.accessToken ? `${user.accessToken.slice(0, 25)}...` : "N/A"
+                displayUser.accessToken
+                  ? `${displayUser.accessToken.slice(0, 25)}...`
+                  : "N/A"
               }
             />
             <DetailRow
               label="Server Auth Code"
-              value={user.serverAuthCode ?? "N/A"}
+              value={displayUser.serverAuthCode ?? "N/A"}
             />
             <DetailRow
               label="Expiration"
               value={
-                user.expirationTime
-                  ? new Date(user.expirationTime).toLocaleString()
+                displayUser.expirationTime
+                  ? new Date(displayUser.expirationTime).toLocaleString()
                   : "N/A"
               }
             />
-            <DetailRow label="Scopes" value={`${scopes.length} granted`} />
-            {scopes.length > 0 && (
+            <DetailRow
+              label="Scopes"
+              value={`${displayScopes.length} granted`}
+            />
+            {displayScopes.length > 0 && (
               <Text style={styles.scopesList}>
-                {scopes.map((s) => s.split("/").pop()).join(", ")}
+                {displayScopes
+                  .map((s) => s.split("/").pop() ?? s)
+                  .filter(Boolean)
+                  .join(", ")}
               </Text>
             )}
           </View>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Token Operations</Text>
-            <View style={styles.buttonRow}>
-              <ActionButton label="Get Token" onPress={handleGetAccessToken} />
-              <ActionButton label="Refresh" onPress={handleRefreshToken} />
+          {user && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Token Operations</Text>
+              <View style={styles.buttonRow}>
+                <ActionButton
+                  label="Get Token"
+                  onPress={handleGetAccessToken}
+                />
+                <ActionButton label="Refresh" onPress={handleRefreshToken} />
+              </View>
+              {accessToken && (
+                <Text style={styles.tokenPreview}>
+                  Token: {accessToken.slice(0, 30)}...
+                </Text>
+              )}
             </View>
-            {accessToken && (
-              <Text style={styles.tokenPreview}>
-                Token: {accessToken.slice(0, 30)}...
-              </Text>
-            )}
-          </View>
+          )}
 
-          {user.provider === "google" && (
+          {user?.provider === "google" && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Incremental Auth</Text>
               <ActionButton
@@ -355,7 +431,11 @@ export const FeatureDemo = () => {
           )}
 
           <ActionButton
-            label="Sign Out"
+            label={
+              isUsingPersistedSnapshot
+                ? "Sign Out + Clear Snapshot"
+                : "Sign Out"
+            }
             onPress={handleLogout}
             variant="danger"
           />
@@ -440,8 +520,8 @@ export const FeatureDemo = () => {
         />
 
         <ToggleRow
-          label="Memory Storage (Demo)"
-          value={useCustomStorage}
+          label="Disk Storage (Persist snapshot)"
+          value={persistAuthSnapshot}
           onChange={handleToggleStorage}
         />
       </View>
@@ -455,7 +535,28 @@ export const FeatureDemo = () => {
             value={hasPlayServices ? "✅ Available" : "❌ Missing"}
             warning={!hasPlayServices && Platform.OS === "android"}
           />
-          <InfoRow label="Session" value={user ? "Active" : "None"} />
+          <InfoRow
+            label="Session"
+            value={
+              user
+                ? "Active"
+                : isUsingPersistedSnapshot
+                  ? "Snapshot only"
+                  : "None"
+            }
+          />
+          <InfoRow
+            label="Persisted Snapshot"
+            value={authSnapshot.user ? "Available" : "None"}
+          />
+          <InfoRow
+            label="Snapshot Updated"
+            value={
+              authSnapshot.updatedAt
+                ? new Date(authSnapshot.updatedAt).toLocaleTimeString()
+                : "N/A"
+            }
+          />
           <InfoRow label="Logging" value={loggingEnabled ? "On" : "Off"} />
         </View>
       </View>
@@ -471,7 +572,7 @@ export const FeatureDemo = () => {
           <CheckItem label="Token Refresh" checked />
           <CheckItem label="Auth State Listener" checked />
           <CheckItem label="Token Refresh Listener" checked />
-          <CheckItem label="Custom Storage Adapter" checked />
+          <CheckItem label="App-level Disk snapshot (nitro-storage)" checked />
           <CheckItem label="Force Account Picker" checked />
           <CheckItem label="Login Hint" checked />
           <CheckItem label="Logging Toggle" checked />
@@ -616,10 +717,7 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: "#fff",
     borderRadius: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
     elevation: 2,
   },
   statusLabel: {
@@ -666,10 +764,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 24,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
     elevation: 2,
   },
   avatar: {
@@ -708,6 +803,11 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 11,
     fontWeight: "bold",
+    color: "#666",
+  },
+  snapshotHint: {
+    marginTop: 8,
+    fontSize: 12,
     color: "#666",
   },
   detailsCard: {

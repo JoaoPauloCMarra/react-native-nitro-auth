@@ -1,6 +1,4 @@
 #include "HybridAuth.hpp"
-#include "AuthCache.hpp"
-#include "JSONSerializer.hpp"
 #include "PlatformAuth.hpp"
 #include <NitroModules/NitroLogger.hpp>
 #include <chrono>
@@ -10,7 +8,7 @@ namespace margelo::nitro::NitroAuth {
 bool HybridAuth::sLoggingEnabled = false;
 
 HybridAuth::HybridAuth() : HybridObject(TAG) {
-  loadFromCache();
+  // In-memory only - no internal persistence.
 }
 
 std::optional<AuthUser> HybridAuth::getCurrentUser() {
@@ -25,41 +23,6 @@ std::vector<std::string> HybridAuth::getGrantedScopes() {
 
 bool HybridAuth::getHasPlayServices() {
   return PlatformAuth::hasPlayServices();
-}
-
-void HybridAuth::loadFromCache() {
-  std::lock_guard<std::mutex> lock(_mutex);
-  std::optional<std::string> json;
-  
-  if (_storageAdapter) {
-    json = _storageAdapter->load("nitro_auth_user");
-  } else {
-    json = AuthCache::getUserJson();
-  }
-  
-  if (json) {
-    _currentUser = JSONSerializer::deserialize(*json);
-    if (_currentUser && _currentUser->scopes) {
-      _grantedScopes = *_currentUser->scopes;
-    }
-  }
-}
-
-void HybridAuth::saveToCache(const std::optional<AuthUser>& user) {
-  if (user) {
-    auto json = JSONSerializer::serialize(*user);
-    if (_storageAdapter) {
-      _storageAdapter->save("nitro_auth_user", json);
-    } else {
-      AuthCache::setUserJson(json);
-    }
-  } else {
-    if (_storageAdapter) {
-      _storageAdapter->remove("nitro_auth_user");
-    } else {
-      AuthCache::clear();
-    }
-  }
 }
 
 void HybridAuth::notifyAuthStateChanged() {
@@ -104,7 +67,6 @@ void HybridAuth::logout() {
     std::lock_guard<std::mutex> lock(_mutex);
     _currentUser = std::nullopt;
     _grantedScopes.clear();
-    saveToCache(std::nullopt);
   }
   PlatformAuth::logout();
   notifyAuthStateChanged();
@@ -114,18 +76,27 @@ std::shared_ptr<Promise<void>> HybridAuth::silentRestore() {
   auto promise = Promise<void>::create();
   auto silentPromise = PlatformAuth::silentRestore();
   silentPromise->addOnResolvedListener([this, promise](const std::optional<AuthUser>& user) {
-    if (user) {
+    {
       std::lock_guard<std::mutex> lock(_mutex);
       _currentUser = user;
-      if (user->scopes) _grantedScopes = *user->scopes;
-      saveToCache(_currentUser);
+      if (user) {
+        if (user->scopes) {
+          _grantedScopes = *user->scopes;
+        } else {
+          _grantedScopes.clear();
+        }
+      } else {
+        _grantedScopes.clear();
+      }
     }
+    // Always resolve - no session is not an error, just means user is logged out
     notifyAuthStateChanged();
     promise->resolve();
   });
   
-  silentPromise->addOnRejectedListener([promise](const std::exception_ptr& error) {
-    promise->reject(error);
+  silentPromise->addOnRejectedListener([promise](const std::exception_ptr&) {
+    // Silently ignore errors during restore - user will be logged out
+    promise->resolve();
   });
   return promise;
 }
@@ -142,7 +113,6 @@ std::shared_ptr<Promise<void>> HybridAuth::login(AuthProvider provider, const st
         _grantedScopes = *options->scopes;
       }
       if (_currentUser) _currentUser->scopes = _grantedScopes;
-      saveToCache(_currentUser);
     }
     notifyAuthStateChanged();
     promise->resolve();
@@ -167,7 +137,6 @@ std::shared_ptr<Promise<void>> HybridAuth::requestScopes(const std::vector<std::
         }
       }
       if (_currentUser) _currentUser->scopes = _grantedScopes;
-      saveToCache(_currentUser);
     }
     notifyAuthStateChanged();
     promise->resolve();
@@ -192,7 +161,6 @@ std::shared_ptr<Promise<void>> HybridAuth::revokeScopes(const std::vector<std::s
     );
     if (_currentUser) {
       _currentUser->scopes = _grantedScopes;
-      saveToCache(_currentUser);
     }
   }
   notifyAuthStateChanged();
@@ -241,7 +209,6 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
       if (_currentUser) {
         _currentUser->accessToken = tokens.accessToken;
         _currentUser->idToken = tokens.idToken;
-        saveToCache(_currentUser);
       }
     }
     notifyTokensRefreshed(tokens);
@@ -257,15 +224,6 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
  
 void HybridAuth::setLoggingEnabled(bool enabled) {
   sLoggingEnabled = enabled;
-}
-
-void HybridAuth::setStorageAdapter(const std::optional<std::shared_ptr<HybridAuthStorageAdapterSpec>>& adapter) {
-  std::lock_guard<std::mutex> lock(_mutex);
-  _storageAdapter = adapter.value_or(nullptr);
-  if (_storageAdapter) {
-    loadFromCache();
-    notifyAuthStateChanged();
-  }
 }
 
 void HybridAuth::notifyTokensRefreshed(const AuthTokens& tokens) {

@@ -110,7 +110,7 @@ export const SocialButton: React.FC<SocialButtonProps> = ({
             )}
             {provider === "apple" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
-                <Text style={{ fontSize: 18, color: getTextColor() }}></Text>
+                <Text style={{ fontSize: 18, color: getTextColor() }}></Text>
               </View>
             )}
             {provider === "microsoft" && variant !== "primary" && (

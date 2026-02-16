@@ -7,14 +7,14 @@ import type {
   AuthTokens,
 } from "./Auth.nitro";
 
-interface AuthState {
+type AuthState = {
   user: AuthUser | undefined;
   scopes: string[];
   loading: boolean;
   error: Error | undefined;
-}
+};
 
-export interface UseAuthReturn extends AuthState {
+export type UseAuthReturn = AuthState & {
   hasPlayServices: boolean;
   login: (provider: AuthProvider, options?: LoginOptions) => Promise<void>;
   logout: () => void;
@@ -23,7 +23,7 @@ export interface UseAuthReturn extends AuthState {
   getAccessToken: () => Promise<string | undefined>;
   refreshToken: () => Promise<AuthTokens>;
   silentRestore: () => Promise<void>;
-}
+};
 
 export function useAuth(): UseAuthReturn {
   const [state, setState] = useState<AuthState>({

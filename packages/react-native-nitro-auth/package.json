@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-auth",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "High-performance authentication library for React Native with Google Sign-In, Apple Sign-In, and Microsoft Sign-In support, powered by Nitro Modules (JSI)",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -29,7 +29,7 @@
     "!scripts"
   ],
   "scripts": {
-    "prebuild": "npm run codegen",
+    "prebuild": "bun run codegen",
     "build": "bob build",
     "clean": "rimraf lib nitrogen/generated",
     "codegen": "nitrogen --logLevel=\"debug\"",
@@ -37,7 +37,7 @@
     "test": "jest",
     "test:coverage": "jest --coverage",
     "test:cpp": "node scripts/test-cpp.js",
-    "prepublishOnly": "npm run clean && npm run build",
+    "prepublishOnly": "bun run clean && bun run build",
     "prepack": "node -e \"const fs=require('fs'); fs.copyFileSync('../../README.md','./README.md'); try{fs.copyFileSync('../../LICENSE','./LICENSE')}catch(e){}\"",
     "postpack": "node -e \"const fs=require('fs'); ['./README.md','./LICENSE'].forEach(f=>fs.existsSync(f)&&fs.unlinkSync(f))\""
   },
@@ -79,20 +79,20 @@
   },
   "devDependencies": {
     "@expo/config-plugins": "^54.0.4",
-    "@react-native/babel-preset": "^0.81.0",
-    "@testing-library/react": "^16.1.0",
-    "@types/node": "^22.14.0",
+    "@react-native/babel-preset": "^0.81.6",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^22.19.11",
     "jest-environment-jsdom": "^29.7.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
-    "react-native-nitro-modules": "^0.33.7",
+    "react-native-nitro-modules": "^0.33.9",
     "react-native-web": "^0.21.2",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "react": "*",
     "react-native": ">=0.75.0",
-    "react-native-nitro-modules": ">=0.33.7"
+    "react-native-nitro-modules": ">=0.33.9"
   },
   "react-native-builder-bob": {
     "source": "src",

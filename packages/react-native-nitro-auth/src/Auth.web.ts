@@ -5,13 +5,31 @@ import type {
   LoginOptions,
   AuthTokens,
 } from "./Auth.nitro";
-import type { AuthStorageAdapter } from "./AuthStorage.nitro";
+import type { JSStorageAdapter } from "./js-storage-adapter";
 import { logger } from "./utils/logger";
 
 const CACHE_KEY = "nitro_auth_user";
 const SCOPES_KEY = "nitro_auth_scopes";
+const MS_REFRESH_TOKEN_KEY = "nitro_auth_microsoft_refresh_token";
 const DEFAULT_SCOPES = ["openid", "email", "profile"];
 const MS_DEFAULT_SCOPES = ["openid", "email", "profile", "User.Read"];
+const STORAGE_MODE_SESSION = "session";
+const STORAGE_MODE_LOCAL = "local";
+const STORAGE_MODE_MEMORY = "memory";
+const POPUP_POLL_INTERVAL_MS = 100;
+const POPUP_TIMEOUT_MS = 120000;
+const WEB_STORAGE_MODES = new Set([
+  STORAGE_MODE_SESSION,
+  STORAGE_MODE_LOCAL,
+  STORAGE_MODE_MEMORY,
+] as const);
+const inMemoryWebStorage = new Map<string, string>();
+
+type WebStorageDriver = {
+  save(key: string, value: string): void;
+  load(key: string): string | undefined;
+  remove(key: string): void;
+};
 
 type AppleAuthResponse = {
   authorization: {
@@ -26,11 +44,24 @@ type AppleAuthResponse = {
   };
 };
 
-const getConfig = () => {
+type AuthWebExtraConfig = {
+  googleWebClientId?: string;
+  microsoftClientId?: string;
+  microsoftTenant?: string;
+  microsoftB2cDomain?: string;
+  appleWebClientId?: string;
+  nitroAuthWebStorage?: "session" | "local" | "memory";
+  nitroAuthPersistTokensOnWeb?: boolean;
+};
+
+const getConfig = (): AuthWebExtraConfig => {
   try {
     const Constants = require("expo-constants").default;
     return Constants.expoConfig?.extra || {};
-  } catch {
+  } catch (error) {
+    logger.debug("expo-constants unavailable on web, falling back to defaults", {
+      error: String(error),
+    });
     return {};
   }
 };
@@ -40,44 +71,227 @@ class AuthWeb implements Auth {
   private _grantedScopes: string[] = [];
   private _listeners: ((user: AuthUser | undefined) => void)[] = [];
   private _tokenListeners: ((tokens: AuthTokens) => void)[] = [];
-  private _storageAdapter: AuthStorageAdapter | undefined;
+  private _storageAdapter: WebStorageDriver | undefined;
 
   constructor() {
     this.loadFromCache();
   }
 
+  private isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      "then" in value &&
+      typeof (value as { then: unknown }).then === "function"
+    );
+  }
+
+  private createWebStorageDriver(
+    adapter: JSStorageAdapter,
+  ): WebStorageDriver {
+    return {
+      save: (key, value) => {
+        const result = adapter.save(key, value);
+        if (this.isPromiseLike(result)) {
+          throw new Error(
+            "On web, JSStorageAdapter.save must be synchronous.",
+          );
+        }
+      },
+      load: (key) => {
+        const result = adapter.load(key);
+        if (this.isPromiseLike(result)) {
+          throw new Error(
+            "On web, JSStorageAdapter.load must be synchronous.",
+          );
+        }
+        return result;
+      },
+      remove: (key) => {
+        const result = adapter.remove(key);
+        if (this.isPromiseLike(result)) {
+          throw new Error(
+            "On web, JSStorageAdapter.remove must be synchronous.",
+          );
+        }
+      },
+    };
+  }
+
+  private shouldPersistTokensInStorage(): boolean {
+    if (this._storageAdapter) {
+      return true;
+    }
+    return getConfig().nitroAuthPersistTokensOnWeb === true;
+  }
+
+  private getWebStorageMode(): "session" | "local" | "memory" {
+    const configuredMode = getConfig().nitroAuthWebStorage;
+    if (configuredMode && WEB_STORAGE_MODES.has(configuredMode)) {
+      return configuredMode;
+    }
+    return STORAGE_MODE_SESSION;
+  }
+
+  private getBrowserStorage(): Storage | undefined {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const mode = this.getWebStorageMode();
+    if (mode === STORAGE_MODE_MEMORY) {
+      return undefined;
+    }
+
+    const storage =
+      mode === STORAGE_MODE_LOCAL ? window.localStorage : window.sessionStorage;
+    try {
+      const testKey = "__nitro_auth_storage_probe__";
+      storage.setItem(testKey, "1");
+      storage.removeItem(testKey);
+      return storage;
+    } catch (error) {
+      logger.warn("Configured web storage is unavailable; using in-memory fallback", {
+        mode,
+        error: String(error),
+      });
+      return undefined;
+    }
+  }
+
+  private saveValue(key: string, value: string): void {
+    if (this._storageAdapter) {
+      this._storageAdapter.save(key, value);
+      return;
+    }
+
+    const storage = this.getBrowserStorage();
+    if (storage) {
+      storage.setItem(key, value);
+      return;
+    }
+    inMemoryWebStorage.set(key, value);
+  }
+
+  private loadValue(key: string): string | undefined {
+    if (this._storageAdapter) {
+      return this._storageAdapter.load(key);
+    }
+
+    const storage = this.getBrowserStorage();
+    if (storage) {
+      return storage.getItem(key) ?? undefined;
+    }
+    return inMemoryWebStorage.get(key);
+  }
+
+  private removeValue(key: string): void {
+    if (this._storageAdapter) {
+      this._storageAdapter.remove(key);
+      return;
+    }
+
+    const storage = this.getBrowserStorage();
+    if (storage) {
+      storage.removeItem(key);
+    }
+    inMemoryWebStorage.delete(key);
+  }
+
+  private removePersistedBrowserValue(key: string): void {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      window.localStorage.removeItem(key);
+      window.sessionStorage.removeItem(key);
+    } catch (error) {
+      logger.debug("Failed to clear persisted browser value", {
+        key,
+        error: String(error),
+      });
+    }
+  }
+
+  private sanitizeUserForPersistence(user: AuthUser): AuthUser {
+    if (this.shouldPersistTokensInStorage()) {
+      return user;
+    }
+
+    const safeUser = { ...user };
+    delete safeUser.accessToken;
+    delete safeUser.idToken;
+    delete safeUser.serverAuthCode;
+    return safeUser;
+  }
+
+  private saveRefreshToken(refreshToken: string): void {
+    if (this._storageAdapter || this.shouldPersistTokensInStorage()) {
+      this.saveValue(MS_REFRESH_TOKEN_KEY, refreshToken);
+      return;
+    }
+
+    // Security-first default: keep refresh tokens in-memory only on web.
+    inMemoryWebStorage.set(MS_REFRESH_TOKEN_KEY, refreshToken);
+  }
+
+  private loadRefreshToken(): string | undefined {
+    if (this._storageAdapter || this.shouldPersistTokensInStorage()) {
+      return this.loadValue(MS_REFRESH_TOKEN_KEY);
+    }
+    return inMemoryWebStorage.get(MS_REFRESH_TOKEN_KEY);
+  }
+
   private loadFromCache() {
-    const cached = this._storageAdapter
-      ? this._storageAdapter.load(CACHE_KEY)
-      : localStorage.getItem(CACHE_KEY);
+    const cached = this.loadValue(CACHE_KEY);
 
     if (cached) {
       try {
-        this._currentUser = JSON.parse(cached);
-      } catch {
+        const parsedUser = JSON.parse(cached) as AuthUser;
+        if (this.shouldPersistTokensInStorage()) {
+          this._currentUser = parsedUser;
+        } else {
+          const safeUser = { ...parsedUser };
+          delete safeUser.accessToken;
+          delete safeUser.idToken;
+          delete safeUser.serverAuthCode;
+          this._currentUser = safeUser;
+        }
+      } catch (error) {
+        logger.warn("Failed to parse cached auth user; clearing cache", {
+          error: String(error),
+        });
         this.removeFromCache(CACHE_KEY);
       }
     }
 
-    const scopes = this._storageAdapter
-      ? this._storageAdapter.load(SCOPES_KEY)
-      : localStorage.getItem(SCOPES_KEY);
+    const scopes = this.loadValue(SCOPES_KEY);
 
     if (scopes) {
       try {
-        this._grantedScopes = JSON.parse(scopes);
-      } catch {
+        const parsedScopes = JSON.parse(scopes) as unknown;
+        if (!Array.isArray(parsedScopes)) {
+          throw new Error("Expected cached scopes to be an array");
+        }
+        this._grantedScopes = parsedScopes.filter(
+          (scope): scope is string => typeof scope === "string",
+        );
+      } catch (error) {
+        logger.warn("Failed to parse cached scopes; clearing cache", {
+          error: String(error),
+        });
         this.removeFromCache(SCOPES_KEY);
       }
+    }
+
+    if (!this.shouldPersistTokensInStorage() && !this._storageAdapter) {
+      this.removePersistedBrowserValue(MS_REFRESH_TOKEN_KEY);
     }
   }
 
   private removeFromCache(key: string) {
-    if (this._storageAdapter) {
-      this._storageAdapter.remove(key);
-    } else {
-      localStorage.removeItem(key);
-    }
+    this.removeValue(key);
   }
 
   get currentUser(): AuthUser | undefined {
@@ -169,14 +383,7 @@ class AuthWeb implements Auth {
     this._grantedScopes = this._grantedScopes.filter(
       (s) => !scopes.includes(s),
     );
-    if (this._storageAdapter) {
-      this._storageAdapter.save(
-        SCOPES_KEY,
-        JSON.stringify(this._grantedScopes),
-      );
-    } else {
-      localStorage.setItem(SCOPES_KEY, JSON.stringify(this._grantedScopes));
-    }
+    this.saveValue(SCOPES_KEY, JSON.stringify(this._grantedScopes));
     if (this._currentUser) {
       this._currentUser.scopes = this._grantedScopes;
       this.updateUser(this._currentUser);
@@ -201,9 +408,7 @@ class AuthWeb implements Auth {
 
     if (this._currentUser.provider === "microsoft") {
       logger.log("Refreshing Microsoft tokens...");
-      const refreshToken = this._storageAdapter
-        ? this._storageAdapter.load("microsoft_refresh_token")
-        : localStorage.getItem("nitro_auth_microsoft_refresh_token");
+      const refreshToken = this.loadRefreshToken();
 
       if (!refreshToken) {
         throw new Error("No refresh token available");
@@ -211,6 +416,11 @@ class AuthWeb implements Auth {
 
       const config = getConfig();
       const clientId = config.microsoftClientId;
+      if (!clientId) {
+        throw new Error(
+          "Microsoft Client ID not configured. Add 'microsoftClientId' to expo.extra in your app.config.js",
+        );
+      }
       const tenant = config.microsoftTenant ?? "common";
       const b2cDomain = config.microsoftB2cDomain;
 
@@ -243,14 +453,7 @@ class AuthWeb implements Auth {
       const expiresIn = json.expires_in;
 
       if (newRefreshToken) {
-        if (this._storageAdapter) {
-          this._storageAdapter.save("microsoft_refresh_token", newRefreshToken);
-        } else {
-          localStorage.setItem(
-            "nitro_auth_microsoft_refresh_token",
-            newRefreshToken,
-          );
-        }
+        this.saveRefreshToken(newRefreshToken);
       }
 
       const claims = this.decodeMicrosoftJwt(idToken);
@@ -259,7 +462,7 @@ class AuthWeb implements Auth {
         idToken,
         accessToken: accessToken ?? undefined,
         expirationTime: expiresIn
-          ? Date.now() + parseInt(expiresIn) * 1000
+          ? Date.now() + parseInt(expiresIn, 10) * 1000
           : undefined,
         ...claims,
       };
@@ -295,6 +498,10 @@ class AuthWeb implements Auth {
 
     if (msg.includes("cancel") || msg.includes("popup_closed")) {
       mappedMsg = "cancelled";
+    } else if (msg.includes("timeout")) {
+      mappedMsg = "timeout";
+    } else if (msg.includes("popup blocked")) {
+      mappedMsg = "popup_blocked";
     } else if (msg.includes("network")) {
       mappedMsg = "network_error";
     } else if (msg.includes("client id") || msg.includes("config")) {
@@ -302,6 +509,68 @@ class AuthWeb implements Auth {
     }
 
     return Object.assign(new Error(mappedMsg), { underlyingError: rawMessage });
+  }
+
+  private waitForPopupRedirect(
+    popup: Window,
+    redirectUri: string,
+    provider: "Google" | "Microsoft",
+    onRedirect: (url: string) => Promise<void> | void,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let crossOriginLogShown = false;
+
+      const cleanup = (
+        intervalId: number,
+        timeoutId: number,
+        shouldClosePopup: boolean,
+      ) => {
+        window.clearInterval(intervalId);
+        window.clearTimeout(timeoutId);
+        if (shouldClosePopup && !popup.closed) {
+          popup.close();
+        }
+      };
+
+      const timeoutId = window.setTimeout(() => {
+        cleanup(intervalId, timeoutId, true);
+        reject(
+          new Error(
+            `${provider.toLowerCase()}_auth_timeout`,
+          ),
+        );
+      }, POPUP_TIMEOUT_MS);
+
+      const intervalId = window.setInterval(() => {
+        if (popup.closed) {
+          cleanup(intervalId, timeoutId, false);
+          reject(new Error("cancelled"));
+          return;
+        }
+
+        let url: string;
+        try {
+          url = popup.location.href;
+        } catch (error) {
+          if (!crossOriginLogShown) {
+            logger.debug(`Waiting for ${provider} auth redirect`, {
+              error: String(error),
+            });
+            crossOriginLogShown = true;
+          }
+          return;
+        }
+
+        if (!url.startsWith(redirectUri)) {
+          return;
+        }
+
+        cleanup(intervalId, timeoutId, true);
+        void Promise.resolve(onRedirect(url))
+          .then(() => resolve())
+          .catch((error: unknown) => reject(error));
+      }, POPUP_POLL_INTERVAL_MS);
+    });
   }
 
   private async loginGoogle(
@@ -324,7 +593,7 @@ class AuthWeb implements Auth {
       authUrl.searchParams.set("redirect_uri", redirectUri);
       authUrl.searchParams.set("response_type", "id_token token code");
       authUrl.searchParams.set("scope", scopes.join(" "));
-      authUrl.searchParams.set("nonce", Math.random().toString(36).slice(2));
+      authUrl.searchParams.set("nonce", crypto.randomUUID());
       authUrl.searchParams.set("access_type", "offline");
       authUrl.searchParams.set("prompt", "consent");
 
@@ -348,53 +617,41 @@ class AuthWeb implements Auth {
         return;
       }
 
-      const checkInterval = setInterval(() => {
-        try {
-          if (popup.closed) {
-            clearInterval(checkInterval);
-            reject(new Error("cancelled"));
-            return;
+      void this.waitForPopupRedirect(
+        popup,
+        redirectUri,
+        "Google",
+        (url) => {
+          const hash = new URL(url).hash.slice(1);
+          const params = new URLSearchParams(hash);
+          const idToken = params.get("id_token");
+          const accessToken = params.get("access_token");
+          const expiresIn = params.get("expires_in");
+          const code = params.get("code");
+
+          if (!idToken) {
+            throw new Error("No id_token in response");
           }
 
-          const url = popup.location.href;
-          if (url.startsWith(redirectUri)) {
-            clearInterval(checkInterval);
-            popup.close();
+          this._grantedScopes = scopes;
+          this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
 
-            const hash = new URL(url).hash.slice(1);
-            const params = new URLSearchParams(hash);
-            const idToken = params.get("id_token");
-            const accessToken = params.get("access_token");
-            const expiresIn = params.get("expires_in");
-            const code = params.get("code");
-
-            if (idToken) {
-              this._grantedScopes = scopes;
-              if (this._storageAdapter) {
-                this._storageAdapter.save(SCOPES_KEY, JSON.stringify(scopes));
-              } else {
-                localStorage.setItem(SCOPES_KEY, JSON.stringify(scopes));
-              }
-
-              const user: AuthUser = {
-                provider: "google",
-                idToken,
-                accessToken: accessToken ?? undefined,
-                serverAuthCode: code ?? undefined,
-                scopes,
-                expirationTime: expiresIn
-                  ? Date.now() + parseInt(expiresIn) * 1000
-                  : undefined,
-                ...this.decodeGoogleJwt(idToken),
-              };
-              this.updateUser(user);
-              resolve();
-            } else {
-              reject(new Error("No id_token in response"));
-            }
-          }
-        } catch {}
-      }, 100);
+          const user: AuthUser = {
+            provider: "google",
+            idToken,
+            accessToken: accessToken ?? undefined,
+            serverAuthCode: code ?? undefined,
+            scopes,
+            expirationTime: expiresIn
+              ? Date.now() + parseInt(expiresIn, 10) * 1000
+              : undefined,
+            ...this.decodeGoogleJwt(idToken),
+          };
+          this.updateUser(user);
+        },
+      )
+        .then(() => resolve())
+        .catch((error: unknown) => reject(error));
     });
   }
 
@@ -407,7 +664,8 @@ class AuthWeb implements Auth {
         name: decoded.name,
         photo: decoded.picture,
       };
-    } catch {
+    } catch (error) {
+      logger.warn("Failed to decode Google ID token", { error: String(error) });
       return {};
     }
   }
@@ -477,58 +735,42 @@ class AuthWeb implements Auth {
         return;
       }
 
-      const checkInterval = setInterval(async () => {
-        try {
-          if (popup.closed) {
-            clearInterval(checkInterval);
-            reject(new Error("cancelled"));
-            return;
+      void this.waitForPopupRedirect(
+        popup,
+        redirectUri,
+        "Microsoft",
+        async (url) => {
+          const urlObj = new URL(url);
+          const code = urlObj.searchParams.get("code");
+          const returnedState = urlObj.searchParams.get("state");
+          const error = urlObj.searchParams.get("error");
+          const errorDescription = urlObj.searchParams.get("error_description");
+
+          if (error) {
+            throw new Error(errorDescription ?? error);
           }
 
-          const url = popup.location.href;
-          if (url.startsWith(redirectUri)) {
-            clearInterval(checkInterval);
-            popup.close();
-
-            const urlObj = new URL(url);
-            const code = urlObj.searchParams.get("code");
-            const returnedState = urlObj.searchParams.get("state");
-            const error = urlObj.searchParams.get("error");
-            const errorDescription =
-              urlObj.searchParams.get("error_description");
-
-            if (error) {
-              reject(new Error(errorDescription ?? error));
-              return;
-            }
-
-            if (returnedState !== state) {
-              reject(new Error("State mismatch - possible CSRF attack"));
-              return;
-            }
-
-            if (!code) {
-              reject(new Error("No authorization code in response"));
-              return;
-            }
-
-            try {
-              await this.exchangeMicrosoftCodeForTokens(
-                code,
-                codeVerifier,
-                clientId,
-                redirectUri,
-                effectiveTenant,
-                nonce,
-                effectiveScopes,
-              );
-              resolve();
-            } catch (e) {
-              reject(e);
-            }
+          if (returnedState !== state) {
+            throw new Error("State mismatch - possible CSRF attack");
           }
-        } catch {}
-      }, 100);
+
+          if (!code) {
+            throw new Error("No authorization code in response");
+          }
+
+          await this.exchangeMicrosoftCodeForTokens(
+            code,
+            codeVerifier,
+            clientId,
+            redirectUri,
+            effectiveTenant,
+            nonce,
+            effectiveScopes,
+          );
+        },
+      )
+        .then(() => resolve())
+        .catch((error: unknown) => reject(error));
     });
   }
 
@@ -606,22 +848,11 @@ class AuthWeb implements Auth {
     const expiresIn = json.expires_in;
 
     if (refreshToken) {
-      if (this._storageAdapter) {
-        this._storageAdapter.save("microsoft_refresh_token", refreshToken);
-      } else {
-        localStorage.setItem(
-          "nitro_auth_microsoft_refresh_token",
-          refreshToken,
-        );
-      }
+      this.saveRefreshToken(refreshToken);
     }
 
     this._grantedScopes = scopes;
-    if (this._storageAdapter) {
-      this._storageAdapter.save(SCOPES_KEY, JSON.stringify(scopes));
-    } else {
-      localStorage.setItem(SCOPES_KEY, JSON.stringify(scopes));
-    }
+    this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
 
     const user: AuthUser = {
       provider: "microsoft",
@@ -629,7 +860,7 @@ class AuthWeb implements Auth {
       accessToken: accessToken ?? undefined,
       scopes,
       expirationTime: expiresIn
-        ? Date.now() + parseInt(expiresIn) * 1000
+        ? Date.now() + parseInt(expiresIn, 10) * 1000
         : undefined,
       ...claims,
     };
@@ -656,7 +887,10 @@ class AuthWeb implements Auth {
         email: decoded.preferred_username ?? decoded.email,
         name: decoded.name,
       };
-    } catch {
+    } catch (error) {
+      logger.warn("Failed to decode Microsoft ID token", {
+        error: String(error),
+      });
       return {};
     }
   }
@@ -727,17 +961,14 @@ class AuthWeb implements Auth {
     this._grantedScopes = [];
     this.removeFromCache(CACHE_KEY);
     this.removeFromCache(SCOPES_KEY);
-    this.removeFromCache("microsoft_refresh_token");
+    this.removeFromCache(MS_REFRESH_TOKEN_KEY);
     this.notify();
   }
 
   private updateUser(user: AuthUser) {
     this._currentUser = user;
-    if (this._storageAdapter) {
-      this._storageAdapter.save(CACHE_KEY, JSON.stringify(user));
-    } else {
-      localStorage.setItem(CACHE_KEY, JSON.stringify(user));
-    }
+    const userToPersist = this.sanitizeUserForPersistence(user);
+    this.saveValue(CACHE_KEY, JSON.stringify(userToPersist));
     this.notify();
   }
 
@@ -745,12 +976,12 @@ class AuthWeb implements Auth {
     logger.setEnabled(enabled);
   }
 
-  setStorageAdapter(adapter: AuthStorageAdapter | undefined): void {
-    this._storageAdapter = adapter;
-    if (adapter) {
-      this.loadFromCache();
-      this.notify();
-    }
+  setWebStorageAdapter(adapter: JSStorageAdapter | undefined): void {
+    this._storageAdapter = adapter
+      ? this.createWebStorageDriver(adapter)
+      : undefined;
+    this.loadFromCache();
+    this.notify();
   }
 
   name = "Auth";

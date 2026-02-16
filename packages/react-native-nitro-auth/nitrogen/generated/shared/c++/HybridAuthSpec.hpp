@@ -21,8 +21,6 @@ namespace margelo::nitro::NitroAuth { enum class AuthProvider; }
 namespace margelo::nitro::NitroAuth { struct LoginOptions; }
 // Forward declaration of `AuthTokens` to properly resolve imports.
 namespace margelo::nitro::NitroAuth { struct AuthTokens; }
-// Forward declaration of `HybridAuthStorageAdapterSpec` to properly resolve imports.
-namespace margelo::nitro::NitroAuth { class HybridAuthStorageAdapterSpec; }
 
 #include "AuthUser.hpp"
 #include <optional>
@@ -33,8 +31,6 @@ namespace margelo::nitro::NitroAuth { class HybridAuthStorageAdapterSpec; }
 #include "LoginOptions.hpp"
 #include "AuthTokens.hpp"
 #include <functional>
-#include <memory>
-#include "HybridAuthStorageAdapterSpec.hpp"
 
 namespace margelo::nitro::NitroAuth {
 
@@ -79,7 +75,6 @@ namespace margelo::nitro::NitroAuth {
       virtual std::function<void()> onAuthStateChanged(const std::function<void(const std::optional<AuthUser>& /* user */)>& callback) = 0;
       virtual std::function<void()> onTokensRefreshed(const std::function<void(const AuthTokens& /* tokens */)>& callback) = 0;
       virtual void setLoggingEnabled(bool enabled) = 0;
-      virtual void setStorageAdapter(const std::optional<std::shared_ptr<HybridAuthStorageAdapterSpec>>& adapter) = 0;
 
     protected:
       // Hybrid Setup

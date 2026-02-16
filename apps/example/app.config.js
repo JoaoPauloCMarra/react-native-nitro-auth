@@ -33,11 +33,13 @@ export default {
           },
         },
       ],
+      "react-native-nitro-storage",
       [
         "react-native-nitro-auth",
         {
           ios: {
             googleClientId: process.env.GOOGLE_IOS_CLIENT_ID,
+            googleServerClientId: process.env.GOOGLE_SERVER_CLIENT_ID,
             googleUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME,
             appleSignIn: true,
             microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
@@ -61,6 +63,8 @@ export default {
       microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
       microsoftTenant: process.env.MICROSOFT_TENANT,
       microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,
+      // Use localStorage for web (persists across browser sessions)
+      nitroAuthWebStorage: "local",
     },
     experiments: {
       typedRoutes: true,

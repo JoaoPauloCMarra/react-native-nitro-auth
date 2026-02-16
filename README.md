@@ -12,12 +12,13 @@ Nitro Auth is a modern authentication library for React Native built on top of [
 
 Nitro Auth is designed to replace legacy modules like `@react-native-google-signin/google-signin` with a modern, high-performance architecture.
 
-| Feature         | Legacy Modules               | Nitro Auth                     |
-| :-------------- | :--------------------------- | :----------------------------- |
-| **Performance** | Async bridge overhead (JSON) | **Direct JSI C++ (Zero-copy)** |
-| **Persistence** | Varies / Manual              | **Built-in & Automatic**       |
-| **Setup**       | Manual async initialization  | **Sync & declarative plugins** |
-| **Types**       | Manual / Brittle             | **Fully Generated (Nitrogen)** |
+| Feature           | Legacy Modules               | Nitro Auth                                 |
+| :---------------- | :--------------------------- | :----------------------------------------- |
+| **Performance**   | Async bridge overhead (JSON) | **Direct JSI C++ (Zero-copy)**             |
+| **Storage**       | Varies / Hidden defaults     | **In-memory only (app-owned persistence)** |
+| **Setup**         | Manual async initialization  | **Sync & declarative plugins**             |
+| **Types**         | Manual / Brittle             | **Fully Generated (Nitrogen)**             |
+| **Provider Data** | Varies                       | **Normalized auth payload**                |
 
 ## Features
 
@@ -29,19 +30,24 @@ Nitro Auth is designed to replace legacy modules like `@react-native-google-sign
 - **Auto-Refresh**: Synchronous access to tokens with automatic silent refresh.
 - **Google One-Tap / Sheet**: Modern login experience on Android (Credential Manager) and iOS (Sign-In Sheet).
 - **Error Metadata**: Detailed native error messages for easier debugging.
-- **Custom Storage**: Pluggable storage adapters for secure persistence (e.g. Keychain, MMKV, AsyncStorage).
-- **Refresh Interceptors**: Listen to token updates globally.
+- **Normalized Provider Payload**: Exposes provider/user/token fields in a consistent cross-platform shape.
+- **App-Owned Persistence**: The package does not persist auth data. Apps decide what to persist and where.
+
+## Design Philosophy
+
+This is an **auth-only package** - it does NOT store any data on the device by default. The package provides:
+
+- Login/logout functionality for Google, Apple, and Microsoft
+- Token management (access token, refresh token, ID token)
+- Scope management (request/revoke scopes)
+- Consistent provider/user/token field exposure across iOS, Android, and Web
+
+**Storage is the responsibility of the app using this package.** Use your own storage layer (for example [react-native-nitro-storage](https://github.com/JoaoPauloCMarra/react-native-nitro-storage)) to persist app-level auth snapshots/tokens when needed.
 
 ## Installation
 
 ```bash
 bun add react-native-nitro-auth react-native-nitro-modules
-# or
-npm install react-native-nitro-auth react-native-nitro-modules
-# or
-yarn add react-native-nitro-auth react-native-nitro-modules
-# or
-pnpm add react-native-nitro-auth react-native-nitro-modules
 ```
 
 For Expo projects, rebuild native code after installation:
@@ -58,37 +64,45 @@ Fastest way to confirm the package and Microsoft login work:
    In [Azure Portal](https://portal.azure.com) → **Azure Active Directory** → **App registrations** → **New registration**:
    - Name: e.g. `Nitro Auth Example`
    - Supported account types: **Accounts in any organizational directory and personal Microsoft accounts**
-   - Redirect URI (add after creation):  
-     - **Android**: `msauth://com.auth.example/<client-id>`  
+   - Redirect URI (add after creation):
+     - **Android**: `msauth://com.auth.example/<client-id>`
      - **iOS**: `msauth.com.auth.example://auth` (use your bundle id)
    - Under **Authentication** → **Platform configurations** → add **Mobile and desktop applications** with the Android redirect URI above and the iOS one if testing on iOS.  
-   Copy the **Application (client) ID**.
+     Copy the **Application (client) ID**.
 
 2. **Env file**  
    From the repo root:
+
    ```bash
    cd apps/example
    cp .env.example .env.local
    ```
+
    Edit `.env.local` and set at least:
+
    ```bash
    MICROSOFT_CLIENT_ID=<your-application-client-id>
    MICROSOFT_TENANT=common
    ```
+
    (Google/Apple can stay placeholder if you only care about Microsoft.)
 
 3. **Run the app**  
    From the **monorepo root**:
+
    ```bash
    bun install
    bun run start
    ```
+
    In a second terminal:
+
    ```bash
    bun run example:android
    # or
    bun run example:ios
    ```
+
    Wait for the app to install and open.
 
 4. **Test Microsoft**  
@@ -297,13 +311,18 @@ Nitro Auth reads web configuration from `expo.extra`:
       "microsoftClientId": "YOUR_AZURE_AD_CLIENT_ID",
       "microsoftTenant": "common",
       "microsoftB2cDomain": "your-tenant.b2clogin.com",
-      "appleWebClientId": "com.example.web"
+      "appleWebClientId": "com.example.web",
+      "nitroAuthWebStorage": "session",
+      "nitroAuthPersistTokensOnWeb": false
     }
   }
 }
 ```
 
 For Apple web sign-in, `appleWebClientId` must be your Apple Service ID. For Microsoft web, make sure your Azure app includes a Web redirect URI matching your site.
+
+- `nitroAuthWebStorage`: `"session"` (default), `"local"`, or `"memory"`.
+- `nitroAuthPersistTokensOnWeb`: `false` by default (recommended). Set `true` only if you need cross-reload token persistence.
 
 ## Quick Start
 
@@ -453,7 +472,11 @@ If you previously called `GoogleSignin.configure()` at app startup, remove it. N
 
 ### Silent Restore
 
-Automatically restore the user session on app startup. This is faster than a full login and works offline if the session is cached.
+Attempts to restore provider SDK sessions on app startup.
+
+- Google: restore is supported via provider SDK session state.
+- Apple: provider credentials are re-requested by OS flow.
+- Microsoft: no internal persistence; restore requires your app/backend session strategy.
 
 ```tsx
 useEffect(() => {
@@ -510,46 +533,53 @@ const handleCalendar = async () => {
 };
 ```
 
-### Pluggable Storage Adapters
+### App-Owned Persistence
 
-Nitro Auth persists the session automatically. By default, it uses secure storage on native (Keychain on iOS, EncryptedSharedPreferences on Android) and `localStorage` on web.
+Nitro Auth is intentionally stateless in-process. Persist only what your app needs.
 
-#### 1) JS Storage (AsyncStorage, MMKV, etc.)
-
-Easily swap the default storage with your preferred library from the JS layer:
+#### Using react-native-nitro-storage (Recommended)
 
 ```ts
-import { AuthService, type JSStorageAdapter } from "react-native-nitro-auth";
-import { MMKV } from "react-native-mmkv";
+import { AuthService, type AuthUser } from "react-native-nitro-auth";
+import { createStorageItem, StorageScope } from "react-native-nitro-storage";
 
-const storage = new MMKV();
-
-const mmkvAdapter: JSStorageAdapter = {
-  save: (key, value) => storage.set(key, value),
-  load: (key) => storage.getString(key),
-  remove: (key) => storage.delete(key),
+type AuthSnapshot = {
+  user: AuthUser | undefined;
+  scopes: string[];
+  updatedAt: number | undefined;
 };
 
-// Set it once at app startup
-AuthService.setJSStorageAdapter(mmkvAdapter);
+const authSnapshotItem = createStorageItem<AuthSnapshot>({
+  key: "auth_snapshot",
+  scope: StorageScope.Disk,
+  defaultValue: {
+    user: undefined,
+    scopes: [],
+    updatedAt: undefined,
+  },
+});
+
+// Save on auth changes (do not overwrite snapshot with empty user on app refresh)
+AuthService.onAuthStateChanged((user) => {
+  if (!user) return;
+
+  authSnapshotItem.set({
+    user,
+    scopes: AuthService.grantedScopes,
+    updatedAt: Date.now(),
+  });
+});
+
+// Clear on logout
+function logout() {
+  AuthService.logout();
+  authSnapshotItem.set({
+    user: undefined,
+    scopes: [],
+    updatedAt: undefined,
+  });
+}
 ```
-
-> [!NOTE]
-> Call `setJSStorageAdapter` before your first `useAuth()` or `AuthService` call so cached values are loaded before UI renders.
-
-#### 2) Native Storage (Keychain, etc.)
-
-For maximum security, you can implement a native HybridObject (C++, Swift, or Kotlin) and pass it to Nitro. This runs directly in memory at the C++ layer.
-
-```ts
-import { AuthService } from "react-native-nitro-auth";
-// Import your native Nitro module
-import { KeychainStorage } from "./native/KeychainStorage";
-
-AuthService.setStorageAdapter(KeychainStorage);
-```
-
-**Production recommendation:** If you need custom storage policies, auditability, or a different encryption model, provide your own adapter (Keychain, EncryptedSharedPreferences, or a secure JS store). See [Pluggable Storage Adapters](#pluggable-storage-adapters) above.
 
 ### Production Readiness
 
@@ -559,7 +589,7 @@ Nitro Auth is suitable for production use:
 - **Apple Sign-In**: Supported on iOS and Web (not available on Android).
 - **Microsoft (Azure AD / B2C)**: Login, incremental scopes, and token refresh are supported on all platforms. Uses PKCE, state, and nonce for security.
 
-**Token storage:** By default, tokens are stored in secure platform storage on native (Keychain / EncryptedSharedPreferences) and in `localStorage` on web. On Android API < 23, storage falls back to unencrypted `SharedPreferences`. For high-security web requirements or custom storage needs, configure a [custom storage adapter](#pluggable-storage-adapters).
+**Token storage:** This package provides auth only and does not persist session data by default. Your app controls persistence strategy and security policy.
 
 ### Logging & Debugging
 
@@ -666,54 +696,6 @@ if (user?.serverAuthCode) {
 }
 ```
 
-### Custom Storage Adapter
-
-By default, Nitro Auth uses secure native storage on iOS/Android and `localStorage` on web. You can provide a custom adapter for different security or storage requirements.
-
-> [!IMPORTANT]
-> `AuthStorageAdapter` must be implemented as a **native Nitro HybridObject** in C++, Swift, or Kotlin. Plain JavaScript objects are not supported due to Nitro's type system. See [Nitro Hybrid Objects documentation](https://nitro.margelo.com/docs/hybrid-objects) for implementation details.
-
-**Example (Swift):**
-
-```swift
-class HybridKeychainStorage: HybridAuthStorageAdapterSpec {
-  func save(key: String, value: String) {
-    // Save to Keychain
-  }
-
-  func load(key: String) -> String? {
-    // Load from Keychain
-  }
-
-  func remove(key: String) {
-    // Remove from Keychain
-  }
-}
-```
-
-**Usage (TypeScript):**
-
-```ts
-import { NitroModules } from "react-native-nitro-modules";
-import { AuthService, AuthStorageAdapter } from "react-native-nitro-auth";
-
-const keychainStorage =
-  NitroModules.createHybridObject<AuthStorageAdapter>("KeychainStorage");
-AuthService.setStorageAdapter(keychainStorage);
-```
-
-### Token Refresh Listeners
-
-Perfect for updating your API client (e.g., Axios/Fetch) whenever tokens are refreshed in the background:
-
-```ts
-AuthService.onTokensRefreshed((tokens) => {
-  console.log("Tokens were updated!", tokens.accessToken);
-  apiClient.defaults.headers.common["Authorization"] =
-    `Bearer ${tokens.accessToken}`;
-});
-```
-
 ### Google One-Tap & Sheet
 
 Explicitly enable the modern One-Tap flow on Android or the Sign-In Sheet on iOS:
@@ -756,81 +738,186 @@ This is useful for scenarios where:
 
 ## API Reference
 
-### useAuth Hook
+### Package Exports
 
-| Property          | Type                              | Description                                            |
-| ----------------- | --------------------------------- | ------------------------------------------------------ |
-| `user`            | `AuthUser \| undefined`           | Current authenticated user (includes `serverAuthCode`) |
-| `scopes`          | `string[]`                        | Currently granted OAuth scopes                         |
-| `loading`         | `boolean`                         | True during auth operations                            |
-| `error`           | `Error \| undefined`              | Last error that occurred                               |
-| `hasPlayServices` | `boolean`                         | (Android) True if Play Services available              |
-| `login`           | `(provider, options?) => Promise` | Start login flow                                       |
-| `logout`          | `() => void`                      | Clear session (synchronous)                            |
-| `silentRestore`   | `() => Promise<void>`             | Restore session automatically on startup               |
-| `requestScopes`   | `(scopes) => Promise`             | Request additional OAuth scopes                        |
-| `revokeScopes`    | `(scopes) => Promise`             | Revoke previously granted scopes                       |
-| `getAccessToken`  | `() => Promise<string?>`          | Get current access token (auto-refreshes)              |
-| `refreshToken`    | `() => Promise<AuthTokens>`       | Explicitly refresh and return new tokens               |
+```ts
+import {
+  AuthService,
+  SocialButton,
+  useAuth,
+  type UseAuthReturn,
+  type Auth,
+  type AuthUser,
+  type AuthTokens,
+  type AuthProvider,
+  type AuthErrorCode,
+  type LoginOptions,
+} from "react-native-nitro-auth";
+```
 
-### AuthService
+### Core Types
 
-| Method                     | Type                                      | Description                                        |
-| -------------------------- | ----------------------------------------- | -------------------------------------------------- |
-| `login`                    | `(provider, options?) => Promise<void>`   | Start login flow                                   |
-| `logout`                   | `() => void`                              | Clear session                                      |
-| `silentRestore`            | `() => Promise<void>`                     | Restore session on startup                         |
-| `requestScopes`            | `(scopes) => Promise<void>`               | Request additional OAuth scopes                    |
-| `revokeScopes`             | `(scopes) => Promise<void>`               | Revoke previously granted scopes                   |
-| `getAccessToken`           | `() => Promise<string \| undefined>`      | Get current access token (auto-refreshes)          |
-| `refreshToken`             | `() => Promise<AuthTokens>`               | Explicitly refresh and return new tokens           |
-| `onAuthStateChanged`       | `(callback) => () => void`                | Subscribe to auth state changes                    |
-| `onTokensRefreshed`        | `(callback) => () => void`                | Subscribe to token refresh events                  |
-| `setLoggingEnabled`        | `(enabled: boolean) => void`              | Enable or disable verbose logging                  |
-| `setStorageAdapter`        | `(adapter?: AuthStorageAdapter) => void`  | Set native storage adapter                         |
-| `setJSStorageAdapter`      | `(adapter?: JSStorageAdapter) => Promise<void>` | Set JS storage adapter                       |
+| Type              | Definition                                                                                                                                                                                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AuthProvider`    | `"google" \| "apple" \| "microsoft"`                                                                                                                                                                                                          |
+| `AuthErrorCode`   | `"cancelled" \| "timeout" \| "popup_blocked" \| "network_error" \| "configuration_error" \| "unsupported_provider" \| "invalid_state" \| "invalid_nonce" \| "token_error" \| "no_id_token" \| "parse_error" \| "refresh_failed" \| "unknown"` |
+| `MicrosoftPrompt` | `"login" \| "consent" \| "select_account" \| "none"`                                                                                                                                                                                          |
 
-### AuthUser
+### `AuthUser`
 
-| Field            | Type                 | Description                                      |
-| --------------- | -------------------- | ------------------------------------------------ |
-| `provider`      | `"google" \| "apple" \| "microsoft"` | Provider that authenticated the user |
-| `email`         | `string?`            | User email (if provided)                         |
-| `name`          | `string?`            | User display name                                |
-| `photo`         | `string?`            | Profile image URL (Google only)                  |
-| `idToken`       | `string?`            | OIDC ID token                                    |
-| `accessToken`   | `string?`            | Access token (if available)                      |
-| `serverAuthCode`| `string?`            | Google server auth code (if configured)          |
-| `scopes`        | `string[]?`          | Granted OAuth scopes                             |
-| `expirationTime`| `number?`            | Token expiration time (ms since epoch)           |
-| `underlyingError` | `string?`          | Raw native error message                         |
+| Field             | Type                    | Description                                                                |
+| ----------------- | ----------------------- | -------------------------------------------------------------------------- |
+| `provider`        | `AuthProvider`          | Provider that authenticated the user                                       |
+| `email`           | `string \| undefined`   | User email                                                                 |
+| `name`            | `string \| undefined`   | Display name                                                               |
+| `photo`           | `string \| undefined`   | Profile image URL (Google)                                                 |
+| `idToken`         | `string \| undefined`   | OIDC ID token                                                              |
+| `accessToken`     | `string \| undefined`   | OAuth access token                                                         |
+| `refreshToken`    | `string \| undefined`   | OAuth refresh token                                                        |
+| `serverAuthCode`  | `string \| undefined`   | Google server auth code (legacy Android flow + backend exchange scenarios) |
+| `scopes`          | `string[] \| undefined` | Granted scopes for current session                                         |
+| `expirationTime`  | `number \| undefined`   | Expiration timestamp in milliseconds since epoch                           |
+| `underlyingError` | `string \| undefined`   | Raw provider/native error message                                          |
 
-### LoginOptions
+### `AuthTokens`
 
-| Option               | Type       | Platform | Description                                     |
-| -------------------- | ---------- | -------- | ----------------------------------------------- |
-| `scopes`             | `string[]` | All      | Required OAuth scopes (default: email, profile) |
-| `loginHint`          | `string`   | All      | Pre-fill email address in the login picker      |
-| `useOneTap`          | `boolean`  | Android  | Enable Google One-Tap (Credential Manager)      |
-| `useSheet`           | `boolean`  | iOS      | Enable iOS Google Sign-In Sheet                 |
-| `forceAccountPicker` | `boolean`  | All      | Always show the account selection screen        |
-| `useLegacyGoogleSignIn` | `boolean` | Android | Use legacy Google Sign-In (supports `serverAuthCode`) |
-| `tenant`             | `string`   | Microsoft | Azure AD tenant (`common`, `organizations`, etc.) |
-| `prompt`             | `string`   | Microsoft | Prompt behavior (`login`, `consent`, `select_account`, `none`) |
+| Field            | Type                  | Description                   |
+| ---------------- | --------------------- | ----------------------------- |
+| `accessToken`    | `string \| undefined` | Refreshed access token        |
+| `idToken`        | `string \| undefined` | Refreshed ID token            |
+| `refreshToken`   | `string \| undefined` | Refresh token (if available)  |
+| `expirationTime` | `number \| undefined` | Optional expiration timestamp |
 
-### SocialButton Props
+### `LoginOptions`
 
-| Prop           | Type                                           | Default     | Description                                   |
-| -------------- | ---------------------------------------------- | ----------- | --------------------------------------------- |
-| `provider`     | `"google" \| "apple" \| "microsoft"`           | required    | Authentication provider                       |
-| `variant`      | `"primary" \| "outline" \| "white" \| "black"` | `"primary"` | Button style variant                          |
-| `onPress`      | `() => void`                                   | —           | Custom handler (disables default login)       |
-| `onSuccess`    | `(user: AuthUser) => void`                     | —           | Called with user data on success (auto-login) |
-| `onError`      | `(error: unknown) => void`                     | —           | Called on failure (auto-login)                |
-| `disabled`     | `boolean`                                      | `false`     | Disable button interaction                    |
-| `style`        | `ViewStyle`                                    | —           | Custom container styles                       |
-| `textStyle`    | `TextStyle`                                    | —           | Custom text styles                            |
-| `borderRadius` | `number`                                       | `8`         | Button border radius                          |
+| Option                  | Type              | Platform  | Description                                                                       |
+| ----------------------- | ----------------- | --------- | --------------------------------------------------------------------------------- |
+| `scopes`                | `string[]`        | All       | Requested scopes (defaults are provider-specific)                                 |
+| `loginHint`             | `string`          | All       | Prefills account identifier                                                       |
+| `useOneTap`             | `boolean`         | Android   | Use Credential Manager/One-Tap flow                                               |
+| `useSheet`              | `boolean`         | iOS       | Use native Google Sign-In sheet                                                   |
+| `forceAccountPicker`    | `boolean`         | All       | Always show account chooser                                                       |
+| `useLegacyGoogleSignIn` | `boolean`         | Android   | Use legacy Google Sign-In (required when you need `serverAuthCode`)               |
+| `tenant`                | `string`          | Microsoft | Tenant (`common`, `organizations`, `consumers`, tenant id, or full authority URL) |
+| `prompt`                | `MicrosoftPrompt` | Microsoft | Prompt behavior                                                                   |
+
+### `useAuth()`
+
+```ts
+declare function useAuth(): UseAuthReturn;
+```
+
+| Property          | Type                                                                | Description                                          |
+| ----------------- | ------------------------------------------------------------------- | ---------------------------------------------------- |
+| `user`            | `AuthUser \| undefined`                                             | Current in-memory user                               |
+| `scopes`          | `string[]`                                                          | Current granted scopes                               |
+| `loading`         | `boolean`                                                           | `true` while an auth operation is in-flight          |
+| `error`           | `Error \| undefined`                                                | Last operation error                                 |
+| `hasPlayServices` | `boolean`                                                           | Android Play Services availability                   |
+| `login`           | `(provider: AuthProvider, options?: LoginOptions) => Promise<void>` | Starts provider login                                |
+| `logout`          | `() => void`                                                        | Clears current session                               |
+| `requestScopes`   | `(scopes: string[]) => Promise<void>`                               | Requests additional scopes                           |
+| `revokeScopes`    | `(scopes: string[]) => Promise<void>`                               | Revokes scopes in current session                    |
+| `getAccessToken`  | `() => Promise<string \| undefined>`                                | Returns access token, auto-refreshing when supported |
+| `refreshToken`    | `() => Promise<AuthTokens>`                                         | Explicit refresh                                     |
+| `silentRestore`   | `() => Promise<void>`                                               | Restores provider SDK session (if available)         |
+
+### `AuthService`
+
+Synchronous state + async operations (useful outside React trees).
+
+#### Readonly state
+
+| Property          | Type                    | Description                        |
+| ----------------- | ----------------------- | ---------------------------------- |
+| `name`            | `string`                | Hybrid object name (`"Auth"`)      |
+| `currentUser`     | `AuthUser \| undefined` | Current user snapshot              |
+| `grantedScopes`   | `string[]`              | Current scope snapshot             |
+| `hasPlayServices` | `boolean`               | Android Play Services availability |
+
+#### Methods
+
+| Method               | Signature                                                | Description                      |
+| -------------------- | -------------------------------------------------------- | -------------------------------- |
+| `login`              | `(provider, options?) => Promise<void>`                  | Starts login                     |
+| `logout`             | `() => void`                                             | Clears session                   |
+| `requestScopes`      | `(scopes) => Promise<void>`                              | Incremental auth                 |
+| `revokeScopes`       | `(scopes) => Promise<void>`                              | Scope revoke                     |
+| `getAccessToken`     | `() => Promise<string \| undefined>`                     | Access token getter with refresh |
+| `refreshToken`       | `() => Promise<AuthTokens>`                              | Explicit token refresh           |
+| `silentRestore`      | `() => Promise<void>`                                    | Restore provider SDK session     |
+| `onAuthStateChanged` | `(callback: (user?: AuthUser) => void) => () => void`    | Auth change listener             |
+| `onTokensRefreshed`  | `(callback: (tokens: AuthTokens) => void) => () => void` | Token refresh listener           |
+| `setLoggingEnabled`  | `(enabled: boolean) => void`                             | Debug logging toggle             |
+| `dispose`            | `() => void`                                             | Disposes hybrid object           |
+| `equals`             | `(other: unknown) => boolean`                            | Hybrid object identity check     |
+
+### Storage Contract
+
+Nitro Auth does not provide persistence APIs. Persist the auth data you need in your app layer (for example with `react-native-nitro-storage`, MMKV, Keychain wrappers, or backend-issued sessions).
+
+### `SocialButton`
+
+| Prop           | Type                                           | Default     | Description                                 |
+| -------------- | ---------------------------------------------- | ----------- | ------------------------------------------- |
+| `provider`     | `AuthProvider`                                 | required    | Provider                                    |
+| `variant`      | `"primary" \| "outline" \| "white" \| "black"` | `"primary"` | Visual style                                |
+| `borderRadius` | `number`                                       | `8`         | Border radius                               |
+| `style`        | `ViewStyle`                                    | `undefined` | Container style override                    |
+| `textStyle`    | `TextStyle`                                    | `undefined` | Text style override                         |
+| `disabled`     | `boolean`                                      | `false`     | Disabled state                              |
+| `onPress`      | `() => void`                                   | `undefined` | Custom press handler (skips built-in login) |
+| `onSuccess`    | `(user: AuthUser) => void`                     | `undefined` | Called after successful default login       |
+| `onError`      | `(error: unknown) => void`                     | `undefined` | Called when default login fails             |
+
+### Config Plugin API (`app.json` / `app.config.js`)
+
+`plugins: [["react-native-nitro-auth", { ios: {...}, android: {...} }]]`
+
+#### iOS plugin options
+
+| Option                 | Type      | Description                                  |
+| ---------------------- | --------- | -------------------------------------------- |
+| `googleClientId`       | `string`  | Writes `GIDClientID`                         |
+| `googleServerClientId` | `string`  | Writes `GIDServerClientID`                   |
+| `googleUrlScheme`      | `string`  | Adds Google URL scheme                       |
+| `appleSignIn`          | `boolean` | Enables Apple Sign-In entitlement            |
+| `microsoftClientId`    | `string`  | Writes `MSALClientID` + MSAL redirect scheme |
+| `microsoftTenant`      | `string`  | Writes `MSALTenant`                          |
+| `microsoftB2cDomain`   | `string`  | Writes `MSALB2cDomain`                       |
+
+#### Android plugin options
+
+| Option               | Type     | Description                                                      |
+| -------------------- | -------- | ---------------------------------------------------------------- |
+| `googleClientId`     | `string` | Writes `nitro_auth_google_client_id` string                      |
+| `microsoftClientId`  | `string` | Writes `nitro_auth_microsoft_client_id` + redirect intent filter |
+| `microsoftTenant`    | `string` | Writes `nitro_auth_microsoft_tenant`                             |
+| `microsoftB2cDomain` | `string` | Writes `nitro_auth_microsoft_b2c_domain`                         |
+
+### Web runtime config (`expo.extra`)
+
+| Key                           | Type                               | Default     | Description                                               |
+| ----------------------------- | ---------------------------------- | ----------- | --------------------------------------------------------- |
+| `googleWebClientId`           | `string`                           | `undefined` | Google web OAuth client id                                |
+| `microsoftClientId`           | `string`                           | `undefined` | Microsoft app client id                                   |
+| `microsoftTenant`             | `string`                           | `"common"`  | Microsoft tenant/authority                                |
+| `microsoftB2cDomain`          | `string`                           | `undefined` | B2C domain when applicable                                |
+| `appleWebClientId`            | `string`                           | `undefined` | Apple Service ID                                          |
+| `nitroAuthWebStorage`         | `"session" \| "local" \| "memory"` | `"session"` | Storage for non-sensitive web cache                       |
+| `nitroAuthPersistTokensOnWeb` | `boolean`                          | `false`     | Persist sensitive tokens on web storage instead of memory |
+
+### Error semantics
+
+Errors are surfaced as `Error` with `message` as a normalized code when possible, and `underlyingError` with provider/native details.
+
+| Normalized message    | Meaning                                        |
+| --------------------- | ---------------------------------------------- |
+| `cancelled`           | User cancelled popup/login flow                |
+| `timeout`             | Provider popup did not complete before timeout |
+| `popup_blocked`       | Browser blocked popup opening                  |
+| `network_error`       | Network failure                                |
+| `configuration_error` | Missing/invalid provider configuration         |
 
 ## Platform Support
 

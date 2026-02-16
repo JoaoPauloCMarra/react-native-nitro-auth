@@ -34,7 +34,6 @@ target_sources(
   ../nitrogen/generated/android/NitroAuthOnLoad.cpp
   # Shared Nitrogen C++ sources
   ../nitrogen/generated/shared/c++/HybridAuthSpec.cpp
-  ../nitrogen/generated/shared/c++/HybridAuthStorageAdapterSpec.cpp
   # Android-specific Nitrogen C++ sources
   
 )

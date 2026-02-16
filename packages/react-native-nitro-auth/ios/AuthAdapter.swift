@@ -7,6 +7,11 @@ import CommonCrypto
 
 @objc
 public class AuthAdapter: NSObject {
+  private static let defaultMicrosoftScopes = ["openid", "email", "profile", "offline_access", "User.Read"]
+  private static var inMemoryMicrosoftRefreshToken: String?
+  private static var inMemoryMicrosoftScopes: [String] = defaultMicrosoftScopes
+  private static var inMemoryGoogleServerAuthCode: String?
+
   @objc
   public static func login(provider: String, scopes: [String], loginHint: String?, useSheet: Bool, forceAccountPicker: Bool = false, tenant: String? = nil, prompt: String? = nil, completion: @escaping (NSDictionary?, String?) -> Void) {
     if provider == "google" {
@@ -258,9 +263,9 @@ public class AuthAdapter: NSObject {
         let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
         
         if !refreshToken.isEmpty {
-          KeychainStore.set(refreshToken, for: "nitro_auth_microsoft_refresh_token")
+          inMemoryMicrosoftRefreshToken = refreshToken
         }
-        UserDefaults.standard.set(scopes, forKey: "nitro_auth_microsoft_scopes")
+        inMemoryMicrosoftScopes = scopes.isEmpty ? defaultMicrosoftScopes : scopes
         
         let resultData: [String: Any] = [
           "provider": "microsoft",
@@ -313,6 +318,9 @@ public class AuthAdapter: NSObject {
       return
     }
     
+    let serverAuthCode = result?.serverAuthCode ?? ""
+    inMemoryGoogleServerAuthCode = serverAuthCode.isEmpty ? nil : serverAuthCode
+
     let data: [String: Any] = [
       "provider": "google",
       "email": user.profile?.email ?? "",
@@ -320,7 +328,7 @@ public class AuthAdapter: NSObject {
       "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
       "idToken": user.idToken?.tokenString ?? "",
       "accessToken": user.accessToken.tokenString,
-      "serverAuthCode": result?.serverAuthCode ?? "",
+      "serverAuthCode": serverAuthCode,
       "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000,
       "underlyingError": ""
     ]
@@ -353,12 +361,11 @@ public class AuthAdapter: NSObject {
       }
       return
     }
-    guard getStoredMicrosoftRefreshToken() != nil else {
+    guard inMemoryMicrosoftRefreshToken != nil else {
       completion(nil, "No user logged in")
       return
     }
-    let storedScopes = UserDefaults.standard.array(forKey: "nitro_auth_microsoft_scopes") as? [String] ?? ["openid", "email", "profile", "offline_access", "User.Read"]
-    let mergedScopes = Array(Set(storedScopes + scopes))
+    let mergedScopes = Array(Set(inMemoryMicrosoftScopes + scopes))
     loginMicrosoft(scopes: mergedScopes, loginHint: nil, tenant: nil, prompt: nil, completion: completion)
   }
 
@@ -399,7 +406,7 @@ public class AuthAdapter: NSObject {
             "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
             "idToken": user.idToken?.tokenString ?? "",
             "accessToken": user.accessToken.tokenString,
-            "serverAuthCode": "",
+            "serverAuthCode": inMemoryGoogleServerAuthCode ?? "",
             "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000
           ]
           completion(data as NSDictionary)
@@ -413,7 +420,7 @@ public class AuthAdapter: NSObject {
   }
 
   private static func tryMicrosoftSilentRefresh(completion: @escaping (NSDictionary?) -> Void) {
-    guard let refreshToken = getStoredMicrosoftRefreshToken() else {
+    guard let refreshToken = inMemoryMicrosoftRefreshToken else {
       completion(nil)
       return
     }
@@ -459,7 +466,7 @@ public class AuthAdapter: NSObject {
         let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
         
         if !newRefreshToken.isEmpty {
-          KeychainStore.set(newRefreshToken, for: "nitro_auth_microsoft_refresh_token")
+          inMemoryMicrosoftRefreshToken = newRefreshToken
         }
         
         let resultData: [String: Any] = [
@@ -478,7 +485,7 @@ public class AuthAdapter: NSObject {
   }
 
   private static func tryMicrosoftRefreshForTokenRefresh(completion: @escaping (NSDictionary?, String?) -> Void) {
-    guard let refreshToken = getStoredMicrosoftRefreshToken() else {
+    guard let refreshToken = inMemoryMicrosoftRefreshToken else {
       completion(nil, "No user logged in")
       return
     }
@@ -523,7 +530,7 @@ public class AuthAdapter: NSObject {
         let expiresIn = json["expires_in"] as? Double ?? 0
         let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
         if !newRefreshToken.isEmpty {
-          KeychainStore.set(newRefreshToken, for: "nitro_auth_microsoft_refresh_token")
+          inMemoryMicrosoftRefreshToken = newRefreshToken
         }
         let tokensData: [String: Any] = [
           "accessToken": accessToken,
@@ -551,20 +558,9 @@ public class AuthAdapter: NSObject {
   @objc
   public static func logout() {
     GIDSignIn.sharedInstance.signOut()
-    KeychainStore.remove("nitro_auth_microsoft_refresh_token")
-    UserDefaults.standard.removeObject(forKey: "nitro_auth_microsoft_scopes")
-  }
-
-  private static func getStoredMicrosoftRefreshToken() -> String? {
-    if let token = KeychainStore.get("nitro_auth_microsoft_refresh_token") {
-      return token
-    }
-    if let legacy = UserDefaults.standard.string(forKey: "nitro_auth_microsoft_refresh_token") {
-      KeychainStore.set(legacy, for: "nitro_auth_microsoft_refresh_token")
-      UserDefaults.standard.removeObject(forKey: "nitro_auth_microsoft_refresh_token")
-      return legacy
-    }
-    return nil
+    inMemoryMicrosoftRefreshToken = nil
+    inMemoryMicrosoftScopes = defaultMicrosoftScopes
+    inMemoryGoogleServerAuthCode = nil
   }
 }
 

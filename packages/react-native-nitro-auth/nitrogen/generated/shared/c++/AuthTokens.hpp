@@ -42,11 +42,12 @@ namespace margelo::nitro::NitroAuth {
   public:
     std::optional<std::string> accessToken     SWIFT_PRIVATE;
     std::optional<std::string> idToken     SWIFT_PRIVATE;
+    std::optional<std::string> refreshToken     SWIFT_PRIVATE;
     std::optional<double> expirationTime     SWIFT_PRIVATE;
 
   public:
     AuthTokens() = default;
-    explicit AuthTokens(std::optional<std::string> accessToken, std::optional<std::string> idToken, std::optional<double> expirationTime): accessToken(accessToken), idToken(idToken), expirationTime(expirationTime) {}
+    explicit AuthTokens(std::optional<std::string> accessToken, std::optional<std::string> idToken, std::optional<std::string> refreshToken, std::optional<double> expirationTime): accessToken(accessToken), idToken(idToken), refreshToken(refreshToken), expirationTime(expirationTime) {}
 
   public:
     friend bool operator==(const AuthTokens& lhs, const AuthTokens& rhs) = default;
@@ -64,6 +65,7 @@ namespace margelo::nitro {
       return margelo::nitro::NitroAuth::AuthTokens(
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "accessToken"))),
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "idToken"))),
+        JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "refreshToken"))),
         JSIConverter<std::optional<double>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "expirationTime")))
       );
     }
@@ -71,6 +73,7 @@ namespace margelo::nitro {
       jsi::Object obj(runtime);
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "accessToken"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.accessToken));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "idToken"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.idToken));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "refreshToken"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.refreshToken));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "expirationTime"), JSIConverter<std::optional<double>>::toJSI(runtime, arg.expirationTime));
       return obj;
     }
@@ -84,6 +87,7 @@ namespace margelo::nitro {
       }
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "accessToken")))) return false;
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "idToken")))) return false;
+      if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "refreshToken")))) return false;
       if (!JSIConverter<std::optional<double>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "expirationTime")))) return false;
       return true;
     }
