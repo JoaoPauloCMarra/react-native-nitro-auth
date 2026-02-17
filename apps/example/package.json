@@ -9,11 +9,14 @@
     "android": "expo run:android",
     "prebuild": "expo prebuild",
     "prebuild:clean": "expo prebuild --clean",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@babel/runtime": "^7.28.6",
-    "dotenv": "^17.2.3",
+    "dotenv": "^17.3.1",
     "expo": "~54.0.33",
     "expo-asset": "~12.0.12",
     "expo-build-properties": "~1.0.10",
@@ -26,13 +29,16 @@
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
     "react-native-nitro-auth": "*",
-    "react-native-nitro-modules": "^0.33.7",
+    "react-native-nitro-modules": "^0.33.9",
+    "react-native-nitro-storage": "^0.3.1",
     "react-native-safe-area-context": "5.6.2",
     "react-native-screens": "~4.16.0",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
     "babel-plugin-module-resolver": "^5.0.2",
-    "babel-preset-expo": "~54.0.10"
+    "babel-preset-expo": "~54.0.10",
+    "eslint": "^10.0.0",
+    "eslint-config-expo-magic": "^2.0.2"
   }
 }

@@ -3,9 +3,7 @@
 package com.auth
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.os.Bundle
-import android.os.Build
 import android.util.Log
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
@@ -27,17 +25,12 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
 import java.util.UUID
-import org.json.JSONArray
 import org.json.JSONObject
 import android.util.Base64
 
 object AuthAdapter {
     private const val TAG = "AuthAdapter"
-    private const val PREF_NAME = "nitro_auth"
-    private const val SECURE_PREF_NAME = "nitro_auth_secure"
     
     private var appContext: Context? = null
     private var currentActivity: Activity? = null
@@ -51,47 +44,10 @@ object AuthAdapter {
     private var pendingMicrosoftTenant: String? = null
     private var pendingMicrosoftClientId: String? = null
     private var pendingMicrosoftB2cDomain: String? = null
-
-    private fun getPrefs(context: Context): SharedPreferences {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-                val securePrefs = EncryptedSharedPreferences.create(
-                    SECURE_PREF_NAME,
-                    masterKeyAlias,
-                    context,
-                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                )
-                migrateLegacyPrefsIfNeeded(context, securePrefs)
-                securePrefs
-            } else {
-                context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to initialize encrypted storage, falling back to SharedPreferences", e)
-            context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        }
-    }
-
-    private fun migrateLegacyPrefsIfNeeded(context: Context, securePrefs: SharedPreferences) {
-        val legacyPrefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        if (legacyPrefs.all.isEmpty() || securePrefs.all.isNotEmpty()) {
-            return
-        }
-        val editor = securePrefs.edit()
-        for ((key, value) in legacyPrefs.all) {
-            when (value) {
-                is String -> editor.putString(key, value)
-                is Boolean -> editor.putBoolean(key, value)
-                is Int -> editor.putInt(key, value)
-                is Long -> editor.putLong(key, value)
-                is Float -> editor.putFloat(key, value)
-            }
-        }
-        editor.apply()
-        legacyPrefs.edit().clear().apply()
-    }
+    
+    private var inMemoryMicrosoftRefreshToken: String? = null
+    private var inMemoryMicrosoftScopes: List<String> =
+        listOf("openid", "email", "profile", "offline_access", "User.Read")
 
     @JvmStatic
     private external fun nativeInitialize(context: Context)
@@ -141,11 +97,10 @@ object AuthAdapter {
     }
 
     fun onSignInSuccess(account: GoogleSignInAccount, scopes: List<String>) {
-        val ctx = appContext ?: return
-        saveUser(ctx, "google", account.email, account.displayName,
-                 account.photoUrl?.toString(), account.idToken, account.serverAuthCode, scopes)
+        appContext ?: return
+        val expirationTime = getJwtExpirationTimeMs(account.idToken)
         nativeOnLoginSuccess("google", account.email, account.displayName,
-                            account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode, scopes.toTypedArray(), null)
+                            account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode, scopes.toTypedArray(), expirationTime)
     }
 
     fun onSignInError(errorCode: Int, message: String?) {
@@ -393,12 +348,11 @@ object AuthAdapter {
             val email = claims["preferred_username"] ?: claims["email"]
             val name = claims["name"]
 
-            val ctx = appContext
-            if (ctx != null) {
-                saveUser(ctx, "microsoft", email, name, null, idToken, refreshToken, pendingMicrosoftScopes)
-                if (refreshToken.isNotEmpty()) {
-                    saveMicrosoftRefreshToken(ctx, refreshToken)
-                }
+            if (refreshToken.isNotEmpty()) {
+                inMemoryMicrosoftRefreshToken = refreshToken
+            }
+            inMemoryMicrosoftScopes = pendingMicrosoftScopes.ifEmpty {
+                listOf("openid", "email", "profile", "offline_access", "User.Read")
             }
 
             clearPkceState()
@@ -419,14 +373,12 @@ object AuthAdapter {
         }
     }
 
-    private fun saveMicrosoftRefreshToken(context: Context, refreshToken: String) {
-        val prefs = getPrefs(context)
-        prefs.edit().putString("microsoft_refresh_token", refreshToken).apply()
+    private fun saveMicrosoftRefreshToken(refreshToken: String) {
+        inMemoryMicrosoftRefreshToken = refreshToken
     }
 
-    private fun getMicrosoftRefreshToken(context: Context): String? {
-        val prefs = getPrefs(context)
-        return prefs.getString("microsoft_refresh_token", null)
+    private fun getMicrosoftRefreshToken(): String? {
+        return inMemoryMicrosoftRefreshToken
     }
 
     private fun clearPkceState() {
@@ -453,6 +405,15 @@ object AuthAdapter {
         } catch (e: Exception) {
             emptyMap()
         }
+    }
+
+    private fun getJwtExpirationTimeMs(idToken: String?): Long? {
+        if (idToken.isNullOrEmpty()) {
+            return null
+        }
+
+        val expSeconds = decodeJwt(idToken)["exp"]?.toLongOrNull() ?: return null
+        return expSeconds * 1000
     }
 
     private fun getMicrosoftClientIdFromResources(context: Context): String? {
@@ -553,6 +514,7 @@ object AuthAdapter {
         }
 
         if (googleIdTokenCredential != null) {
+            val expirationTime = getJwtExpirationTimeMs(googleIdTokenCredential.idToken)
             nativeOnLoginSuccess(
                 "google",
                 googleIdTokenCredential.id,
@@ -562,7 +524,7 @@ object AuthAdapter {
                 null,
                 null,
                 scopes.toTypedArray(),
-                null
+                expirationTime
             )
         } else {
             Log.w(TAG, "Unsupported credential type: ${credential.type}")
@@ -590,12 +552,8 @@ object AuthAdapter {
             ctx.startActivity(intent)
             return
         }
-        val userJson = getUserJson(ctx)
-        if (userJson != null && userJson.contains("\"provider\":\"microsoft\"")) {
-            val currentScopes = extractScopesFromUserJson(userJson)
-            val defaultMicrosoftScopes = listOf("openid", "email", "profile", "offline_access", "User.Read")
-            val existing = if (currentScopes.isEmpty()) defaultMicrosoftScopes else currentScopes
-            val mergedScopes = (existing + scopes.toList()).distinct()
+        if (inMemoryMicrosoftRefreshToken != null) {
+            val mergedScopes = (inMemoryMicrosoftScopes + scopes.toList()).distinct()
             val tenant = getMicrosoftTenantFromResources(ctx)
             loginMicrosoft(ctx, mergedScopes.toTypedArray(), null, tenant, null)
             return
@@ -624,20 +582,21 @@ object AuthAdapter {
             googleSignInClient!!.silentSignIn().addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     val acc = task.result
-                    nativeOnRefreshSuccess(acc?.idToken, null, null)
+                    nativeOnRefreshSuccess(
+                        acc?.idToken,
+                        null,
+                        getJwtExpirationTimeMs(acc?.idToken),
+                    )
                 } else {
                     nativeOnRefreshError("network_error", task.exception?.message ?: "Silent sign-in failed")
                 }
             }
             return
         }
-        val userJson = getUserJson(ctx)
-        if (userJson != null && userJson.contains("\"provider\":\"microsoft\"")) {
-            val refreshToken = getMicrosoftRefreshToken(ctx)
-            if (refreshToken != null) {
-                refreshMicrosoftTokenForRefresh(ctx, refreshToken)
-                return
-            }
+        val refreshToken = getMicrosoftRefreshToken()
+        if (refreshToken != null) {
+            refreshMicrosoftTokenForRefresh(ctx, refreshToken)
+            return
         }
         nativeOnRefreshError("unknown", "No user logged in")
     }
@@ -662,7 +621,8 @@ object AuthAdapter {
                 .build()
             GoogleSignIn.getClient(ctx, gso).signOut()
         }
-        clearUser(ctx)
+        inMemoryMicrosoftRefreshToken = null
+        inMemoryMicrosoftScopes = listOf("openid", "email", "profile", "offline_access", "User.Read")
     }
 
     @JvmStatic
@@ -677,7 +637,8 @@ object AuthAdapter {
                 .build()
             GoogleSignIn.getClient(ctx, gso).revokeAccess()
         }
-        clearUser(ctx)
+        inMemoryMicrosoftRefreshToken = null
+        inMemoryMicrosoftScopes = listOf("openid", "email", "profile", "offline_access", "User.Read")
     }
 
     private fun getClientIdFromResources(context: Context): String? {
@@ -686,65 +647,18 @@ object AuthAdapter {
     }
 
     @JvmStatic
-    fun getUserJson(context: Context): String? {
-        val pref = getPrefs(context)
-        return pref.getString("user_json", null)
-    }
-
-    @JvmStatic
-    fun setUserJson(context: Context, json: String) {
-        val pref = getPrefs(context)
-        pref.edit().putString("user_json", json).apply()
-    }
-
-    @JvmStatic
-    fun clearUser(context: Context) {
-        val pref = getPrefs(context)
-        pref.edit().clear().apply()
-    }
-
-    @JvmStatic
     fun restoreSession(context: Context) {
         val ctx = context.applicationContext ?: appContext ?: context
         val account = GoogleSignIn.getLastSignedInAccount(ctx)
         if (account != null) {
+            val expirationTime = getJwtExpirationTimeMs(account.idToken)
             nativeOnLoginSuccess("google", account.email, account.displayName,
                                 account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
-                                account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), null)
+                                account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), expirationTime)
         } else {
-            val json = getUserJson(ctx)
-            if (json != null) {
-                val provider = try {
-                    val parsed = JSONObject(json)
-                    parsed.optString("provider")
-                } catch (_: Exception) {
-                    ""
-                }
-                val effectiveProvider = when (provider) {
-                    "google" -> "google"
-                    "microsoft" -> "microsoft"
-                    "apple" -> "apple"
-                    else -> "apple"
-                }
-                
-                if (effectiveProvider == "microsoft") {
-                    val refreshToken = getMicrosoftRefreshToken(ctx)
-                    if (refreshToken != null) {
-                        refreshMicrosoftToken(ctx, refreshToken)
-                    } else {
-                        val email = extractJsonValue(json, "email")
-                        val name = extractJsonValue(json, "name")
-                        val idToken = extractJsonValue(json, "idToken")
-                        nativeOnLoginSuccess(effectiveProvider, email, name, null, idToken, null, null, null, null)
-                    }
-                } else {
-                    val email = extractJsonValue(json, "email")
-                    val name = extractJsonValue(json, "name")
-                    val photo = extractJsonValue(json, "photo")
-                    val idToken = extractJsonValue(json, "idToken")
-                    val serverAuthCode = extractJsonValue(json, "serverAuthCode")
-                    nativeOnLoginSuccess(effectiveProvider, email, name, photo, idToken, null, serverAuthCode, null, null)
-                }
+            val refreshToken = getMicrosoftRefreshToken()
+            if (refreshToken != null) {
+                refreshMicrosoftToken(ctx, refreshToken)
             } else {
                 nativeOnLoginError("unknown", "No session")
             }
@@ -801,9 +715,11 @@ object AuthAdapter {
                         val name = claims["name"]
 
                         if (newRefreshToken.isNotEmpty()) {
-                            saveMicrosoftRefreshToken(context, newRefreshToken)
+                            saveMicrosoftRefreshToken(newRefreshToken)
                         }
-                        saveUser(context, "microsoft", email, name, null, newIdToken, newRefreshToken, null)
+                        inMemoryMicrosoftScopes = pendingMicrosoftScopes.ifEmpty {
+                            listOf("openid", "email", "profile", "offline_access", "User.Read")
+                        }
 
                         nativeOnLoginSuccess("microsoft", email, name, null, newIdToken, newAccessToken, null, null, expirationTime)
                     } else {
@@ -859,9 +775,11 @@ object AuthAdapter {
                         val email = claims["preferred_username"] ?: claims["email"]
                         val name = claims["name"]
                         if (newRefreshToken.isNotEmpty()) {
-                            saveMicrosoftRefreshToken(context, newRefreshToken)
+                            saveMicrosoftRefreshToken(newRefreshToken)
                         }
-                        saveUser(context, "microsoft", email, name, null, newIdToken, newRefreshToken, null)
+                        inMemoryMicrosoftScopes = pendingMicrosoftScopes.ifEmpty {
+                            listOf("openid", "email", "profile", "offline_access", "User.Read")
+                        }
                         nativeOnRefreshSuccess(
                             newIdToken.ifEmpty { null },
                             newAccessToken.ifEmpty { null },
@@ -879,36 +797,4 @@ object AuthAdapter {
         }
     }
 
-    private fun extractJsonValue(json: String, key: String): String? {
-        return try {
-            val value = JSONObject(json).optString(key, "")
-            if (value.isEmpty()) null else value
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun extractScopesFromUserJson(json: String): List<String> {
-        return try {
-            val jsonObj = JSONObject(json)
-            val arr = jsonObj.optJSONArray("scopes") ?: return emptyList()
-            (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotEmpty() } }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    private fun saveUser(context: Context, provider: String, email: String?, name: String?, 
-                          photo: String?, idToken: String?, serverAuthCode: String?, scopes: List<String>?) {
-        val pref = getPrefs(context)
-        val json = JSONObject()
-        json.put("provider", provider)
-        if (email != null) json.put("email", email)
-        if (name != null) json.put("name", name)
-        if (photo != null) json.put("photo", photo)
-        if (idToken != null) json.put("idToken", idToken)
-        if (serverAuthCode != null) json.put("serverAuthCode", serverAuthCode)
-        if (scopes != null) json.put("scopes", JSONArray(scopes))
-        pref.edit().putString("user_json", json.toString()).apply()
-    }
 }

@@ -1,6 +1,6 @@
+import { StyleSheet, View } from "react-native";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { StyleSheet, View } from "react-native";
 import { AuthService } from "react-native-nitro-auth";
 
 AuthService.setLoggingEnabled(true);
@@ -8,7 +8,7 @@ AuthService.setLoggingEnabled(true);
 export default function RootLayout() {
   return (
     <View style={styles.container}>
-      <StatusBar style="light" />
+      <StatusBar hidden />
       <Stack
         screenOptions={{
           headerShown: false,

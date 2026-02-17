@@ -1,6 +1,4 @@
 import { AuthModule } from "./Auth.web";
-import type { AuthStorageAdapter } from "./AuthStorage.nitro";
-import type { JSStorageAdapter } from "./service";
 
 export const AuthService = {
   ...AuthModule,
@@ -31,11 +29,6 @@ export const AuthService = {
   onAuthStateChanged: AuthModule.onAuthStateChanged.bind(AuthModule),
   onTokensRefreshed: AuthModule.onTokensRefreshed.bind(AuthModule),
   setLoggingEnabled: AuthModule.setLoggingEnabled.bind(AuthModule),
-  setStorageAdapter: AuthModule.setStorageAdapter.bind(AuthModule),
   dispose: AuthModule.dispose.bind(AuthModule),
   equals: AuthModule.equals.bind(AuthModule),
-
-  setJSStorageAdapter(adapter: JSStorageAdapter | undefined): void {
-    AuthModule.setStorageAdapter(adapter as AuthStorageAdapter | undefined);
-  },
 };

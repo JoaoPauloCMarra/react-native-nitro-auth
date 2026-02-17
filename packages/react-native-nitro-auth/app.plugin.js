@@ -6,7 +6,6 @@ const {
   AndroidConfig,
   createRunOncePlugin,
 } = require("@expo/config-plugins");
-
 const pkg = require("./package.json");
 
 const withNitroAuth = (config, props = {}) => {
@@ -157,9 +156,7 @@ const withNitroAuth = (config, props = {}) => {
           ],
         };
         const existingMsalActivity = application.activity.find(
-          (a) =>
-            a.$?.["android:name"] ===
-            "com.auth.MicrosoftAuthActivity",
+          (a) => a.$?.["android:name"] === "com.auth.MicrosoftAuthActivity",
         );
         if (!existingMsalActivity) {
           application.activity.push(msalActivity);
@@ -172,8 +169,4 @@ const withNitroAuth = (config, props = {}) => {
   return config;
 };
 
-module.exports = createRunOncePlugin(
-  withNitroAuth,
-  pkg.name,
-  pkg.version,
-);
+module.exports = createRunOncePlugin(withNitroAuth, pkg.name, pkg.version);
