@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   StyleSheet,
   View,
@@ -23,20 +23,101 @@ import {
 } from "react-native-nitro-storage";
 
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+const SHOWCASE_CAPABILITIES = [
+  "Google / Apple / Microsoft",
+  "JSI-based auth calls",
+  "Auth state listener",
+  "Token refresh listener",
+  "Scope request / revoke",
+  "Silent restore",
+  "Server auth code support",
+  "App-managed Disk snapshot",
+] as const;
+
 type AuthSnapshot = {
   user: AuthUser | undefined;
   scopes: string[];
   updatedAt: number | undefined;
 };
 
+const EMPTY_AUTH_SNAPSHOT: AuthSnapshot = {
+  user: undefined,
+  scopes: [],
+  updatedAt: undefined,
+};
+
+const dedupeScopes = (
+  scopesToDedupe: readonly string[] | undefined,
+): string[] => {
+  const uniqueScopes: string[] = [];
+  const seen = new Set<string>();
+
+  for (const scope of scopesToDedupe ?? []) {
+    if (!scope || seen.has(scope)) {
+      continue;
+    }
+    seen.add(scope);
+    uniqueScopes.push(scope);
+  }
+
+  return uniqueScopes;
+};
+
+const mergeAuthUser = ({
+  previousUser,
+  incomingUser,
+  tokenPatch,
+}: {
+  previousUser: AuthUser | undefined;
+  incomingUser: AuthUser | undefined;
+  tokenPatch?:
+    | Partial<
+        Pick<
+          AuthUser,
+          "accessToken" | "idToken" | "refreshToken" | "expirationTime"
+        >
+      >
+    | undefined;
+}): AuthUser | undefined => {
+  const baseUser = incomingUser ?? previousUser;
+  if (!baseUser) {
+    return undefined;
+  }
+
+  const mergedScopes = dedupeScopes(
+    incomingUser?.scopes ?? previousUser?.scopes,
+  );
+  const mergedUser: AuthUser = {
+    ...previousUser,
+    ...incomingUser,
+    provider:
+      incomingUser?.provider ?? previousUser?.provider ?? baseUser.provider,
+    accessToken:
+      tokenPatch?.accessToken ??
+      incomingUser?.accessToken ??
+      previousUser?.accessToken,
+    idToken:
+      tokenPatch?.idToken ?? incomingUser?.idToken ?? previousUser?.idToken,
+    refreshToken:
+      tokenPatch?.refreshToken ??
+      incomingUser?.refreshToken ??
+      previousUser?.refreshToken,
+    expirationTime:
+      tokenPatch?.expirationTime ??
+      incomingUser?.expirationTime ??
+      previousUser?.expirationTime,
+    serverAuthCode:
+      incomingUser?.serverAuthCode ?? previousUser?.serverAuthCode,
+    scopes: mergedScopes.length > 0 ? mergedScopes : undefined,
+  };
+
+  return mergedUser;
+};
+
 const authSnapshotItem = createStorageItem<AuthSnapshot>({
   key: "demo_auth_snapshot",
   scope: StorageScope.Disk,
-  defaultValue: {
-    user: undefined,
-    scopes: [],
-    updatedAt: undefined,
-  },
+  defaultValue: EMPTY_AUTH_SNAPSHOT,
 });
 
 export const FeatureDemo = () => {
@@ -64,12 +145,90 @@ export const FeatureDemo = () => {
   const [variant, setVariant] = useState<
     "primary" | "outline" | "white" | "black"
   >("primary");
+  const clearAuthSnapshot = useCallback(() => {
+    setAuthSnapshot(EMPTY_AUTH_SNAPSHOT);
+  }, [setAuthSnapshot]);
+  const persistAuthSnapshotState = useCallback(
+    ({
+      incomingUser,
+      incomingScopes,
+      tokenPatch,
+    }: {
+      incomingUser?: AuthUser;
+      incomingScopes?: string[];
+      tokenPatch?:
+        | Partial<
+            Pick<
+              AuthUser,
+              "accessToken" | "idToken" | "refreshToken" | "expirationTime"
+            >
+          >
+        | undefined;
+    } = {}) => {
+      if (!persistAuthSnapshot) {
+        return;
+      }
+
+      setAuthSnapshot((previousSnapshot) => {
+        const serviceUser = AuthService.currentUser;
+        const nextUser = mergeAuthUser({
+          previousUser: previousSnapshot.user,
+          incomingUser: incomingUser ?? serviceUser,
+          tokenPatch,
+        });
+
+        if (!nextUser) {
+          return previousSnapshot;
+        }
+
+        const nextScopes = dedupeScopes(
+          incomingScopes && incomingScopes.length > 0
+            ? incomingScopes
+            : AuthService.grantedScopes.length > 0
+              ? AuthService.grantedScopes
+              : (nextUser.scopes ?? previousSnapshot.scopes),
+        );
+
+        return {
+          user: {
+            ...nextUser,
+            scopes: nextScopes.length > 0 ? nextScopes : nextUser.scopes,
+          },
+          scopes: nextScopes,
+          updatedAt: Date.now(),
+        };
+      });
+    },
+    [persistAuthSnapshot, setAuthSnapshot],
+  );
+  const persistLatestAuthState = useCallback(() => {
+    persistAuthSnapshotState({
+      incomingUser: AuthService.currentUser,
+      incomingScopes: AuthService.grantedScopes,
+    });
+  }, [persistAuthSnapshotState]);
   const displayUser =
     user ?? (persistAuthSnapshot ? authSnapshot.user : undefined);
-  const displayScopes =
-    scopes.length > 0 ? scopes : persistAuthSnapshot ? authSnapshot.scopes : [];
+  const displayScopes = dedupeScopes(
+    scopes.length > 0 ? scopes : persistAuthSnapshot ? authSnapshot.scopes : [],
+  );
   const isUsingPersistedSnapshot =
     !user && persistAuthSnapshot && Boolean(authSnapshot.user);
+  const statusVariant = error
+    ? "error"
+    : loading
+      ? "pending"
+      : displayUser
+        ? "connected"
+        : "idle";
+  const statusBadgeLabel =
+    statusVariant === "error"
+      ? "Issue"
+      : statusVariant === "pending"
+        ? "Working"
+        : statusVariant === "connected"
+          ? "Connected"
+          : "Idle";
 
   useEffect(() => {
     void AuthService.silentRestore();
@@ -78,27 +237,38 @@ export const FeatureDemo = () => {
   useEffect(() => {
     const unsubscribeAuth = AuthService.onAuthStateChanged((u) => {
       setStatus(u ? `Auth: ${u.email || "logged in"}` : "Auth: logged out");
+      if (u) {
+        persistAuthSnapshotState({
+          incomingUser: u,
+          incomingScopes: AuthService.grantedScopes,
+        });
+      }
     });
 
     const unsubscribeTokens = AuthService.onTokensRefreshed((tokens) => {
       setStatus(
         `Tokens refreshed! Expires: ${tokens.expirationTime ? new Date(tokens.expirationTime).toLocaleTimeString() : "unknown"}`,
       );
+      persistAuthSnapshotState({
+        incomingScopes: AuthService.grantedScopes,
+        tokenPatch: {
+          accessToken: tokens.accessToken,
+          idToken: tokens.idToken,
+          refreshToken: tokens.refreshToken,
+          expirationTime: tokens.expirationTime,
+        },
+      });
     });
 
     return () => {
       unsubscribeAuth();
       unsubscribeTokens();
     };
-  }, []);
+  }, [persistAuthSnapshotState]);
 
   useEffect(() => {
     if (!persistAuthSnapshot) {
-      setAuthSnapshot({
-        user: undefined,
-        scopes: [],
-        updatedAt: undefined,
-      });
+      clearAuthSnapshot();
       return;
     }
 
@@ -106,12 +276,17 @@ export const FeatureDemo = () => {
       return;
     }
 
-    setAuthSnapshot({
-      user,
-      scopes,
-      updatedAt: Date.now(),
+    persistAuthSnapshotState({
+      incomingUser: user,
+      incomingScopes: scopes,
     });
-  }, [persistAuthSnapshot, scopes, setAuthSnapshot, user]);
+  }, [
+    clearAuthSnapshot,
+    persistAuthSnapshot,
+    persistAuthSnapshotState,
+    scopes,
+    user,
+  ]);
 
   const hasCalendarScope = scopes.includes(CALENDAR_SCOPE);
 
@@ -142,6 +317,7 @@ export const FeatureDemo = () => {
             ? useLegacyGoogleSignIn
             : undefined,
       });
+      persistLatestAuthState();
       setStatus(`Logged in as ${AuthService.currentUser?.email}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -157,6 +333,7 @@ export const FeatureDemo = () => {
         useLegacyGoogleSignIn:
           Platform.OS === "android" ? useLegacyGoogleSignIn : undefined,
       });
+      persistLatestAuthState();
     } catch (e: unknown) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -171,6 +348,7 @@ export const FeatureDemo = () => {
         useLegacyGoogleSignIn:
           Platform.OS === "android" ? useLegacyGoogleSignIn : undefined,
       });
+      persistLatestAuthState();
     } catch (e: unknown) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -206,6 +384,7 @@ export const FeatureDemo = () => {
           "offline_access",
         ],
       });
+      persistLatestAuthState();
       setStatus("Logged in with Microsoft B2C!");
     } catch (e: unknown) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -217,6 +396,12 @@ export const FeatureDemo = () => {
       setStatus("Getting access token...");
       const token = await getAccessToken();
       setAccessToken(token ?? null);
+      if (token) {
+        persistAuthSnapshotState({
+          incomingScopes: AuthService.grantedScopes,
+          tokenPatch: { accessToken: token },
+        });
+      }
       setStatus(token ? `Token: ${token.slice(0, 20)}...` : "No token");
     } catch (e: unknown) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -227,6 +412,15 @@ export const FeatureDemo = () => {
     try {
       setStatus("Refreshing tokens...");
       const tokens = await refreshToken();
+      persistAuthSnapshotState({
+        incomingScopes: AuthService.grantedScopes,
+        tokenPatch: {
+          accessToken: tokens.accessToken,
+          idToken: tokens.idToken,
+          refreshToken: tokens.refreshToken,
+          expirationTime: tokens.expirationTime,
+        },
+      });
       setStatus(`Refreshed! New token: ${tokens.accessToken?.slice(0, 15)}...`);
     } catch (e: unknown) {
       setStatus(`Refresh error: ${e instanceof Error ? e.message : String(e)}`);
@@ -235,6 +429,9 @@ export const FeatureDemo = () => {
 
   const handleToggleStorage = (enabled: boolean) => {
     setPersistAuthSnapshot(enabled);
+    if (!enabled) {
+      clearAuthSnapshot();
+    }
     setStatus(
       enabled
         ? "Disk snapshot persistence enabled"
@@ -272,11 +469,7 @@ export const FeatureDemo = () => {
   const handleLogout = () => {
     logout();
     setAccessToken(null);
-    setAuthSnapshot({
-      user: undefined,
-      scopes: [],
-      updatedAt: undefined,
-    });
+    clearAuthSnapshot();
     setStatus("Logged out");
   };
 
@@ -286,15 +479,50 @@ export const FeatureDemo = () => {
       contentContainerStyle={styles.contentContainer}
     >
       <View style={styles.header}>
+        <View style={styles.headerGlowPrimary} />
+        <View style={styles.headerGlowSecondary} />
         <Text style={styles.title}>Nitro Auth</Text>
-        <Text style={styles.subtitle}>Feature Demo (JSI)</Text>
-        <Text style={styles.version}>v0.5.2</Text>
+        <Text style={styles.subtitle}>Modern Feature Showcase (JSI)</Text>
+        <Text style={styles.version}>v0.5.3</Text>
+      </View>
+
+      <View style={styles.heroPanel}>
+        <MetricTile
+          value="3"
+          label="Providers"
+          caption="Google, Apple, Microsoft"
+        />
+        <MetricTile
+          value={displayScopes.length.toString()}
+          label="Granted Scopes"
+          caption={
+            displayUser ? "Current session grants" : "Sign in to inspect"
+          }
+        />
+        <MetricTile
+          value={persistAuthSnapshot ? "On" : "Off"}
+          label="Disk Snapshot"
+          caption="Cleared automatically on logout"
+        />
       </View>
 
       <View style={styles.statusCard}>
-        <Text style={styles.statusLabel}>Status</Text>
+        <View style={styles.statusHeader}>
+          <Text style={styles.statusLabel}>Status</Text>
+          <View
+            style={[
+              styles.statusBadge,
+              statusVariant === "error" && styles.statusBadgeError,
+              statusVariant === "pending" && styles.statusBadgePending,
+              statusVariant === "connected" && styles.statusBadgeConnected,
+              statusVariant === "idle" && styles.statusBadgeIdle,
+            ]}
+          >
+            <Text style={styles.statusBadgeText}>{statusBadgeLabel}</Text>
+          </View>
+        </View>
         <Text style={styles.statusText}>{status}</Text>
-        {error && (
+        {error ? (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{error.message}</Text>
             {"underlyingError" in error &&
@@ -304,14 +532,28 @@ export const FeatureDemo = () => {
                 </Text>
               )}
           </View>
-        )}
+        ) : null}
       </View>
 
-      {loading && (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Package Showcase</Text>
+        <View style={styles.showcaseCard}>
+          <Text style={styles.showcaseTitle}>What this demo covers</Text>
+          <View style={styles.showcaseGrid}>
+            {SHOWCASE_CAPABILITIES.map((capability) => (
+              <View key={capability} style={styles.capabilityChip}>
+                <Text style={styles.capabilityText}>{capability}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+
+      {loading ? (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color="#4285F4" />
         </View>
-      )}
+      ) : null}
 
       {displayUser ? (
         <View style={styles.section}>
@@ -338,11 +580,11 @@ export const FeatureDemo = () => {
                 {displayUser.provider.toUpperCase()}
               </Text>
             </View>
-            {isUsingPersistedSnapshot && (
+            {isUsingPersistedSnapshot ? (
               <Text style={styles.snapshotHint}>
                 Showing persisted Disk snapshot
               </Text>
-            )}
+            ) : null}
           </View>
 
           <View style={styles.detailsCard}>
@@ -390,7 +632,7 @@ export const FeatureDemo = () => {
             )}
           </View>
 
-          {user && (
+          {user ? (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Token Operations</Text>
               <View style={styles.buttonRow}>
@@ -400,13 +642,13 @@ export const FeatureDemo = () => {
                 />
                 <ActionButton label="Refresh" onPress={handleRefreshToken} />
               </View>
-              {accessToken && (
+              {accessToken ? (
                 <Text style={styles.tokenPreview}>
                   Token: {accessToken.slice(0, 30)}...
                 </Text>
-              )}
+              ) : null}
             </View>
-          )}
+          ) : null}
 
           {user?.provider === "google" && (
             <View style={styles.section}>
@@ -532,7 +774,7 @@ export const FeatureDemo = () => {
           <InfoRow label="Platform" value={Platform.OS} />
           <InfoRow
             label="Play Services"
-            value={hasPlayServices ? "✅ Available" : "❌ Missing"}
+            value={hasPlayServices ? "Available" : "Missing"}
             warning={!hasPlayServices && Platform.OS === "android"}
           />
           <InfoRow
@@ -548,6 +790,14 @@ export const FeatureDemo = () => {
           <InfoRow
             label="Persisted Snapshot"
             value={authSnapshot.user ? "Available" : "None"}
+          />
+          <InfoRow
+            label="Snapshot Backend"
+            value={
+              Platform.OS === "web"
+                ? "nitro-storage Disk (localStorage)"
+                : "nitro-storage Disk (native)"
+            }
           />
           <InfoRow
             label="Snapshot Updated"
@@ -675,8 +925,31 @@ function InfoRow({
 function CheckItem({ label, checked }: { label: string; checked: boolean }) {
   return (
     <View style={styles.checkItem}>
-      <Text style={styles.checkIcon}>{checked ? "✅" : "⬜"}</Text>
+      <View
+        style={[
+          styles.checkDot,
+          checked ? styles.checkDotActive : styles.checkDotInactive,
+        ]}
+      />
       <Text style={styles.checkLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function MetricTile({
+  value,
+  label,
+  caption,
+}: {
+  value: string;
+  label: string;
+  caption: string;
+}) {
+  return (
+    <View style={styles.metricTile}>
+      <Text style={styles.metricValue}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+      <Text style={styles.metricCaption}>{caption}</Text>
     </View>
   );
 }
@@ -684,64 +957,165 @@ function CheckItem({ label, checked }: { label: string; checked: boolean }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f8f9fa",
+    backgroundColor: "#edf2ff",
   },
   contentContainer: {
-    paddingBottom: 40,
+    paddingBottom: 64,
   },
   header: {
-    backgroundColor: "#1a1a1a",
-    padding: 24,
-    paddingTop: 80,
+    marginHorizontal: 14,
+    marginTop: 14,
+    backgroundColor: "#0f172a",
+    paddingHorizontal: 24,
+    paddingTop: 68,
+    paddingBottom: 24,
     alignItems: "center",
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
+    borderRadius: 30,
+    overflow: "hidden",
+    boxShadow: "0 18px 34px rgba(15, 23, 42, 0.22)",
+    elevation: 8,
+  },
+  headerGlowPrimary: {
+    position: "absolute",
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+    backgroundColor: "rgba(59, 130, 246, 0.28)",
+    top: -120,
+    right: -70,
+  },
+  headerGlowSecondary: {
+    position: "absolute",
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    backgroundColor: "rgba(14, 165, 233, 0.2)",
+    bottom: -110,
+    left: -70,
   },
   title: {
-    fontSize: 32,
-    fontWeight: "bold",
-    color: "#fff",
+    fontSize: 38,
+    fontWeight: "800",
+    color: "#f8fafc",
+    letterSpacing: -0.6,
+    fontFamily: Platform.OS === "ios" ? "AvenirNext-Bold" : "sans-serif",
   },
   subtitle: {
     fontSize: 16,
-    color: "rgba(255,255,255,0.7)",
-    marginTop: 4,
+    color: "rgba(226, 232, 240, 0.9)",
+    marginTop: 6,
+    fontFamily:
+      Platform.OS === "ios" ? "AvenirNext-Medium" : "sans-serif-medium",
   },
   version: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.5)",
-    marginTop: 8,
+    fontSize: 11,
+    color: "#bfdbfe",
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.35)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  heroPanel: {
+    marginHorizontal: 16,
+    marginTop: 14,
+    flexDirection: "row",
+    gap: 10,
+  },
+  metricTile: {
+    flex: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.94)",
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.18)",
+    boxShadow: "0 8px 20px rgba(30, 41, 59, 0.08)",
+    elevation: 2,
+  },
+  metricValue: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#0f172a",
+    marginBottom: 4,
+  },
+  metricLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    color: "#475569",
+  },
+  metricCaption: {
+    marginTop: 5,
+    fontSize: 11,
+    color: "#64748b",
+    lineHeight: 14,
   },
   statusCard: {
     margin: 16,
-    padding: 16,
-    backgroundColor: "#fff",
+    marginTop: 14,
+    padding: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.96)",
     borderRadius: 16,
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.2)",
+    boxShadow: "0 8px 24px rgba(30, 41, 59, 0.07)",
     elevation: 2,
+  },
+  statusHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
   },
   statusLabel: {
     fontSize: 12,
-    color: "#666",
-    fontWeight: "600",
-    marginBottom: 4,
+    color: "#334155",
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  statusBadgeConnected: {
+    backgroundColor: "#dcfce7",
+  },
+  statusBadgePending: {
+    backgroundColor: "#fef3c7",
+  },
+  statusBadgeError: {
+    backgroundColor: "#fee2e2",
+  },
+  statusBadgeIdle: {
+    backgroundColor: "#e2e8f0",
   },
   statusText: {
     fontSize: 14,
-    color: "#333",
+    color: "#1e293b",
   },
   errorBox: {
     marginTop: 8,
-    padding: 8,
-    backgroundColor: "#ffebee",
-    borderRadius: 8,
+    padding: 10,
+    backgroundColor: "#fee2e2",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#fecaca",
   },
   errorText: {
-    color: "#c62828",
+    color: "#b91c1c",
     fontSize: 13,
   },
   errorDetail: {
-    color: "#666",
+    color: "#7f1d1d",
     fontSize: 11,
     marginTop: 4,
   },
@@ -751,20 +1125,56 @@ const styles = StyleSheet.create({
   },
   section: {
     marginHorizontal: 16,
-    marginTop: 16,
+    marginTop: 18,
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 12,
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0f172a",
+    marginBottom: 10,
+    letterSpacing: -0.2,
+  },
+  showcaseCard: {
+    backgroundColor: "rgba(255, 255, 255, 0.97)",
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.2)",
+    boxShadow: "0 12px 26px rgba(15, 23, 42, 0.08)",
+    elevation: 2,
+  },
+  showcaseTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#334155",
+    marginBottom: 10,
+  },
+  showcaseGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  capabilityChip: {
+    backgroundColor: "#eff6ff",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  capabilityText: {
+    fontSize: 11,
+    color: "#1e3a8a",
+    fontWeight: "600",
   },
   profileCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.98)",
+    borderRadius: 20,
     padding: 24,
     alignItems: "center",
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.2)",
+    boxShadow: "0 12px 28px rgba(15, 23, 42, 0.08)",
     elevation: 2,
   },
   avatar: {
@@ -780,82 +1190,94 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     fontSize: 28,
-    fontWeight: "bold",
-    color: "#666",
+    fontWeight: "800",
+    color: "#475569",
   },
   userName: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#333",
+    fontSize: 21,
+    fontWeight: "800",
+    color: "#0f172a",
+    letterSpacing: -0.2,
   },
   userEmail: {
     fontSize: 14,
-    color: "#666",
+    color: "#475569",
     marginTop: 2,
   },
   badge: {
-    marginTop: 8,
+    marginTop: 10,
     paddingHorizontal: 12,
     paddingVertical: 4,
-    backgroundColor: "#f0f0f0",
-    borderRadius: 12,
+    backgroundColor: "#e2e8f0",
+    borderRadius: 999,
   },
   badgeText: {
     fontSize: 11,
-    fontWeight: "bold",
-    color: "#666",
+    fontWeight: "700",
+    color: "#334155",
   },
   snapshotHint: {
     marginTop: 8,
     fontSize: 12,
-    color: "#666",
+    color: "#1d4ed8",
+    backgroundColor: "#dbeafe",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   detailsCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.98)",
+    borderRadius: 18,
     padding: 16,
     marginTop: 12,
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.2)",
   },
   detailsTitle: {
     fontSize: 14,
-    fontWeight: "600",
-    color: "#333",
+    fontWeight: "700",
+    color: "#0f172a",
     marginBottom: 12,
   },
   detailRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#f0f0f0",
+    borderBottomColor: "#dbe3f0",
   },
   detailLabel: {
     fontSize: 13,
-    color: "#666",
+    color: "#64748b",
     flex: 1,
   },
   detailValue: {
     fontSize: 13,
-    color: "#333",
+    color: "#0f172a",
     flex: 2,
     textAlign: "right",
+    fontWeight: "600",
   },
   scopesList: {
-    fontSize: 11,
-    color: "#666",
-    marginTop: 4,
-    fontStyle: "italic",
+    fontSize: 12,
+    color: "#334155",
+    marginTop: 8,
+    lineHeight: 16,
   },
   buttonRow: {
     flexDirection: "row",
-    gap: 8,
+    gap: 10,
   },
   actionButton: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingVertical: 13,
+    borderRadius: 14,
     alignItems: "center",
     marginVertical: 4,
+    boxShadow: "0 6px 16px rgba(59, 130, 246, 0.25)",
+    elevation: 2,
   },
   actionButtonOutline: {
     borderWidth: 1,
@@ -863,11 +1285,11 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   tokenPreview: {
-    fontSize: 11,
-    color: "#666",
+    fontSize: 12,
+    color: "#334155",
     marginTop: 8,
     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
@@ -875,37 +1297,43 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#fff",
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.98)",
+    padding: 14,
+    borderRadius: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.18)",
   },
   toggleLabel: {
     fontSize: 14,
-    color: "#333",
+    color: "#0f172a",
+    fontWeight: "600",
   },
   variantDemo: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 14,
   },
   variantLabel: {
     fontSize: 13,
-    color: "#666",
+    color: "#475569",
   },
   cycleBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: "#e0e0e0",
-    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: "#e2e8f0",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
   },
   cycleBtnText: {
     fontSize: 12,
-    color: "#333",
+    color: "#334155",
+    fontWeight: "700",
   },
   loginButtons: {
-    marginBottom: 16,
+    marginBottom: 18,
   },
   spacer: {
     height: 12,
@@ -915,50 +1343,65 @@ const styles = StyleSheet.create({
   },
   advancedTitle: {
     fontSize: 13,
-    color: "#666",
+    color: "#64748b",
+    fontWeight: "700",
     marginBottom: 8,
   },
   infoCard: {
-    backgroundColor: "#fff",
+    backgroundColor: "rgba(255, 255, 255, 0.98)",
     borderRadius: 16,
     padding: 16,
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.2)",
   },
   infoRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#dbe3f0",
   },
   infoLabel: {
     fontSize: 13,
-    color: "#666",
+    color: "#64748b",
   },
   infoValue: {
     fontSize: 13,
-    color: "#333",
+    color: "#0f172a",
     fontWeight: "600",
   },
   infoWarning: {
-    color: "#f39c12",
+    color: "#b45309",
   },
   lastSection: {
-    marginBottom: 40,
+    marginBottom: 56,
   },
   checklistCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.98)",
+    borderRadius: 18,
     padding: 16,
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.2)",
   },
   checkItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 4,
+    paddingVertical: 6,
   },
-  checkIcon: {
-    fontSize: 14,
-    marginRight: 8,
+  checkDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 10,
+  },
+  checkDotActive: {
+    backgroundColor: "#16a34a",
+  },
+  checkDotInactive: {
+    backgroundColor: "#cbd5e1",
   },
   checkLabel: {
     fontSize: 13,
-    color: "#333",
+    color: "#0f172a",
   },
 });

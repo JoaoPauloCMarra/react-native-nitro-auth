@@ -12,13 +12,13 @@ Nitro Auth is a modern authentication library for React Native built on top of [
 
 Nitro Auth is designed to replace legacy modules like `@react-native-google-signin/google-signin` with a modern, high-performance architecture.
 
-| Feature           | Legacy Modules               | Nitro Auth                                 |
-| :---------------- | :--------------------------- | :----------------------------------------- |
-| **Performance**   | Async bridge overhead (JSON) | **Direct JSI C++ (Zero-copy)**             |
-| **Storage**       | Varies / Hidden defaults     | **In-memory only (app-owned persistence)** |
-| **Setup**         | Manual async initialization  | **Sync & declarative plugins**             |
-| **Types**         | Manual / Brittle             | **Fully Generated (Nitrogen)**             |
-| **Provider Data** | Varies                       | **Normalized auth payload**                |
+| Feature           | Legacy Modules               | Nitro Auth                                                                     |
+| :---------------- | :--------------------------- | :----------------------------------------------------------------------------- |
+| **Performance**   | Async bridge overhead (JSON) | **Direct JSI C++ (Zero-copy)**                                                 |
+| **Storage**       | Varies / Hidden defaults     | **Native: in-memory only; Web: session cache (tokens memory-only by default)** |
+| **Setup**         | Manual async initialization  | **Sync & declarative plugins**                                                 |
+| **Types**         | Manual / Brittle             | **Fully Generated (Nitrogen)**                                                 |
+| **Provider Data** | Varies                       | **Normalized auth payload**                                                    |
 
 ## Features
 
@@ -27,15 +27,18 @@ Nitro Auth is designed to replace legacy modules like `@react-native-google-sign
 - **Incremental Auth**: Request additional OAuth scopes on the fly.
 - **Expo Ready**: Comes with a powerful Config Plugin for zero-config setup.
 - **Cross-Platform**: Unified API for iOS, Android, and Web.
-- **Auto-Refresh**: Synchronous access to tokens with automatic silent refresh.
+- **Token Lifecycle Helpers**: `getAccessToken()` refreshes near-expiry tokens; `refreshToken()` allows explicit refresh control.
 - **Google One-Tap / Sheet**: Modern login experience on Android (Credential Manager) and iOS (Sign-In Sheet).
 - **Error Metadata**: Detailed native error messages for easier debugging.
 - **Normalized Provider Payload**: Exposes provider/user/token fields in a consistent cross-platform shape.
-- **App-Owned Persistence**: The package does not persist auth data. Apps decide what to persist and where.
+- **App-Owned Persistence**: Native is stateless by default. Web keeps a non-sensitive session snapshot; apps decide long-term persistence strategy.
 
 ## Design Philosophy
 
-This is an **auth-only package** - it does NOT store any data on the device by default. The package provides:
+This is an **auth-only package** - on **native** (iOS/Android) it does NOT store auth data by default.  
+On **web**, Nitro Auth stores a non-sensitive auth snapshot in `sessionStorage` by default; sensitive tokens stay memory-only unless explicitly enabled.
+
+The package provides:
 
 - Login/logout functionality for Google, Apple, and Microsoft
 - Token management (access token, refresh token, ID token)
@@ -44,11 +47,35 @@ This is an **auth-only package** - it does NOT store any data on the device by d
 
 **Storage is the responsibility of the app using this package.** Use your own storage layer (for example [react-native-nitro-storage](https://github.com/JoaoPauloCMarra/react-native-nitro-storage)) to persist app-level auth snapshots/tokens when needed.
 
+### Provider Data Availability
+
+Token/data shape is normalized, but provider SDKs do not always return all fields at login time:
+
+| Provider + Flow             | `idToken`  | `accessToken`                | `serverAuthCode`             | `expirationTime`                    |
+| --------------------------- | ---------- | ---------------------------- | ---------------------------- | ----------------------------------- |
+| Google (iOS)                | Usually ✅ | Provider-dependent           | Optional (if configured)     | Optional                            |
+| Google (Android One-Tap)    | ✅         | Usually `undefined` at login | `undefined`                  | Derived from ID token when possible |
+| Google (Android Legacy)     | ✅         | Usually `undefined` at login | ✅ (if server client is set) | Derived from ID token when possible |
+| Google (Web)                | ✅         | ✅                           | Optional (`code`)            | Usually ✅                          |
+| Microsoft (iOS/Android/Web) | ✅         | Usually ✅                   | `undefined`                  | Usually ✅                          |
+| Apple (iOS/Web)             | ✅         | `undefined`                  | `undefined`                  | `undefined`                         |
+
+> [!NOTE]
+> On Apple, email/name can be limited after first consent depending on Apple policy.
+
 ## Installation
 
 ```bash
 bun add react-native-nitro-auth react-native-nitro-modules
 ```
+
+### Requirements
+
+| Dependency                   | Version     |
+| ---------------------------- | ----------- |
+| `react-native`               | `>= 0.75.0` |
+| `react-native-nitro-modules` | `>= 0.33.9` |
+| `react`                      | `*`         |
 
 For Expo projects, rebuild native code after installation:
 
@@ -570,6 +597,25 @@ AuthService.onAuthStateChanged((user) => {
   });
 });
 
+// Keep token/expiration fields fresh in persisted snapshot
+AuthService.onTokensRefreshed((tokens) => {
+  authSnapshotItem.set((prev) => {
+    if (!prev.user) return prev;
+
+    return {
+      ...prev,
+      user: {
+        ...prev.user,
+        accessToken: tokens.accessToken ?? prev.user.accessToken,
+        idToken: tokens.idToken ?? prev.user.idToken,
+        refreshToken: tokens.refreshToken ?? prev.user.refreshToken,
+        expirationTime: tokens.expirationTime ?? prev.user.expirationTime,
+      },
+      updatedAt: Date.now(),
+    };
+  });
+});
+
 // Clear on logout
 function logout() {
   AuthService.logout();
@@ -583,13 +629,21 @@ function logout() {
 
 ### Production Readiness
 
-Nitro Auth is suitable for production use:
+Nitro Auth is suitable for production use when configured with provider-accurate expectations:
 
-- **Google Sign-In**: Full support including One-Tap / Sheet, incremental scopes, and token refresh on iOS, Android, and Web.
-- **Apple Sign-In**: Supported on iOS and Web (not available on Android).
-- **Microsoft (Azure AD / B2C)**: Login, incremental scopes, and token refresh are supported on all platforms. Uses PKCE, state, and nonce for security.
+- **Google Sign-In**: One-Tap + legacy on Android, native on iOS, popup on web.
+- **Apple Sign-In**: iOS + web only.
+- **Microsoft (Azure AD / B2C)**: iOS, Android, and web with PKCE/state/nonce protections.
 
-**Token storage:** This package provides auth only and does not persist session data by default. Your app controls persistence strategy and security policy.
+Production checklist:
+
+1. Configure client IDs, URL schemes, and redirect URIs per platform/provider.
+2. Call `silentRestore()` during app startup to rehydrate provider session state when available.
+3. Persist only app-owned snapshots/tokens (for example with `react-native-nitro-storage`), then clear them on logout.
+4. On Android Google, use `useLegacyGoogleSignIn: true` when backend flows require `serverAuthCode`.
+5. Treat token fields as optional and branch by provider/flow.
+6. Keep web sensitive tokens memory-only unless you explicitly require persistent web tokens (`nitroAuthPersistTokensOnWeb: true`).
+7. Enable logging only in development, and monitor normalized error codes in production.
 
 ### Logging & Debugging
 
@@ -601,9 +655,9 @@ import { AuthService } from "react-native-nitro-auth";
 AuthService.setLoggingEnabled(true);
 ```
 
-### Sync Access to Tokens
+### Sync State + Async Tokens
 
-Nitro Auth provides synchronous access to the current state, while still supporting silent refresh:
+Nitro Auth provides synchronous access to in-memory state, while token retrieval remains async:
 
 ```ts
 // Quick access to what we have in memory
@@ -647,7 +701,7 @@ try {
 
 ### Native Error Metadata
 
-For more detailed debugging, Nitro Auth captures the raw native error message. You can access it from the authenticated user or cast the error:
+For more detailed debugging, Nitro Auth captures raw provider/native details in `underlyingError` where available:
 
 ```ts
 // From authenticated user (on success)
@@ -779,6 +833,9 @@ import {
 | `expirationTime`  | `number \| undefined`   | Expiration timestamp in milliseconds since epoch                           |
 | `underlyingError` | `string \| undefined`   | Raw provider/native error message                                          |
 
+> [!NOTE]
+> On Android Google One-Tap/Credential Manager, `idToken` is typically available immediately, while `accessToken` and `expirationTime` may be `undefined` until refresh/exchange flow provides them.
+
 ### `AuthTokens`
 
 | Field            | Type                  | Description                   |
@@ -855,6 +912,7 @@ Synchronous state + async operations (useful outside React trees).
 ### Storage Contract
 
 Nitro Auth does not provide persistence APIs. Persist the auth data you need in your app layer (for example with `react-native-nitro-storage`, MMKV, Keychain wrappers, or backend-issued sessions).
+There is no public `setStorageAdapter`/`setJSStorageAdapter` API in this package.
 
 ### `SocialButton`
 
@@ -919,19 +977,46 @@ Errors are surfaced as `Error` with `message` as a normalized code when possible
 | `network_error`       | Network failure                                |
 | `configuration_error` | Missing/invalid provider configuration         |
 
+## Quality Gates
+
+From monorepo root:
+
+```bash
+bun run format:check
+bun run lint
+bun run typecheck
+```
+
+Workspace-local commands:
+
+```bash
+# apps/example
+bun run format
+bun run lint
+bun run typecheck
+
+# packages/react-native-nitro-auth
+bun run format
+bun run lint
+bun run typecheck
+bun run test
+```
+
 ## Platform Support
 
-| Feature                   | iOS | Android | Web |
-| ------------------------- | --- | ------- | --- |
-| Google Sign-In            | ✅  | ✅      | ✅  |
-| Apple Sign-In             | ✅  | ❌      | ✅  |
-| Microsoft Sign-In         | ✅  | ✅      | ✅  |
-| Custom OAuth Scopes       | ✅  | ✅      | ✅  |
-| Incremental Authorization | ✅  | ✅      | ✅  |
-| Token Refresh             | ✅  | ✅      | ✅  |
-| Session Persistence       | ✅  | ✅      | ✅  |
-| Auto-Refresh              | ✅  | ✅      | ✅  |
-| Native C++ Performance    | ✅  | ✅      | —   |
+| Feature                    | iOS | Android | Web |
+| -------------------------- | --- | ------- | --- |
+| Google Sign-In             | ✅  | ✅      | ✅  |
+| Apple Sign-In              | ✅  | ❌      | ✅  |
+| Microsoft Sign-In          | ✅  | ✅      | ✅  |
+| Custom OAuth Scopes        | ✅  | ✅      | ✅  |
+| Incremental Authorization  | ✅  | ✅      | ✅  |
+| Token Refresh              | ✅  | ✅      | ✅  |
+| Native Session Persistence | ❌  | ❌      | —   |
+| Web Auth Snapshot Cache    | —   | —       | ✅  |
+| App-Owned Persistence      | ✅  | ✅      | ✅  |
+| Auto-Refresh               | ✅  | ✅      | ✅  |
+| Native C++ Performance     | ✅  | ✅      | —   |
 
 ## Architecture
 

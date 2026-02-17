@@ -1,4 +1,4 @@
-const expoConfig = require("eslint-config-expo/flat");
 const { defineConfig } = require("eslint/config");
+const expoMagicConfig = require("eslint-config-expo-magic");
 
-module.exports = defineConfig([expoConfig]);
+module.exports = defineConfig([...expoMagicConfig]);

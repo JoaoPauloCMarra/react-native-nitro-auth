@@ -19,10 +19,14 @@ const loadAuthModule = async (
   extra?: Record<string, unknown>,
 ): Promise<TestAuthModule> => {
   jest.resetModules();
-  jest.doMock("expo-constants", () => ({
-    __esModule: true,
-    default: { expoConfig: { extra: extra ?? {} } },
-  }), { virtual: true });
+  jest.doMock(
+    "expo-constants",
+    () => ({
+      __esModule: true,
+      default: { expoConfig: { extra: extra ?? {} } },
+    }),
+    { virtual: true },
+  );
   const module = await import("../Auth.web");
   return module.AuthModule as unknown as TestAuthModule;
 };
@@ -131,10 +135,10 @@ describe("AuthModule (web)", () => {
     });
 
     const loginPromise = auth.login("google");
-    const loginExpectation = expect(loginPromise).rejects.toThrow("timeout");
-    await jest.advanceTimersByTimeAsync(120001);
-
-    await loginExpectation;
+    await Promise.all([
+      expect(loginPromise).rejects.toThrow("timeout"),
+      jest.advanceTimersByTimeAsync(120001),
+    ]);
     expect(popup.close).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,10 +1,10 @@
 const { spawnSync } = require("child_process");
-const path = require("path");
 const fs = require("fs");
+const path = require("path");
 
 const testFile = path.join(
   __dirname,
-  "../cpp/__tests__/JSONSerializerTests.cpp"
+  "../cpp/__tests__/JSONSerializerTests.cpp",
 );
 const includeDir = path.join(__dirname, "../cpp");
 const nitrogenDir = path.join(__dirname, "../nitrogen/generated/shared/c++");
@@ -145,7 +145,7 @@ const compile = spawnSync(
     "-o",
     outputFile,
   ],
-  { stdio: "inherit" }
+  { stdio: "inherit" },
 );
 
 if (compile.status !== 0) {

@@ -1,19 +1,33 @@
 import { renderHook, act } from "@testing-library/react";
-import type { AuthProvider, AuthTokens, AuthUser, LoginOptions } from "../Auth.nitro";
+import { AuthService } from "../service";
+import { useAuth } from "../use-auth";
+import type {
+  AuthProvider,
+  AuthTokens,
+  AuthUser,
+  LoginOptions,
+} from "../Auth.nitro";
+
+// Import after mock
 
 // Module-level mock state
 let mockCurrentUser: AuthUser | undefined = undefined;
 let mockScopes: string[] = [];
 
-type LoginFn = (provider: AuthProvider, options?: LoginOptions) => Promise<void>;
+type LoginFn = (
+  provider: AuthProvider,
+  options?: LoginOptions,
+) => Promise<void>;
 type RequestScopesFn = (scopes: string[]) => Promise<void>;
 type RevokeScopesFn = (scopes: string[]) => Promise<void>;
 type GetAccessTokenFn = () => Promise<string | undefined>;
 type RefreshTokenFn = () => Promise<AuthTokens>;
 type OnAuthStateChangedFn = (
-  callback: (user: AuthUser | undefined) => void
+  callback: (user: AuthUser | undefined) => void,
 ) => () => void;
-type OnTokensRefreshedFn = (callback: (tokens: AuthTokens) => void) => () => void;
+type OnTokensRefreshedFn = (
+  callback: (tokens: AuthTokens) => void,
+) => () => void;
 
 const mockLogin = jest.fn<ReturnType<LoginFn>, Parameters<LoginFn>>();
 const mockLogout = jest.fn();
@@ -70,10 +84,6 @@ jest.mock("../service", () => ({
       mockOnTokensRefreshed(...args),
   },
 }));
-
-// Import after mock
-import { useAuth } from "../use-auth";
-import { AuthService } from "../service";
 
 describe("useAuth", () => {
   beforeEach(() => {

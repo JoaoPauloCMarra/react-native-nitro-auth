@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { AuthService } from "./service";
 import type {
   AuthUser,
   AuthProvider,
   LoginOptions,
   AuthTokens,
 } from "./Auth.nitro";
+import { AuthService } from "./service";
 
 type AuthState = {
   user: AuthUser | undefined;
@@ -13,6 +13,16 @@ type AuthState = {
   loading: boolean;
   error: Error | undefined;
 };
+
+class AuthHookError extends Error {
+  public readonly underlyingError?: string;
+
+  constructor(message: string, underlyingError?: string) {
+    super(message);
+    this.name = "AuthHookError";
+    this.underlyingError = underlyingError;
+  }
+}
 
 export type UseAuthReturn = AuthState & {
   hasPlayServices: boolean;
@@ -124,8 +134,10 @@ export function useAuth(): UseAuthReturn {
       return tokens;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      const authError = new Error(msg) as Error & { underlyingError?: string };
-      authError.underlyingError = AuthService.currentUser?.underlyingError;
+      const authError = new AuthHookError(
+        msg,
+        AuthService.currentUser?.underlyingError,
+      );
       setState((prev) => ({
         ...prev,
         loading: false,

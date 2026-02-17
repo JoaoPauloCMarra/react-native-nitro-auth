@@ -109,10 +109,18 @@ std::shared_ptr<Promise<void>> HybridAuth::login(AuthProvider provider, const st
     {
       std::lock_guard<std::mutex> lock(_mutex);
       _currentUser = user;
-      if (options && options->scopes) {
+      if (user.scopes && !user.scopes->empty()) {
+        _grantedScopes = *user.scopes;
+      } else if (options && options->scopes && !options->scopes->empty()) {
         _grantedScopes = *options->scopes;
+      } else {
+        _grantedScopes.clear();
       }
-      if (_currentUser) _currentUser->scopes = _grantedScopes;
+      if (_currentUser) {
+        _currentUser->scopes = _grantedScopes.empty()
+          ? std::nullopt
+          : std::make_optional(_grantedScopes);
+      }
     }
     notifyAuthStateChanged();
     promise->resolve();
@@ -207,8 +215,18 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
     {
       std::lock_guard<std::mutex> lock(_mutex);
       if (_currentUser) {
-        _currentUser->accessToken = tokens.accessToken;
-        _currentUser->idToken = tokens.idToken;
+        if (tokens.accessToken.has_value()) {
+          _currentUser->accessToken = tokens.accessToken;
+        }
+        if (tokens.idToken.has_value()) {
+          _currentUser->idToken = tokens.idToken;
+        }
+        if (tokens.refreshToken.has_value()) {
+          _currentUser->refreshToken = tokens.refreshToken;
+        }
+        if (tokens.expirationTime.has_value()) {
+          _currentUser->expirationTime = tokens.expirationTime;
+        }
       }
     }
     notifyTokensRefreshed(tokens);

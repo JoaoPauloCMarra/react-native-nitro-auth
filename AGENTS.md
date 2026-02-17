@@ -2,12 +2,21 @@
 
 - Use `bun`/`bunx` only.
 - Monorepo dependency updates: run from root, then verify `packages/react-native-nitro-auth` and `apps/example`.
+- Tooling baseline: use `eslint-config-expo-magic` with flat config and keep `format`, `format:check`, `lint`, and `typecheck` scripts available in workspaces used by Turbo.
 - Keep package auth-only and stateless on native:
   - No internal persistence in iOS/Android for user/session/token data.
   - `silentRestore()` should rely on provider SDK session restore only.
   - Never dereference `std::optional<AuthUser>` without checking (`silentRestore` crash risk on iOS).
+- Web persistence nuance: default `sessionStorage` cache is non-sensitive; sensitive tokens remain memory-only unless explicitly enabled.
+- Example app parity rule: set `expo.extra.nitroAuthWebStorage = "memory"` so package stays stateless on web; demo persistence must come from `react-native-nitro-storage` Disk (`localStorage` fallback on web).
+- Type safety baseline: keep `Auth.web` JSON parsing/runtime guards (`parseAuthUser`, `parseScopes`, `parseResponseObject`) and return full `AuthTokens` shape from refresh paths.
 - App-owned persistence belongs in consuming apps (example uses `react-native-nitro-storage` Disk).
 - Example persistence rule: keep Disk snapshot across refresh/restart, clear snapshot only on explicit logout.
+- Example should merge token refresh events into Disk snapshot so `accessToken`/`expirationTime` survive reloads.
+- Keep `HybridAuth::login` scope precedence as: provider-returned scopes first, requested options second, otherwise empty. Never overwrite provider scopes with empty options.
+- Android Google: One Tap/Legacy provides `idToken` (+ optional `serverAuthCode`), not direct OAuth `accessToken`. Derive `expirationTime` from ID token `exp` claim for UI parity.
+- README accuracy: keep provider field availability documented (especially Android Google missing direct `accessToken`) and avoid documenting removed storage-adapter APIs.
+- Device verification: Maestro may return `UNAVAILABLE: io exception` on Android emulator sessions; if that happens, validate UI with `adb exec-out screencap -p` as fallback.
 - Public API must not reintroduce storage adapter exports/functions.
 - If auth payload shape changes, update:
   - `/Users/jota/Workspace/Projects/RN-Packages/react-native-nitro-auth/README.md`

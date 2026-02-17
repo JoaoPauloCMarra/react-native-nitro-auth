@@ -1,19 +1,20 @@
 import React, { useState } from "react";
+import type { ViewStyle, TextStyle } from "react-native";
 import {
   Pressable,
   Text,
   StyleSheet,
   View,
-  ViewStyle,
-  TextStyle,
   ActivityIndicator,
 } from "react-native";
 import { NitroModules } from "react-native-nitro-modules";
 import type { Auth, AuthProvider, AuthUser } from "../Auth.nitro";
 
-interface SocialButtonProps {
+export type SocialButtonVariant = "primary" | "outline" | "white" | "black";
+
+export type SocialButtonProps = {
   provider: AuthProvider;
-  variant?: "primary" | "outline" | "white" | "black";
+  variant?: SocialButtonVariant;
   borderRadius?: number;
   style?: ViewStyle;
   textStyle?: TextStyle;
@@ -21,14 +22,45 @@ interface SocialButtonProps {
   onSuccess?: (user: AuthUser) => void;
   onError?: (error: unknown) => void;
   onPress?: () => void;
-}
+};
+
+const PROVIDER_LABELS: Record<AuthProvider, string> = {
+  google: "Google",
+  apple: "Apple",
+  microsoft: "Microsoft",
+};
+
+const PROVIDER_PRIMARY_BACKGROUND: Record<AuthProvider, string> = {
+  google: "#4285F4",
+  apple: "#000000",
+  microsoft: "#2F2F2F",
+};
+
+const getBackgroundColor = ({
+  disabled,
+  variant,
+  provider,
+}: {
+  disabled: boolean;
+  variant: SocialButtonVariant;
+  provider: AuthProvider;
+}): string => {
+  if (disabled) return "#CCCCCC";
+  if (variant === "black") return "#000000";
+  if (variant === "white") return "#FFFFFF";
+  if (variant === "outline") return "transparent";
+  return PROVIDER_PRIMARY_BACKGROUND[provider];
+};
+
+const getTextColor = (variant: SocialButtonVariant): string =>
+  variant === "white" || variant === "outline" ? "#000000" : "#FFFFFF";
 
 async function performLogin(provider: AuthProvider): Promise<void> {
   const auth = NitroModules.createHybridObject<Auth>("Auth");
   await auth.login(provider);
 }
 
-export const SocialButton: React.FC<SocialButtonProps> = ({
+export const SocialButton = ({
   provider,
   variant = "primary",
   borderRadius = 8,
@@ -38,46 +70,30 @@ export const SocialButton: React.FC<SocialButtonProps> = ({
   onSuccess,
   onError,
   onPress,
-}) => {
+}: SocialButtonProps) => {
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (loading || disabled) return;
     if (onPress) {
       onPress();
       return;
     }
+
     setLoading(true);
-    performLogin(provider)
-      .then(() => {
-        setLoading(false);
-        const user = NitroModules.createHybridObject<Auth>("Auth").currentUser;
-        if (user) onSuccess?.(user);
-      })
-      .catch((e) => {
-        setLoading(false);
-        onError?.(e);
-      });
+    try {
+      await performLogin(provider);
+      const user = NitroModules.createHybridObject<Auth>("Auth").currentUser;
+      if (user) {
+        onSuccess?.(user);
+      }
+    } catch (error) {
+      onError?.(error);
+    } finally {
+      setLoading(false);
+    }
   };
-
-  const isGoogle = provider === "google";
-  const isMicrosoft = provider === "microsoft";
-  const isDisabled = loading || disabled;
-
-  const getBackgroundColor = () => {
-    if (isDisabled) return "#CCCCCC";
-    if (variant === "black") return "#000000";
-    if (variant === "white") return "#FFFFFF";
-    if (variant === "outline") return "transparent";
-    if (isGoogle) return "#4285F4";
-    if (isMicrosoft) return "#2F2F2F";
-    return "#000000";
-  };
-
-  const getTextColor = () => {
-    if (variant === "white" || variant === "outline") return "#000000";
-    return "#FFFFFF";
-  };
+  const isDisabled = loading || disabled === true;
 
   const getBorderColor = () => {
     if (variant === "outline") return "#DDDDDD";
@@ -89,7 +105,11 @@ export const SocialButton: React.FC<SocialButtonProps> = ({
       style={[
         styles.button,
         {
-          backgroundColor: getBackgroundColor(),
+          backgroundColor: getBackgroundColor({
+            disabled: isDisabled,
+            variant,
+            provider,
+          }),
           borderRadius,
           borderColor: getBorderColor(),
           borderWidth: variant === "outline" ? 1 : 0,
@@ -101,7 +121,7 @@ export const SocialButton: React.FC<SocialButtonProps> = ({
     >
       <View style={styles.content}>
         {loading ? (
-          <ActivityIndicator size="small" color={getTextColor()} />
+          <ActivityIndicator size="small" color={getTextColor(variant)} />
         ) : (
           <>
             {provider === "google" && variant !== "primary" && (
@@ -111,7 +131,9 @@ export const SocialButton: React.FC<SocialButtonProps> = ({
             )}
             {provider === "apple" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
-                <Text style={{ fontSize: 18, color: getTextColor() }}></Text>
+                <Text style={{ fontSize: 18, color: getTextColor(variant) }}>
+                  
+                </Text>
               </View>
             )}
             {provider === "microsoft" && variant !== "primary" && (
@@ -119,9 +141,10 @@ export const SocialButton: React.FC<SocialButtonProps> = ({
                 <Text style={{ fontSize: 16 }}>⊞</Text>
               </View>
             )}
-            <Text style={[styles.text, { color: getTextColor() }, textStyle]}>
-              Sign in with{" "}
-              {provider.charAt(0).toUpperCase() + provider.slice(1)}
+            <Text
+              style={[styles.text, { color: getTextColor(variant) }, textStyle]}
+            >
+              Sign in with {PROVIDER_LABELS[provider]}
             </Text>
           </>
         )}

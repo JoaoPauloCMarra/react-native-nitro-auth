@@ -1,5 +1,5 @@
-const { getDefaultConfig } = require("expo/metro-config");
 const path = require("path");
+const { getDefaultConfig } = require("expo/metro-config");
 
 const projectRoot = __dirname;
 const monorepoRoot = path.resolve(projectRoot, "../..");
@@ -20,7 +20,7 @@ config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
   "react-native-nitro-auth": path.resolve(
     monorepoRoot,
-    "packages/react-native-nitro-auth"
+    "packages/react-native-nitro-auth",
   ),
 };
 

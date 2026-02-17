@@ -98,8 +98,9 @@ object AuthAdapter {
 
     fun onSignInSuccess(account: GoogleSignInAccount, scopes: List<String>) {
         appContext ?: return
+        val expirationTime = getJwtExpirationTimeMs(account.idToken)
         nativeOnLoginSuccess("google", account.email, account.displayName,
-                            account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode, scopes.toTypedArray(), null)
+                            account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode, scopes.toTypedArray(), expirationTime)
     }
 
     fun onSignInError(errorCode: Int, message: String?) {
@@ -406,6 +407,15 @@ object AuthAdapter {
         }
     }
 
+    private fun getJwtExpirationTimeMs(idToken: String?): Long? {
+        if (idToken.isNullOrEmpty()) {
+            return null
+        }
+
+        val expSeconds = decodeJwt(idToken)["exp"]?.toLongOrNull() ?: return null
+        return expSeconds * 1000
+    }
+
     private fun getMicrosoftClientIdFromResources(context: Context): String? {
         val resId = context.resources.getIdentifier("nitro_auth_microsoft_client_id", "string", context.packageName)
         return if (resId != 0) context.getString(resId) else null
@@ -504,6 +514,7 @@ object AuthAdapter {
         }
 
         if (googleIdTokenCredential != null) {
+            val expirationTime = getJwtExpirationTimeMs(googleIdTokenCredential.idToken)
             nativeOnLoginSuccess(
                 "google",
                 googleIdTokenCredential.id,
@@ -513,7 +524,7 @@ object AuthAdapter {
                 null,
                 null,
                 scopes.toTypedArray(),
-                null
+                expirationTime
             )
         } else {
             Log.w(TAG, "Unsupported credential type: ${credential.type}")
@@ -571,7 +582,11 @@ object AuthAdapter {
             googleSignInClient!!.silentSignIn().addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     val acc = task.result
-                    nativeOnRefreshSuccess(acc?.idToken, null, null)
+                    nativeOnRefreshSuccess(
+                        acc?.idToken,
+                        null,
+                        getJwtExpirationTimeMs(acc?.idToken),
+                    )
                 } else {
                     nativeOnRefreshError("network_error", task.exception?.message ?: "Silent sign-in failed")
                 }
@@ -636,9 +651,10 @@ object AuthAdapter {
         val ctx = context.applicationContext ?: appContext ?: context
         val account = GoogleSignIn.getLastSignedInAccount(ctx)
         if (account != null) {
+            val expirationTime = getJwtExpirationTimeMs(account.idToken)
             nativeOnLoginSuccess("google", account.email, account.displayName,
                                 account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
-                                account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), null)
+                                account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), expirationTime)
         } else {
             val refreshToken = getMicrosoftRefreshToken()
             if (refreshToken != null) {

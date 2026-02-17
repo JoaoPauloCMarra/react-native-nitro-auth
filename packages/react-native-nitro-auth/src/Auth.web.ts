@@ -54,14 +54,113 @@ type AuthWebExtraConfig = {
   nitroAuthPersistTokensOnWeb?: boolean;
 };
 
+type JsonObject = Record<string, unknown>;
+
+class AuthWebError extends Error {
+  public readonly underlyingError?: string;
+
+  constructor(message: string, underlyingError?: string) {
+    super(message);
+    this.name = "AuthWebError";
+    this.underlyingError = underlyingError;
+  }
+}
+
+const isJsonObject = (value: unknown): value is JsonObject =>
+  typeof value === "object" && value !== null;
+
+const isAuthProvider = (value: unknown): value is AuthProvider =>
+  value === "google" || value === "apple" || value === "microsoft";
+
+const getOptionalString = (
+  source: JsonObject,
+  key: string,
+): string | undefined => {
+  const candidate = source[key];
+  return typeof candidate === "string" ? candidate : undefined;
+};
+
+const getOptionalNumber = (
+  source: JsonObject,
+  key: string,
+): number | undefined => {
+  const candidate = source[key];
+  return typeof candidate === "number" ? candidate : undefined;
+};
+
+const parseAuthUser = (value: unknown): AuthUser | undefined => {
+  if (!isJsonObject(value) || !isAuthProvider(value.provider)) {
+    return undefined;
+  }
+
+  const scopesCandidate = value.scopes;
+  const scopes = Array.isArray(scopesCandidate)
+    ? scopesCandidate.filter(
+        (scope): scope is string => typeof scope === "string",
+      )
+    : undefined;
+
+  return {
+    provider: value.provider,
+    email: getOptionalString(value, "email"),
+    name: getOptionalString(value, "name"),
+    photo: getOptionalString(value, "photo"),
+    idToken: getOptionalString(value, "idToken"),
+    accessToken: getOptionalString(value, "accessToken"),
+    refreshToken: getOptionalString(value, "refreshToken"),
+    serverAuthCode: getOptionalString(value, "serverAuthCode"),
+    scopes,
+    expirationTime: getOptionalNumber(value, "expirationTime"),
+    underlyingError: getOptionalString(value, "underlyingError"),
+  };
+};
+
+const parseScopes = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.filter((scope): scope is string => typeof scope === "string");
+};
+
+const parseAuthWebExtraConfig = (value: unknown): AuthWebExtraConfig => {
+  if (!isJsonObject(value)) {
+    return {};
+  }
+
+  const nitroAuthWebStorageCandidate = value.nitroAuthWebStorage;
+  const nitroAuthWebStorage =
+    nitroAuthWebStorageCandidate === STORAGE_MODE_SESSION ||
+    nitroAuthWebStorageCandidate === STORAGE_MODE_LOCAL ||
+    nitroAuthWebStorageCandidate === STORAGE_MODE_MEMORY
+      ? nitroAuthWebStorageCandidate
+      : undefined;
+
+  return {
+    googleWebClientId: getOptionalString(value, "googleWebClientId"),
+    microsoftClientId: getOptionalString(value, "microsoftClientId"),
+    microsoftTenant: getOptionalString(value, "microsoftTenant"),
+    microsoftB2cDomain: getOptionalString(value, "microsoftB2cDomain"),
+    appleWebClientId: getOptionalString(value, "appleWebClientId"),
+    nitroAuthWebStorage,
+    nitroAuthPersistTokensOnWeb:
+      typeof value.nitroAuthPersistTokensOnWeb === "boolean"
+        ? value.nitroAuthPersistTokensOnWeb
+        : undefined,
+  };
+};
+
 const getConfig = (): AuthWebExtraConfig => {
   try {
     const Constants = require("expo-constants").default;
-    return Constants.expoConfig?.extra || {};
+    return parseAuthWebExtraConfig(Constants.expoConfig?.extra);
   } catch (error) {
-    logger.debug("expo-constants unavailable on web, falling back to defaults", {
-      error: String(error),
-    });
+    logger.debug(
+      "expo-constants unavailable on web, falling back to defaults",
+      {
+        error: String(error),
+      },
+    );
     return {};
   }
 };
@@ -78,32 +177,24 @@ class AuthWeb implements Auth {
   }
 
   private isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-    return (
-      typeof value === "object" &&
-      value !== null &&
-      "then" in value &&
-      typeof (value as { then: unknown }).then === "function"
-    );
+    if (!isJsonObject(value)) {
+      return false;
+    }
+    return typeof value.then === "function";
   }
 
-  private createWebStorageDriver(
-    adapter: JSStorageAdapter,
-  ): WebStorageDriver {
+  private createWebStorageDriver(adapter: JSStorageAdapter): WebStorageDriver {
     return {
       save: (key, value) => {
         const result = adapter.save(key, value);
         if (this.isPromiseLike(result)) {
-          throw new Error(
-            "On web, JSStorageAdapter.save must be synchronous.",
-          );
+          throw new Error("On web, JSStorageAdapter.save must be synchronous.");
         }
       },
       load: (key) => {
         const result = adapter.load(key);
         if (this.isPromiseLike(result)) {
-          throw new Error(
-            "On web, JSStorageAdapter.load must be synchronous.",
-          );
+          throw new Error("On web, JSStorageAdapter.load must be synchronous.");
         }
         return result;
       },
@@ -151,10 +242,13 @@ class AuthWeb implements Auth {
       storage.removeItem(testKey);
       return storage;
     } catch (error) {
-      logger.warn("Configured web storage is unavailable; using in-memory fallback", {
-        mode,
-        error: String(error),
-      });
+      logger.warn(
+        "Configured web storage is unavailable; using in-memory fallback",
+        {
+          mode,
+          error: String(error),
+        },
+      );
       return undefined;
     }
   }
@@ -248,7 +342,10 @@ class AuthWeb implements Auth {
 
     if (cached) {
       try {
-        const parsedUser = JSON.parse(cached) as AuthUser;
+        const parsedUser = parseAuthUser(JSON.parse(cached));
+        if (!parsedUser) {
+          throw new Error("Expected cached auth user to be a valid AuthUser");
+        }
         if (this.shouldPersistTokensInStorage()) {
           this._currentUser = parsedUser;
         } else {
@@ -270,13 +367,11 @@ class AuthWeb implements Auth {
 
     if (scopes) {
       try {
-        const parsedScopes = JSON.parse(scopes) as unknown;
-        if (!Array.isArray(parsedScopes)) {
+        const parsedScopes = parseScopes(JSON.parse(scopes));
+        if (!parsedScopes) {
           throw new Error("Expected cached scopes to be an array");
         }
-        this._grantedScopes = parsedScopes.filter(
-          (scope): scope is string => typeof scope === "string",
-        );
+        this._grantedScopes = parsedScopes;
       } catch (error) {
         logger.warn("Failed to parse cached scopes; clearing cache", {
           error: String(error),
@@ -324,7 +419,9 @@ class AuthWeb implements Auth {
   }
 
   private notify() {
-    this._listeners.forEach((l) => l(this._currentUser));
+    this._listeners.forEach((l) => {
+      l(this._currentUser);
+    });
   }
 
   async login(provider: AuthProvider, options?: LoginOptions): Promise<void> {
@@ -401,7 +498,7 @@ class AuthWeb implements Auth {
     return this._currentUser?.accessToken;
   }
 
-  async refreshToken(): Promise<{ accessToken?: string; idToken?: string }> {
+  async refreshToken(): Promise<AuthTokens> {
     if (!this._currentUser) {
       throw new Error("No user logged in");
     }
@@ -440,36 +537,52 @@ class AuthWeb implements Auth {
         body: body.toString(),
       });
 
-      const json = await response.json();
+      const json = await this.parseResponseObject(response);
       if (!response.ok) {
         throw new Error(
-          json.error_description ?? json.error ?? "Token refresh failed",
+          getOptionalString(json, "error_description") ??
+            getOptionalString(json, "error") ??
+            "Token refresh failed",
         );
       }
 
-      const idToken = json.id_token;
-      const accessToken = json.access_token;
-      const newRefreshToken = json.refresh_token;
-      const expiresIn = json.expires_in;
+      const idToken = getOptionalString(json, "id_token");
+      const accessToken = getOptionalString(json, "access_token");
+      const newRefreshToken = getOptionalString(json, "refresh_token");
+      const expiresInSeconds = getOptionalNumber(json, "expires_in");
 
       if (newRefreshToken) {
         this.saveRefreshToken(newRefreshToken);
       }
 
-      const claims = this.decodeMicrosoftJwt(idToken);
+      const expirationTime =
+        typeof expiresInSeconds === "number"
+          ? Date.now() + expiresInSeconds * 1000
+          : undefined;
+
+      const effectiveIdToken = idToken ?? this._currentUser.idToken;
+      const claims = effectiveIdToken
+        ? this.decodeMicrosoftJwt(effectiveIdToken)
+        : {};
       const user: AuthUser = {
         ...this._currentUser,
-        idToken,
+        idToken: effectiveIdToken,
         accessToken: accessToken ?? undefined,
-        expirationTime: expiresIn
-          ? Date.now() + parseInt(expiresIn, 10) * 1000
-          : undefined,
+        refreshToken: newRefreshToken ?? this._currentUser.refreshToken,
+        expirationTime,
         ...claims,
       };
       this.updateUser(user);
 
-      const tokens = { accessToken, idToken };
-      this._tokenListeners.forEach((l) => l(tokens));
+      const tokens: AuthTokens = {
+        accessToken: accessToken ?? undefined,
+        idToken: effectiveIdToken,
+        refreshToken: newRefreshToken ?? undefined,
+        expirationTime,
+      };
+      this._tokenListeners.forEach((l) => {
+        l(tokens);
+      });
       return tokens;
     }
 
@@ -483,11 +596,15 @@ class AuthWeb implements Auth {
     await this.loginGoogle(
       this._grantedScopes.length > 0 ? this._grantedScopes : DEFAULT_SCOPES,
     );
-    const tokens = {
+    const tokens: AuthTokens = {
       accessToken: this._currentUser.accessToken,
       idToken: this._currentUser.idToken,
+      refreshToken: this._currentUser.refreshToken,
+      expirationTime: this._currentUser.expirationTime,
     };
-    this._tokenListeners.forEach((l) => l(tokens));
+    this._tokenListeners.forEach((l) => {
+      l(tokens);
+    });
     return tokens;
   }
 
@@ -508,7 +625,28 @@ class AuthWeb implements Auth {
       mappedMsg = "configuration_error";
     }
 
-    return Object.assign(new Error(mappedMsg), { underlyingError: rawMessage });
+    return new AuthWebError(mappedMsg, rawMessage);
+  }
+
+  private async parseResponseObject(response: Response): Promise<JsonObject> {
+    const parsed: unknown = await response.json();
+    if (!isJsonObject(parsed)) {
+      throw new Error("Expected JSON object response from auth provider");
+    }
+    return parsed;
+  }
+
+  private parseJwtPayload(token: string): JsonObject {
+    const payload = token.split(".")[1];
+    if (!payload) {
+      throw new Error("Invalid JWT payload");
+    }
+
+    const decoded: unknown = JSON.parse(atob(payload));
+    if (!isJsonObject(decoded)) {
+      throw new Error("Expected JWT payload to be an object");
+    }
+    return decoded;
   }
 
   private waitForPopupRedirect(
@@ -534,11 +672,7 @@ class AuthWeb implements Auth {
 
       const timeoutId = window.setTimeout(() => {
         cleanup(intervalId, timeoutId, true);
-        reject(
-          new Error(
-            `${provider.toLowerCase()}_auth_timeout`,
-          ),
-        );
+        reject(new Error(`${provider.toLowerCase()}_auth_timeout`));
       }, POPUP_TIMEOUT_MS);
 
       const intervalId = window.setInterval(() => {
@@ -567,8 +701,12 @@ class AuthWeb implements Auth {
 
         cleanup(intervalId, timeoutId, true);
         void Promise.resolve(onRedirect(url))
-          .then(() => resolve())
-          .catch((error: unknown) => reject(error));
+          .then(() => {
+            resolve();
+          })
+          .catch((error: unknown) => {
+            reject(error);
+          });
       }, POPUP_POLL_INTERVAL_MS);
     });
   }
@@ -617,52 +755,50 @@ class AuthWeb implements Auth {
         return;
       }
 
-      void this.waitForPopupRedirect(
-        popup,
-        redirectUri,
-        "Google",
-        (url) => {
-          const hash = new URL(url).hash.slice(1);
-          const params = new URLSearchParams(hash);
-          const idToken = params.get("id_token");
-          const accessToken = params.get("access_token");
-          const expiresIn = params.get("expires_in");
-          const code = params.get("code");
+      void this.waitForPopupRedirect(popup, redirectUri, "Google", (url) => {
+        const hash = new URL(url).hash.slice(1);
+        const params = new URLSearchParams(hash);
+        const idToken = params.get("id_token");
+        const accessToken = params.get("access_token");
+        const expiresIn = params.get("expires_in");
+        const code = params.get("code");
 
-          if (!idToken) {
-            throw new Error("No id_token in response");
-          }
+        if (!idToken) {
+          throw new Error("No id_token in response");
+        }
 
-          this._grantedScopes = scopes;
-          this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
+        this._grantedScopes = scopes;
+        this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
 
-          const user: AuthUser = {
-            provider: "google",
-            idToken,
-            accessToken: accessToken ?? undefined,
-            serverAuthCode: code ?? undefined,
-            scopes,
-            expirationTime: expiresIn
-              ? Date.now() + parseInt(expiresIn, 10) * 1000
-              : undefined,
-            ...this.decodeGoogleJwt(idToken),
-          };
-          this.updateUser(user);
-        },
-      )
-        .then(() => resolve())
-        .catch((error: unknown) => reject(error));
+        const user: AuthUser = {
+          provider: "google",
+          idToken,
+          accessToken: accessToken ?? undefined,
+          serverAuthCode: code ?? undefined,
+          scopes,
+          expirationTime: expiresIn
+            ? Date.now() + parseInt(expiresIn, 10) * 1000
+            : undefined,
+          ...this.decodeGoogleJwt(idToken),
+        };
+        this.updateUser(user);
+      })
+        .then(() => {
+          resolve();
+        })
+        .catch((error: unknown) => {
+          reject(error);
+        });
     });
   }
 
   private decodeGoogleJwt(token: string): Partial<AuthUser> {
     try {
-      const payload = token.split(".")[1];
-      const decoded = JSON.parse(atob(payload));
+      const decoded = this.parseJwtPayload(token);
       return {
-        email: decoded.email,
-        name: decoded.name,
-        photo: decoded.picture,
+        email: getOptionalString(decoded, "email"),
+        name: getOptionalString(decoded, "name"),
+        photo: getOptionalString(decoded, "picture"),
       };
     } catch (error) {
       logger.warn("Failed to decode Google ID token", { error: String(error) });
@@ -769,8 +905,12 @@ class AuthWeb implements Auth {
           );
         },
       )
-        .then(() => resolve())
-        .catch((error: unknown) => reject(error));
+        .then(() => {
+          resolve();
+        })
+        .catch((error: unknown) => {
+          reject(error);
+        });
     });
   }
 
@@ -824,28 +964,30 @@ class AuthWeb implements Auth {
       body: body.toString(),
     });
 
-    const json = await response.json();
+    const json = await this.parseResponseObject(response);
 
     if (!response.ok) {
       throw new Error(
-        json.error_description ?? json.error ?? "Token exchange failed",
+        getOptionalString(json, "error_description") ??
+          getOptionalString(json, "error") ??
+          "Token exchange failed",
       );
     }
 
-    const idToken = json.id_token;
+    const idToken = getOptionalString(json, "id_token");
     if (!idToken) {
       throw new Error("No id_token in token response");
     }
 
     const claims = this.decodeMicrosoftJwt(idToken);
-    const payload = JSON.parse(atob(idToken.split(".")[1]));
-    if (payload.nonce !== expectedNonce) {
+    const payload = this.parseJwtPayload(idToken);
+    if (getOptionalString(payload, "nonce") !== expectedNonce) {
       throw new Error("Nonce mismatch - token may be replayed");
     }
 
-    const accessToken = json.access_token;
-    const refreshToken = json.refresh_token;
-    const expiresIn = json.expires_in;
+    const accessToken = getOptionalString(json, "access_token");
+    const refreshToken = getOptionalString(json, "refresh_token");
+    const expiresInSeconds = getOptionalNumber(json, "expires_in");
 
     if (refreshToken) {
       this.saveRefreshToken(refreshToken);
@@ -858,10 +1000,12 @@ class AuthWeb implements Auth {
       provider: "microsoft",
       idToken,
       accessToken: accessToken ?? undefined,
+      refreshToken: refreshToken ?? undefined,
       scopes,
-      expirationTime: expiresIn
-        ? Date.now() + parseInt(expiresIn, 10) * 1000
-        : undefined,
+      expirationTime:
+        typeof expiresInSeconds === "number"
+          ? Date.now() + expiresInSeconds * 1000
+          : undefined,
       ...claims,
     };
     this.updateUser(user);
@@ -881,11 +1025,12 @@ class AuthWeb implements Auth {
 
   private decodeMicrosoftJwt(token: string): Partial<AuthUser> {
     try {
-      const payload = token.split(".")[1];
-      const decoded = JSON.parse(atob(payload));
+      const decoded = this.parseJwtPayload(token);
       return {
-        email: decoded.preferred_username ?? decoded.email,
-        name: decoded.name,
+        email:
+          getOptionalString(decoded, "preferred_username") ??
+          getOptionalString(decoded, "email"),
+        name: getOptionalString(decoded, "name"),
       };
     } catch (error) {
       logger.warn("Failed to decode Microsoft ID token", {
@@ -935,9 +1080,13 @@ class AuthWeb implements Auth {
             this.updateUser(user);
             resolve();
           })
-          .catch((err: unknown) => reject(this.mapError(err)));
+          .catch((err: unknown) => {
+            reject(this.mapError(err));
+          });
       };
-      script.onerror = () => reject(new Error("Failed to load Apple SDK"));
+      script.onerror = () => {
+        reject(new Error("Failed to load Apple SDK"));
+      };
       document.head.appendChild(script);
     });
   }

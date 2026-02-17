@@ -1,29 +1,31 @@
-const mockHybridObject = {
-  name: "Auth",
-  currentUser: undefined,
-  grantedScopes: [],
-  hasPlayServices: true,
-  login: jest.fn(),
-  logout: jest.fn(),
-  requestScopes: jest.fn(),
-  revokeScopes: jest.fn(),
-  getAccessToken: jest.fn(),
-  refreshToken: jest.fn(),
-  onAuthStateChanged: jest.fn(() => jest.fn()),
-  onTokensRefreshed: jest.fn(() => jest.fn()),
-  setLoggingEnabled: jest.fn(),
-  dispose: jest.fn(),
-  equals: jest.fn(),
-};
-
-jest.mock("react-native-nitro-modules", () => ({
-  NitroModules: {
-    createHybridObject: jest.fn(() => mockHybridObject),
-  },
-}));
-
-import { AuthService } from "../service";
 import { NitroModules } from "react-native-nitro-modules";
+import { AuthService } from "../service";
+
+jest.mock("react-native-nitro-modules", () => {
+  const mockHybridObject = {
+    name: "Auth",
+    currentUser: undefined,
+    grantedScopes: [],
+    hasPlayServices: true,
+    login: jest.fn(),
+    logout: jest.fn(),
+    requestScopes: jest.fn(),
+    revokeScopes: jest.fn(),
+    getAccessToken: jest.fn(),
+    refreshToken: jest.fn(),
+    onAuthStateChanged: jest.fn(() => jest.fn()),
+    onTokensRefreshed: jest.fn(() => jest.fn()),
+    setLoggingEnabled: jest.fn(),
+    dispose: jest.fn(),
+    equals: jest.fn(),
+  };
+
+  return {
+    NitroModules: {
+      createHybridObject: jest.fn(() => mockHybridObject),
+    },
+  };
+});
 
 describe("AuthService", () => {
   it("should create hybrid object with correct name", () => {

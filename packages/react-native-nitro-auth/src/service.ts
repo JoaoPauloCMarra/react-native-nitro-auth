@@ -71,7 +71,7 @@ export const AuthService: Auth = {
     nitroAuth.dispose();
   },
 
-  equals(other: unknown): boolean {
-    return (nitroAuth as { equals(o: unknown): boolean }).equals(other);
+  equals(other: Parameters<Auth["equals"]>[0]): boolean {
+    return nitroAuth.equals(other);
   },
 };

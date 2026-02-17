@@ -1,0 +1,7 @@
+node_modules
+android
+ios
+lib
+nitrogen/generated
+coverage
+cpp/build
