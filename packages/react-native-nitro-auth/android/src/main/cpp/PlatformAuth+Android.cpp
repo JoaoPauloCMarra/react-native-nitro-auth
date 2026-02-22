@@ -6,6 +6,8 @@
 #include <fbjni/fbjni.h>
 #include <NitroModules/NitroLogger.hpp>
 #include <NitroModules/Promise.hpp>
+#include <exception>
+#include <stdexcept>
 
 namespace margelo::nitro::NitroAuth {
 
@@ -24,6 +26,33 @@ static std::shared_ptr<Promise<AuthUser>> gScopesPromise;
 static std::shared_ptr<Promise<AuthTokens>> gRefreshPromise;
 static std::shared_ptr<Promise<std::optional<AuthUser>>> gSilentPromise;
 static std::mutex gMutex;
+static jclass gAuthAdapterClass = nullptr;
+static jmethodID gLoginMethod = nullptr;
+static jmethodID gRequestScopesMethod = nullptr;
+
+static void ensureAuthAdapterMethods(JNIEnv* env) {
+    if (gAuthAdapterClass != nullptr && gLoginMethod != nullptr && gRequestScopesMethod != nullptr) {
+        return;
+    }
+
+    jclass localAdapterClass = env->FindClass("com/auth/AuthAdapter");
+    if (localAdapterClass == nullptr) {
+        throw std::runtime_error("Unable to resolve com/auth/AuthAdapter");
+    }
+    gAuthAdapterClass = static_cast<jclass>(env->NewGlobalRef(localAdapterClass));
+    env->DeleteLocalRef(localAdapterClass);
+
+    gLoginMethod = env->GetStaticMethodID(
+        gAuthAdapterClass,
+        "loginSync",
+        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;ZZZLjava/lang/String;Ljava/lang/String;)V"
+    );
+    gRequestScopesMethod = env->GetStaticMethodID(
+        gAuthAdapterClass,
+        "requestScopesSync",
+        "(Landroid/content/Context;[Ljava/lang/String;)V"
+    );
+}
 
 std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, const std::optional<LoginOptions>& options) {
     auto promise = Promise<AuthUser>::create();
@@ -35,6 +64,9 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     
     {
         std::lock_guard<std::mutex> lock(gMutex);
+        if (gLoginPromise) {
+            gLoginPromise->reject(std::make_exception_ptr(std::runtime_error("Login request superseded by a newer request")));
+        }
         gLoginPromise = promise;
     }
     
@@ -71,30 +103,47 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     }
 
     JNIEnv* env = Environment::current();
+    try {
+        ensureAuthAdapterMethods(env);
+    } catch (...) {
+        promise->reject(std::current_exception());
+        return promise;
+    }
     jclass stringClass = env->FindClass("java/lang/String");
     jobjectArray jScopes = env->NewObjectArray(scopes.size(), stringClass, nullptr);
     for (size_t i = 0; i < scopes.size(); i++) {
         env->SetObjectArrayElement(jScopes, i, make_jstring(scopes[i]).get());
     }
     
-    jstring jLoginHint = loginHint.has_value() ? make_jstring(loginHint.value()).get() : nullptr;
-    jstring jTenant = tenant.has_value() ? make_jstring(tenant.value()).get() : nullptr;
-    jstring jPrompt = prompt.has_value() ? make_jstring(prompt.value()).get() : nullptr;
-    
-    jclass adapterClass = env->FindClass("com/auth/AuthAdapter");
-    jmethodID loginMethod = env->GetStaticMethodID(adapterClass, "loginSync", 
-        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;ZZZLjava/lang/String;Ljava/lang/String;)V");
-    env->CallStaticVoidMethod(adapterClass, loginMethod, 
+    local_ref<JString> providerRef = make_jstring(providerStr);
+    local_ref<JString> loginHintRef;
+    local_ref<JString> tenantRef;
+    local_ref<JString> promptRef;
+
+    if (loginHint.has_value()) {
+        loginHintRef = make_jstring(loginHint.value());
+    }
+    if (tenant.has_value()) {
+        tenantRef = make_jstring(tenant.value());
+    }
+    if (prompt.has_value()) {
+        promptRef = make_jstring(prompt.value());
+    }
+
+    env->CallStaticVoidMethod(gAuthAdapterClass, gLoginMethod, 
         contextPtr, 
-        make_jstring(providerStr).get(),
+        providerRef.get(),
         nullptr,
         jScopes,
-        jLoginHint,
+        loginHintRef.get(),
         (jboolean)useOneTap,
         (jboolean)forceAccountPicker,
         (jboolean)useLegacyGoogleSignIn,
-        jTenant,
-        jPrompt);
+        tenantRef.get(),
+        promptRef.get());
+
+    env->DeleteLocalRef(jScopes);
+    env->DeleteLocalRef(stringClass);
     
     return promise;
 }
@@ -109,20 +158,28 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector
     
     {
         std::lock_guard<std::mutex> lock(gMutex);
+        if (gScopesPromise) {
+            gScopesPromise->reject(std::make_exception_ptr(std::runtime_error("Scope request superseded by a newer request")));
+        }
         gScopesPromise = promise;
     }
     
     JNIEnv* env = Environment::current();
+    try {
+        ensureAuthAdapterMethods(env);
+    } catch (...) {
+        promise->reject(std::current_exception());
+        return promise;
+    }
     jclass stringClass = env->FindClass("java/lang/String");
     jobjectArray jScopes = env->NewObjectArray(scopes.size(), stringClass, nullptr);
     for (size_t i = 0; i < scopes.size(); i++) {
         env->SetObjectArrayElement(jScopes, i, make_jstring(scopes[i]).get());
     }
     
-    jclass adapterClass = env->FindClass("com/auth/AuthAdapter");
-    jmethodID requestMethod = env->GetStaticMethodID(adapterClass, "requestScopesSync", 
-        "(Landroid/content/Context;[Ljava/lang/String;)V");
-    env->CallStaticVoidMethod(adapterClass, requestMethod, contextPtr, jScopes);
+    env->CallStaticVoidMethod(gAuthAdapterClass, gRequestScopesMethod, contextPtr, jScopes);
+    env->DeleteLocalRef(jScopes);
+    env->DeleteLocalRef(stringClass);
     return promise;
 }
 
@@ -136,6 +193,9 @@ std::shared_ptr<Promise<AuthTokens>> PlatformAuth::refreshToken() {
     
     {
         std::lock_guard<std::mutex> lock(gMutex);
+        if (gRefreshPromise) {
+            gRefreshPromise->reject(std::make_exception_ptr(std::runtime_error("Refresh request superseded by a newer request")));
+        }
         gRefreshPromise = promise;
     }
     
@@ -155,6 +215,9 @@ std::shared_ptr<Promise<std::optional<AuthUser>>> PlatformAuth::silentRestore() 
 
     {
         std::lock_guard<std::mutex> lock(gMutex);
+        if (gSilentPromise) {
+            gSilentPromise->reject(std::make_exception_ptr(std::runtime_error("Silent restore superseded by a newer request")));
+        }
         gSilentPromise = promise;
     }
 
@@ -182,8 +245,8 @@ void PlatformAuth::logout() {
     logoutMethod(JAuthAdapter::javaClassStatic(), static_ref_cast<JContext>(jContext));
 }
 
-extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeInitialize(JNIEnv* env, jclass, jobject context) {
-    AuthCache::setAndroidContext(env->NewGlobalRef(context));
+extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeInitialize(JNIEnv*, jclass, jobject context) {
+    AuthCache::setAndroidContext(context);
 }
 
 extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess(
@@ -253,6 +316,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess
             const char* s = env->GetStringUTFChars(jstr, nullptr);
             scopeVec.push_back(std::string(s));
             env->ReleaseStringUTFChars(jstr, s);
+            env->DeleteLocalRef(jstr);
         }
         user.scopes = scopeVec;
     }
@@ -260,6 +324,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess
         jclass longClass = env->FindClass("java/lang/Long");
         jmethodID longValueMethod = env->GetMethodID(longClass, "longValue", "()J");
         user.expirationTime = (double)env->CallLongMethod(expirationTime, longValueMethod);
+        env->DeleteLocalRef(longClass);
     }
     
     if (loginPromise) loginPromise->resolve(user);
@@ -328,6 +393,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshSucce
             jclass longClass = env->FindClass("java/lang/Long");
             jmethodID longValueMethod = env->GetMethodID(longClass, "longValue", "()J");
             tokens.expirationTime = (double)env->CallLongMethod(expirationTime, longValueMethod);
+            env->DeleteLocalRef(longClass);
         }
         refreshPromise->resolve(tokens);
     }

@@ -1,24 +1,32 @@
 # React Native Nitro Auth - Agent Notes
 
-- Use `bun`/`bunx` only.
-- Monorepo dependency updates: run from root, then verify `packages/react-native-nitro-auth` and `apps/example`.
-- Tooling baseline: use `eslint-config-expo-magic` with flat config and keep `format`, `format:check`, `lint`, and `typecheck` scripts available in workspaces used by Turbo.
-- Keep package auth-only and stateless on native:
-  - No internal persistence in iOS/Android for user/session/token data.
-  - `silentRestore()` should rely on provider SDK session restore only.
-  - Never dereference `std::optional<AuthUser>` without checking (`silentRestore` crash risk on iOS).
-- Web persistence nuance: default `sessionStorage` cache is non-sensitive; sensitive tokens remain memory-only unless explicitly enabled.
-- Example app parity rule: set `expo.extra.nitroAuthWebStorage = "memory"` so package stays stateless on web; demo persistence must come from `react-native-nitro-storage` Disk (`localStorage` fallback on web).
-- Type safety baseline: keep `Auth.web` JSON parsing/runtime guards (`parseAuthUser`, `parseScopes`, `parseResponseObject`) and return full `AuthTokens` shape from refresh paths.
-- App-owned persistence belongs in consuming apps (example uses `react-native-nitro-storage` Disk).
-- Example persistence rule: keep Disk snapshot across refresh/restart, clear snapshot only on explicit logout.
-- Example should merge token refresh events into Disk snapshot so `accessToken`/`expirationTime` survive reloads.
-- Keep `HybridAuth::login` scope precedence as: provider-returned scopes first, requested options second, otherwise empty. Never overwrite provider scopes with empty options.
-- Android Google: One Tap/Legacy provides `idToken` (+ optional `serverAuthCode`), not direct OAuth `accessToken`. Derive `expirationTime` from ID token `exp` claim for UI parity.
-- README accuracy: keep provider field availability documented (especially Android Google missing direct `accessToken`) and avoid documenting removed storage-adapter APIs.
-- Device verification: Maestro may return `UNAVAILABLE: io exception` on Android emulator sessions; if that happens, validate UI with `adb exec-out screencap -p` as fallback.
-- Public API must not reintroduce storage adapter exports/functions.
-- If auth payload shape changes, update:
+Nitro Auth must stay provider-driven and stateless by default.
+
+## Essentials
+
+- Use `bun` / `bunx` only.
+- Run monorepo dependency changes from root and verify both `packages/react-native-nitro-auth` and `apps/example`.
+- Keep native auth stateless: no internal token/user/session persistence in iOS/Android.
+- Do not reintroduce storage-adapter exports/functions in public API.
+- If auth payload shape changes, also update:
   - `/Users/jota/Workspace/Projects/RN-Packages/react-native-nitro-auth/README.md`
   - `/Users/jota/Workspace/Projects/RN-Packages/react-native-nitro-auth/apps/example/components/FeatureDemo.tsx`
-  - tests in `/Users/jota/Workspace/Projects/RN-Packages/react-native-nitro-auth/packages/react-native-nitro-auth/src/__tests__`
+  - `/Users/jota/Workspace/Projects/RN-Packages/react-native-nitro-auth/packages/react-native-nitro-auth/src/__tests__`
+
+## Detailed Instructions
+
+- [Auth Contract](docs/agent-instructions/auth-contract.md)
+- [Web and Example Persistence](docs/agent-instructions/web-and-example-persistence.md)
+- [Tooling and Verification](docs/agent-instructions/tooling-and-verification.md)
+
+## Regression Guards
+
+- Keep token refresh single-flight on both web and C++ `HybridAuth` to prevent parallel refresh storms.
+- Keep `AuthService.onAuthStateChanged` as payload passthrough; do not re-read `currentUser` inside callback wrappers.
+- Web auth config/storage mode is resolved once per module instance; avoid re-probing browser storage on each read/write.
+- Keep Apple web SDK loading idempotent (single script load promise).
+- JWT payload parsing must support base64url (`-`, `_`, missing padding) across web/iOS Microsoft flows.
+- Android C++ bridge pending promises are replace-and-reject; never silently overwrite in-flight `login/requestScopes/refresh/silentRestore`.
+- In Android `fbjni` code, prefer `local_ref<JString>` for `make_jstring(...)` values and avoid ternary mixes with `local_ref<jstring>` (ambiguous conversion on NDK clang).
+- Keep `bun run verify:core-versions` passing: `react`/`react-dom` pinned to `19.1.0` and `react-native` pinned to `0.81.5`.
+- Expo SDK 54 / compileSdk 35 compatibility: keep `androidx.browser` on `1.8.x` (1.9+ requires compileSdk 36).

@@ -288,6 +288,8 @@ public class AuthAdapter: NSObject {
     guard parts.count >= 2 else { return [:] }
     
     var base64 = parts[1]
+      .replacingOccurrences(of: "-", with: "+")
+      .replacingOccurrences(of: "_", with: "/")
     let remainder = base64.count % 4
     if remainder > 0 {
       base64 += String(repeating: "=", count: 4 - remainder)

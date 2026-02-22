@@ -119,9 +119,14 @@ async function main() {
       const npmUser = execCommandWithOutput("npm whoami");
       console.log(`  ✓ Logged in to npm as: ${npmUser}`);
     }
-
-    console.log("");
   }
+
+  log("🔒 Verifying pinned core dependency versions...", "cyan");
+  if (!execCommand("bun run verify:core-versions")) {
+    log("✗ Core dependency version guard failed", "red");
+    process.exit(1);
+  }
+  console.log("");
 
   log("🧪 Running tests...", "cyan");
   if (!execCommand("bun run test", { cwd: packageDir })) {

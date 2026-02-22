@@ -234,6 +234,42 @@ describe("useAuth", () => {
       expect(result.current.error).toBeInstanceOf(Error);
       expect(result.current.error?.message).toBe("String error");
     });
+
+    it("should avoid duplicate user state writes when auth callback fires during login", async () => {
+      let authStateCallback: ((user: AuthUser | undefined) => void) | null =
+        null;
+      mockOnAuthStateChanged.mockImplementation((callback) => {
+        authStateCallback = callback;
+        return () => {
+          authStateCallback = null;
+        };
+      });
+
+      const user: AuthUser = {
+        provider: "google",
+        email: "sync@example.com",
+      };
+      mockScopes = ["email"];
+      mockLogin.mockImplementation(async () => {
+        mockCurrentUser = user;
+        authStateCallback?.(user);
+      });
+
+      let renderCount = 0;
+      const { result } = renderHook(() => {
+        renderCount += 1;
+        return useAuth();
+      });
+
+      expect(mockOnAuthStateChanged).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await result.current.login("google");
+      });
+
+      expect(result.current.user).toEqual(user);
+      expect(renderCount).toBeLessThanOrEqual(3);
+    });
   });
 
   describe("logout", () => {

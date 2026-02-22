@@ -209,7 +209,16 @@ std::shared_ptr<Promise<std::optional<std::string>>> HybridAuth::getAccessToken(
 }
 
 std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
-  auto promise = Promise<AuthTokens>::create();
+  std::shared_ptr<Promise<AuthTokens>> promise;
+  {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (_refreshInFlight) {
+      return _refreshInFlight;
+    }
+    promise = Promise<AuthTokens>::create();
+    _refreshInFlight = promise;
+  }
+
   auto refreshPromise = PlatformAuth::refreshToken();
   refreshPromise->addOnResolvedListener([this, promise](const AuthTokens& tokens) {
     {
@@ -228,13 +237,22 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
           _currentUser->expirationTime = tokens.expirationTime;
         }
       }
+      if (_refreshInFlight == promise) {
+        _refreshInFlight = nullptr;
+      }
     }
     notifyTokensRefreshed(tokens);
     notifyAuthStateChanged();
     promise->resolve(tokens);
   });
   
-  refreshPromise->addOnRejectedListener([promise](const std::exception_ptr& error) {
+  refreshPromise->addOnRejectedListener([this, promise](const std::exception_ptr& error) {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_refreshInFlight == promise) {
+        _refreshInFlight = nullptr;
+      }
+    }
     promise->reject(error);
   });
   return promise;

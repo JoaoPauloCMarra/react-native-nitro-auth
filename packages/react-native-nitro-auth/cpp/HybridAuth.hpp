@@ -46,6 +46,7 @@ private:
   
   std::map<int, std::function<void(const AuthTokens&)>> _tokenListeners;
   int _nextTokenListenerId = 0;
+  std::shared_ptr<Promise<AuthTokens>> _refreshInFlight;
   
   std::mutex _mutex;
 
