@@ -54,8 +54,8 @@ export const AuthService: Auth = {
   },
 
   onAuthStateChanged(callback: (user: AuthUser | undefined) => void) {
-    return nitroAuth.onAuthStateChanged(() => {
-      callback(AuthService.currentUser);
+    return nitroAuth.onAuthStateChanged((user) => {
+      callback(user);
     });
   },
 

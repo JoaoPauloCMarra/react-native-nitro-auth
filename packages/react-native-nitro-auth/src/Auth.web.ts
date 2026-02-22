@@ -166,13 +166,19 @@ const getConfig = (): AuthWebExtraConfig => {
 };
 
 class AuthWeb implements Auth {
+  private readonly _config: AuthWebExtraConfig;
   private _currentUser: AuthUser | undefined;
   private _grantedScopes: string[] = [];
   private _listeners: ((user: AuthUser | undefined) => void)[] = [];
   private _tokenListeners: ((tokens: AuthTokens) => void)[] = [];
   private _storageAdapter: WebStorageDriver | undefined;
+  private _browserStorageResolved = false;
+  private _browserStorageCache: Storage | undefined;
+  private _refreshPromise: Promise<AuthTokens> | undefined;
+  private _appleSdkLoadPromise: Promise<void> | undefined;
 
   constructor() {
+    this._config = getConfig();
     this.loadFromCache();
   }
 
@@ -213,11 +219,11 @@ class AuthWeb implements Auth {
     if (this._storageAdapter) {
       return true;
     }
-    return getConfig().nitroAuthPersistTokensOnWeb === true;
+    return this._config.nitroAuthPersistTokensOnWeb === true;
   }
 
   private getWebStorageMode(): "session" | "local" | "memory" {
-    const configuredMode = getConfig().nitroAuthWebStorage;
+    const configuredMode = this._config.nitroAuthWebStorage;
     if (configuredMode && WEB_STORAGE_MODES.has(configuredMode)) {
       return configuredMode;
     }
@@ -225,12 +231,19 @@ class AuthWeb implements Auth {
   }
 
   private getBrowserStorage(): Storage | undefined {
+    if (this._browserStorageResolved) {
+      return this._browserStorageCache;
+    }
+
+    this._browserStorageResolved = true;
     if (typeof window === "undefined") {
+      this._browserStorageCache = undefined;
       return undefined;
     }
 
     const mode = this.getWebStorageMode();
     if (mode === STORAGE_MODE_MEMORY) {
+      this._browserStorageCache = undefined;
       return undefined;
     }
 
@@ -240,6 +253,7 @@ class AuthWeb implements Auth {
       const testKey = "__nitro_auth_storage_probe__";
       storage.setItem(testKey, "1");
       storage.removeItem(testKey);
+      this._browserStorageCache = storage;
       return storage;
     } catch (error) {
       logger.warn(
@@ -249,6 +263,7 @@ class AuthWeb implements Auth {
           error: String(error),
         },
       );
+      this._browserStorageCache = undefined;
       return undefined;
     }
   }
@@ -499,6 +514,22 @@ class AuthWeb implements Auth {
   }
 
   async refreshToken(): Promise<AuthTokens> {
+    if (this._refreshPromise) {
+      return this._refreshPromise;
+    }
+
+    const refreshPromise = this.performRefreshToken();
+    this._refreshPromise = refreshPromise;
+    try {
+      return await refreshPromise;
+    } finally {
+      if (this._refreshPromise === refreshPromise) {
+        this._refreshPromise = undefined;
+      }
+    }
+  }
+
+  private async performRefreshToken(): Promise<AuthTokens> {
     if (!this._currentUser) {
       throw new Error("No user logged in");
     }
@@ -511,15 +542,14 @@ class AuthWeb implements Auth {
         throw new Error("No refresh token available");
       }
 
-      const config = getConfig();
-      const clientId = config.microsoftClientId;
+      const clientId = this._config.microsoftClientId;
       if (!clientId) {
         throw new Error(
           "Microsoft Client ID not configured. Add 'microsoftClientId' to expo.extra in your app.config.js",
         );
       }
-      const tenant = config.microsoftTenant ?? "common";
-      const b2cDomain = config.microsoftB2cDomain;
+      const tenant = this._config.microsoftTenant ?? "common";
+      const b2cDomain = this._config.microsoftB2cDomain;
 
       const authBaseUrl = this.getMicrosoftAuthBaseUrl(tenant, b2cDomain);
       const tokenUrl = `${authBaseUrl}oauth2/v2.0/token`;
@@ -642,7 +672,9 @@ class AuthWeb implements Auth {
       throw new Error("Invalid JWT payload");
     }
 
-    const decoded: unknown = JSON.parse(atob(payload));
+    const normalizedPayload = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padding = "=".repeat((4 - (normalizedPayload.length % 4)) % 4);
+    const decoded: unknown = JSON.parse(atob(`${normalizedPayload}${padding}`));
     if (!isJsonObject(decoded)) {
       throw new Error("Expected JWT payload to be an object");
     }
@@ -715,8 +747,7 @@ class AuthWeb implements Auth {
     scopes: string[],
     loginHint?: string,
   ): Promise<void> {
-    const config = getConfig();
-    const clientId = config.googleWebClientId;
+    const clientId = this._config.googleWebClientId;
 
     if (!clientId) {
       throw new Error(
@@ -812,8 +843,7 @@ class AuthWeb implements Auth {
     tenant?: string,
     prompt?: string,
   ): Promise<void> {
-    const config = getConfig();
-    const clientId = config.microsoftClientId;
+    const clientId = this._config.microsoftClientId;
 
     if (!clientId) {
       throw new Error(
@@ -821,8 +851,8 @@ class AuthWeb implements Auth {
       );
     }
 
-    const effectiveTenant = tenant ?? config.microsoftTenant ?? "common";
-    const b2cDomain = config.microsoftB2cDomain;
+    const effectiveTenant = tenant ?? this._config.microsoftTenant ?? "common";
+    const b2cDomain = this._config.microsoftB2cDomain;
     const authBaseUrl = this.getMicrosoftAuthBaseUrl(
       effectiveTenant,
       b2cDomain,
@@ -941,10 +971,9 @@ class AuthWeb implements Auth {
     expectedNonce: string,
     scopes: string[],
   ): Promise<void> {
-    const config = getConfig();
     const authBaseUrl = this.getMicrosoftAuthBaseUrl(
       tenant,
-      config.microsoftB2cDomain,
+      this._config.microsoftB2cDomain,
     );
     const tokenUrl = `${authBaseUrl}oauth2/v2.0/token`;
 
@@ -1040,9 +1069,67 @@ class AuthWeb implements Auth {
     }
   }
 
+  private async ensureAppleSdkLoaded(): Promise<void> {
+    if (window.AppleID) {
+      return;
+    }
+
+    if (this._appleSdkLoadPromise) {
+      return this._appleSdkLoadPromise;
+    }
+
+    this._appleSdkLoadPromise = new Promise<void>((resolve, reject) => {
+      const scriptId = "nitro-auth-apple-sdk";
+      const existingScript = document.getElementById(
+        scriptId,
+      ) as HTMLScriptElement | null;
+
+      if (existingScript) {
+        if (window.AppleID) {
+          resolve();
+          return;
+        }
+
+        existingScript.addEventListener(
+          "load",
+          () => {
+            resolve();
+          },
+          {
+            once: true,
+          },
+        );
+        existingScript.addEventListener(
+          "error",
+          () => {
+            this._appleSdkLoadPromise = undefined;
+            reject(new Error("Failed to load Apple SDK"));
+          },
+          { once: true },
+        );
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.id = scriptId;
+      script.src =
+        "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js";
+      script.async = true;
+      script.onload = () => {
+        resolve();
+      };
+      script.onerror = () => {
+        this._appleSdkLoadPromise = undefined;
+        reject(new Error("Failed to load Apple SDK"));
+      };
+      document.head.appendChild(script);
+    });
+
+    return this._appleSdkLoadPromise;
+  }
+
   private async loginApple(): Promise<void> {
-    const config = getConfig();
-    const clientId = config.appleWebClientId;
+    const clientId = this._config.appleWebClientId;
 
     if (!clientId) {
       throw new Error(
@@ -1050,45 +1137,32 @@ class AuthWeb implements Auth {
       );
     }
 
-    return new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src =
-        "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js";
-      script.async = true;
-      script.onload = () => {
-        if (!window.AppleID) {
-          reject(new Error("Apple SDK not loaded"));
-          return;
-        }
-        window.AppleID.auth.init({
-          clientId,
-          scope: "name email",
-          redirectURI: window.location.origin,
-          usePopup: true,
-        });
-        window.AppleID.auth
-          .signIn()
-          .then((response: AppleAuthResponse) => {
-            const user: AuthUser = {
-              provider: "apple",
-              idToken: response.authorization.id_token,
-              email: response.user?.email,
-              name: response.user?.name
-                ? `${response.user.name.firstName} ${response.user.name.lastName}`.trim()
-                : undefined,
-            };
-            this.updateUser(user);
-            resolve();
-          })
-          .catch((err: unknown) => {
-            reject(this.mapError(err));
-          });
-      };
-      script.onerror = () => {
-        reject(new Error("Failed to load Apple SDK"));
-      };
-      document.head.appendChild(script);
+    await this.ensureAppleSdkLoaded();
+    if (!window.AppleID) {
+      throw new Error("Apple SDK not loaded");
+    }
+
+    window.AppleID.auth.init({
+      clientId,
+      scope: "name email",
+      redirectURI: window.location.origin,
+      usePopup: true,
     });
+
+    try {
+      const response: AppleAuthResponse = await window.AppleID.auth.signIn();
+      const user: AuthUser = {
+        provider: "apple",
+        idToken: response.authorization.id_token,
+        email: response.user?.email,
+        name: response.user?.name
+          ? `${response.user.name.firstName} ${response.user.name.lastName}`.trim()
+          : undefined,
+      };
+      this.updateUser(user);
+    } catch (error) {
+      throw this.mapError(error);
+    }
   }
 
   async silentRestore(): Promise<void> {

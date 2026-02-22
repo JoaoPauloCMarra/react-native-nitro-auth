@@ -32,9 +32,13 @@ import android.util.Base64
 object AuthAdapter {
     private const val TAG = "AuthAdapter"
     
+    @Volatile
+    private var isInitialized = false
+
     private var appContext: Context? = null
     private var currentActivity: Activity? = null
     private var googleSignInClient: GoogleSignInClient? = null
+    private var lifecycleCallbacks: Application.ActivityLifecycleCallbacks? = null
     private var pendingScopes: List<String> = emptyList()
     private var pendingMicrosoftScopes: List<String> = emptyList()
     
@@ -74,23 +78,33 @@ object AuthAdapter {
     @JvmStatic
     private external fun nativeOnRefreshError(error: String, underlyingError: String?)
 
+    @Synchronized
     fun initialize(context: Context) {
-        val app = context.applicationContext as? Application
-        appContext = app
-        
-        app?.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
-            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) { currentActivity = activity }
-            override fun onActivityStarted(activity: Activity) { currentActivity = activity }
-            override fun onActivityResumed(activity: Activity) { currentActivity = activity }
-            override fun onActivityPaused(activity: Activity) { if (currentActivity == activity) currentActivity = null }
-            override fun onActivityStopped(activity: Activity) { if (currentActivity == activity) currentActivity = null }
-            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
-            override fun onActivityDestroyed(activity: Activity) { if (currentActivity == activity) currentActivity = null }
-        })
+        if (isInitialized) {
+            return
+        }
+
+        val applicationContext = context.applicationContext
+        appContext = applicationContext
+
+        val app = applicationContext as? Application
+        if (app != null && lifecycleCallbacks == null) {
+            lifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) { currentActivity = activity }
+                override fun onActivityStarted(activity: Activity) { currentActivity = activity }
+                override fun onActivityResumed(activity: Activity) { currentActivity = activity }
+                override fun onActivityPaused(activity: Activity) { if (currentActivity == activity) currentActivity = null }
+                override fun onActivityStopped(activity: Activity) { if (currentActivity == activity) currentActivity = null }
+                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+                override fun onActivityDestroyed(activity: Activity) { if (currentActivity == activity) currentActivity = null }
+            }
+            app.registerActivityLifecycleCallbacks(lifecycleCallbacks)
+        }
 
         try {
             System.loadLibrary("NitroAuth")
-            nativeInitialize(appContext!!)
+            nativeInitialize(applicationContext)
+            isInitialized = true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load NitroAuth library", e)
         }

@@ -93,7 +93,7 @@ dependencies {
   implementation project(":react-native-nitro-modules")
   
   // Google Sign-In SDK (full scope support)
-  implementation "com.google.android.gms:play-services-auth:21.2.0"
+  implementation "com.google.android.gms:play-services-auth:21.5.1"
   
   // Activity result APIs
   implementation "androidx.activity:activity-ktx:1.9.3"
@@ -104,8 +104,5 @@ dependencies {
   // Google Credential Manager (One-Tap / Passkeys)
   implementation "androidx.credentials:credentials:1.5.0"
   implementation "androidx.credentials:credentials-play-services-auth:1.5.0"
-  implementation "com.google.android.libraries.identity.googleid:googleid:1.1.1"
-
-  // Secure storage (EncryptedSharedPreferences)
-  implementation "androidx.security:security-crypto:1.0.0"
+  implementation "com.google.android.libraries.identity.googleid:googleid:1.2.0"
 }
