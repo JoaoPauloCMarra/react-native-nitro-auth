@@ -6,37 +6,22 @@ import type {
   AuthTokens,
 } from "./Auth.nitro";
 import { AuthService } from "./service";
+import { AuthError } from "./utils/auth-error";
 
 type AuthState = {
   user: AuthUser | undefined;
   scopes: string[];
   loading: boolean;
-  error: Error | undefined;
+  error: AuthError | undefined;
 };
 
 const areScopesEqual = (left: string[], right: string[]): boolean => {
-  if (left.length !== right.length) {
-    return false;
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
   }
-
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) {
-      return false;
-    }
-  }
-
   return true;
 };
-
-class AuthHookError extends Error {
-  public readonly underlyingError?: string;
-
-  constructor(message: string, underlyingError?: string) {
-    super(message);
-    this.name = "AuthHookError";
-    this.underlyingError = underlyingError;
-  }
-}
 
 export type UseAuthReturn = AuthState & {
   hasPlayServices: boolean;
@@ -58,7 +43,7 @@ export function useAuth(): UseAuthReturn {
   });
 
   const syncStateFromService = useCallback(
-    (nextLoading: boolean, nextError: Error | undefined) => {
+    (nextLoading: boolean, nextError: AuthError | undefined) => {
       const nextUser = AuthService.currentUser;
       const nextScopes = AuthService.grantedScopes;
       setState((prev) => {
@@ -70,13 +55,7 @@ export function useAuth(): UseAuthReturn {
         ) {
           return prev;
         }
-
-        return {
-          user: nextUser,
-          scopes: nextScopes,
-          loading: nextLoading,
-          error: nextError,
-        };
+        return { user: nextUser, scopes: nextScopes, loading: nextLoading, error: nextError };
       });
     },
     [],
@@ -89,12 +68,8 @@ export function useAuth(): UseAuthReturn {
         await AuthService.login(provider, options);
         syncStateFromService(false, undefined);
       } catch (e) {
-        const error = e instanceof Error ? e : new Error(String(e));
-        setState((prev) => ({
-          ...prev,
-          loading: false,
-          error,
-        }));
+        const error = AuthError.from(e);
+        setState((prev) => ({ ...prev, loading: false, error }));
         throw error;
       }
     },
@@ -103,12 +78,7 @@ export function useAuth(): UseAuthReturn {
 
   const logout = useCallback(() => {
     AuthService.logout();
-    setState({
-      user: undefined,
-      scopes: [],
-      loading: false,
-      error: undefined,
-    });
+    setState({ user: undefined, scopes: [], loading: false, error: undefined });
   }, []);
 
   const requestScopes = useCallback(
@@ -118,12 +88,8 @@ export function useAuth(): UseAuthReturn {
         await AuthService.requestScopes(newScopes);
         syncStateFromService(false, undefined);
       } catch (e) {
-        const error = e instanceof Error ? e : new Error(String(e));
-        setState((prev) => ({
-          ...prev,
-          loading: false,
-          error,
-        }));
+        const error = AuthError.from(e);
+        setState((prev) => ({ ...prev, loading: false, error }));
         throw error;
       }
     },
@@ -137,12 +103,8 @@ export function useAuth(): UseAuthReturn {
         await AuthService.revokeScopes(scopesToRevoke);
         syncStateFromService(false, undefined);
       } catch (e) {
-        const error = e instanceof Error ? e : new Error(String(e));
-        setState((prev) => ({
-          ...prev,
-          loading: false,
-          error,
-        }));
+        const error = AuthError.from(e);
+        setState((prev) => ({ ...prev, loading: false, error }));
         throw error;
       }
     },
@@ -158,17 +120,9 @@ export function useAuth(): UseAuthReturn {
       syncStateFromService(false, undefined);
       return tokens;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      const authError = new AuthHookError(
-        msg,
-        AuthService.currentUser?.underlyingError,
-      );
-      setState((prev) => ({
-        ...prev,
-        loading: false,
-        error: authError,
-      }));
-      throw authError;
+      const error = AuthError.from(e);
+      setState((prev) => ({ ...prev, loading: false, error }));
+      throw error;
     }
   }, [syncStateFromService]);
 
@@ -178,12 +132,8 @@ export function useAuth(): UseAuthReturn {
       await AuthService.silentRestore();
       syncStateFromService(false, undefined);
     } catch (e) {
-      const error = e instanceof Error ? e : new Error(String(e));
-      setState((prev) => ({
-        ...prev,
-        loading: false,
-        error,
-      }));
+      const error = AuthError.from(e);
+      setState((prev) => ({ ...prev, loading: false, error }));
       throw error;
     }
   }, [syncStateFromService]);
@@ -199,13 +149,7 @@ export function useAuth(): UseAuthReturn {
         ) {
           return prev;
         }
-
-        return {
-          ...prev,
-          user: currentUser,
-          scopes: nextScopes,
-          loading: false,
-        };
+        return { ...prev, user: currentUser, scopes: nextScopes, loading: false };
       });
     });
     return unsubscribe;
@@ -223,15 +167,6 @@ export function useAuth(): UseAuthReturn {
       refreshToken,
       silentRestore,
     }),
-    [
-      state,
-      login,
-      logout,
-      requestScopes,
-      revokeScopes,
-      getAccessToken,
-      refreshToken,
-      silentRestore,
-    ],
+    [state, login, logout, requestScopes, revokeScopes, getAccessToken, refreshToken, silentRestore],
   );
 }

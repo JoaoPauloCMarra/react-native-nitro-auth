@@ -114,37 +114,43 @@ public class AuthAdapter: NSObject {
     DispatchQueue.main.async {
       let session = ASWebAuthenticationSession(url: authUrl, callbackURLScheme: callbackScheme) { callbackURL, error in
         if let error = error {
-          if (error as NSError).code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
+          let nsError = error as NSError
+          if nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
             completion(nil, "cancelled")
+          } else if nsError.domain.lowercased().contains("network") || nsError.code == NSURLErrorNotConnectedToInternet {
+            completion(nil, "network_error")
           } else {
-            completion(nil, error.localizedDescription)
+            completion(nil, "unknown")
           }
           return
         }
-        
+
         guard let callbackURL = callbackURL,
               let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
-          completion(nil, "No response from Microsoft")
+          completion(nil, "unknown")
           return
         }
-        
+
         var params: [String: String] = [:]
         for item in components.queryItems ?? [] {
           params[item.name] = item.value
         }
-        
+
         if let errorCode = params["error"] {
-          completion(nil, params["error_description"] ?? errorCode)
+          // OAuth error codes are already structured (e.g. "access_denied").
+          // Map well-known ones; fall back to "unknown".
+          let mapped = mapOAuthError(errorCode)
+          completion(nil, mapped)
           return
         }
-        
+
         guard let returnedState = params["state"], returnedState == state else {
-          completion(nil, "State mismatch - possible CSRF attack")
+          completion(nil, "invalid_state")
           return
         }
-        
+
         guard let code = params["code"] else {
-          completion(nil, "No authorization code in response")
+          completion(nil, "unknown")
           return
         }
         
@@ -230,30 +236,34 @@ public class AuthAdapter: NSObject {
     URLSession.shared.dataTask(with: request) { data, response, error in
       DispatchQueue.main.async {
         if let error = error {
-          completion(nil, error.localizedDescription)
+          let nsError = error as NSError
+          if nsError.code == NSURLErrorNotConnectedToInternet || nsError.code == NSURLErrorTimedOut {
+            completion(nil, "network_error")
+          } else {
+            completion(nil, "network_error")
+          }
           return
         }
-        
+
         guard let data = data,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-          completion(nil, "Failed to parse token response")
+          completion(nil, "parse_error")
           return
         }
-        
+
         if let errorCode = json["error"] as? String {
-          let desc = json["error_description"] as? String ?? errorCode
-          completion(nil, desc)
+          completion(nil, mapOAuthError(errorCode))
           return
         }
-        
+
         guard let idToken = json["id_token"] as? String else {
-          completion(nil, "No id_token in token response")
+          completion(nil, "no_id_token")
           return
         }
-        
+
         let claims = decodeJwt(idToken)
         guard claims["nonce"] == expectedNonce else {
-          completion(nil, "Nonce mismatch - token may be replayed")
+          completion(nil, "invalid_nonce")
           return
         }
         
@@ -311,7 +321,7 @@ public class AuthAdapter: NSObject {
 
   private static func handleGoogleResult(_ result: GIDSignInResult?, error: Error?, completion: @escaping (NSDictionary?, String?) -> Void) {
     if let error = error {
-      completion(nil, error.localizedDescription)
+      completion(nil, mapError(error))
       return
     }
     
@@ -339,13 +349,37 @@ public class AuthAdapter: NSObject {
 
   static func mapError(_ error: Error) -> String {
     let nsError = error as NSError
+    // GIDSignIn error codes
     if nsError.domain == "com.google.GIDSignIn" {
-      if nsError.code == -5 { return "cancelled" }
+      switch nsError.code {
+      case -5: return "cancelled"   // GIDSignInErrorCodeCanceled
+      case -4: return "network_error" // GIDSignInErrorCodeNoCurrentUser (used for network issues)
+      default: break
+      }
+    }
+    // ASAuthorizationError codes (Apple Sign-In / ASWebAuthenticationSession)
+    if nsError.domain == ASAuthorizationError.errorDomain {
+      switch nsError.code {
+      case ASAuthorizationError.canceled.rawValue: return "cancelled"
+      case ASAuthorizationError.invalidResponse.rawValue: return "configuration_error"
+      default: return "unknown"
+      }
     }
     let msg = error.localizedDescription.lowercased()
     if msg.contains("cancel") { return "cancelled" }
-    if msg.contains("network") { return "network_error" }
+    if msg.contains("network") || msg.contains("internet") || msg.contains("offline") { return "network_error" }
     return "unknown"
+  }
+
+  /// Maps OAuth 2.0 error codes (returned in query params or JSON) to AuthErrorCode values.
+  private static func mapOAuthError(_ oauthCode: String) -> String {
+    switch oauthCode {
+    case "access_denied": return "cancelled"
+    case "invalid_client", "unauthorized_client", "invalid_scope": return "configuration_error"
+    case "invalid_grant", "invalid_request": return "token_error"
+    case "temporarily_unavailable", "server_error": return "network_error"
+    default: return "unknown"
+    }
   }
 
   @objc
@@ -514,16 +548,16 @@ public class AuthAdapter: NSObject {
     URLSession.shared.dataTask(with: request) { data, response, error in
       DispatchQueue.main.async {
         if let error = error {
-          completion(nil, error.localizedDescription)
+          completion(nil, "network_error")
           return
         }
         guard let data = data,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-          completion(nil, "Token refresh failed")
+          completion(nil, "parse_error")
           return
         }
         if let errorCode = json["error"] as? String {
-          completion(nil, (json["error_description"] as? String) ?? errorCode)
+          completion(nil, AuthAdapter.mapOAuthError(errorCode))
           return
         }
         let idToken = json["id_token"] as? String ?? ""
@@ -595,7 +629,7 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
   }
   
   func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
-    completion(nil, error.localizedDescription)
+    completion(nil, AuthAdapter.mapError(error))
   }
 }
 

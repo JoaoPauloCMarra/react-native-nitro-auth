@@ -6,8 +6,10 @@ import type {
   LoginOptions,
   AuthUser,
 } from "./Auth.nitro";
+import { AuthError } from "./utils/auth-error";
 
 const nitroAuth = NitroModules.createHybridObject<Auth>("Auth");
+
 export const AuthService: Auth = {
   get name() {
     return nitroAuth.name;
@@ -26,23 +28,43 @@ export const AuthService: Auth = {
   },
 
   async login(provider: AuthProvider, options?: LoginOptions) {
-    return nitroAuth.login(provider, options);
+    try {
+      return await nitroAuth.login(provider, options);
+    } catch (e) {
+      throw AuthError.from(e);
+    }
   },
 
   async requestScopes(scopes: string[]) {
-    return nitroAuth.requestScopes(scopes);
+    try {
+      return await nitroAuth.requestScopes(scopes);
+    } catch (e) {
+      throw AuthError.from(e);
+    }
   },
 
   async revokeScopes(scopes: string[]) {
-    return nitroAuth.revokeScopes(scopes);
+    try {
+      return await nitroAuth.revokeScopes(scopes);
+    } catch (e) {
+      throw AuthError.from(e);
+    }
   },
 
   async getAccessToken() {
-    return nitroAuth.getAccessToken();
+    try {
+      return await nitroAuth.getAccessToken();
+    } catch (e) {
+      throw AuthError.from(e);
+    }
   },
 
   async refreshToken() {
-    return nitroAuth.refreshToken();
+    try {
+      return await nitroAuth.refreshToken();
+    } catch (e) {
+      throw AuthError.from(e);
+    }
   },
 
   logout() {
@@ -50,7 +72,11 @@ export const AuthService: Auth = {
   },
 
   async silentRestore() {
-    return nitroAuth.silentRestore();
+    try {
+      return await nitroAuth.silentRestore();
+    } catch (e) {
+      throw AuthError.from(e);
+    }
   },
 
   onAuthStateChanged(callback: (user: AuthUser | undefined) => void) {

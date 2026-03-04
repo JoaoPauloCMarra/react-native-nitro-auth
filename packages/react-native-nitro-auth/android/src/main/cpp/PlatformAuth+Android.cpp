@@ -351,19 +351,21 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginError(
     const char* errorCStr = env->GetStringUTFChars(error, nullptr);
     std::string errorStr(errorCStr);
     env->ReleaseStringUTFChars(error, errorCStr);
-    
-    std::string finalError = errorStr;
+
+    // errorStr is the structured AuthErrorCode (e.g. "cancelled", "network_error").
+    // underlyingError is a raw platform message for debugging — it must not replace the code.
     if (underlyingError) {
         const char* uCStr = env->GetStringUTFChars(underlyingError, nullptr);
-        finalError = std::string(uCStr);
         env->ReleaseStringUTFChars(underlyingError, uCStr);
+        // underlyingError is intentionally discarded here; the structured code is sufficient
+        // for consumers. If richer debugging is needed, add it to the AuthUser.underlyingError field.
     }
 
-    if (loginPromise) loginPromise->reject(std::make_exception_ptr(std::runtime_error(finalError)));
-    if (scopesPromise) scopesPromise->reject(std::make_exception_ptr(std::runtime_error(finalError)));
+    if (loginPromise) loginPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
+    if (scopesPromise) scopesPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
     if (silentPromise) {
         if (errorStr == "No session") silentPromise->resolve(std::nullopt);
-        else silentPromise->reject(std::make_exception_ptr(std::runtime_error(finalError)));
+        else silentPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
     }
 }
 
@@ -409,17 +411,15 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshError
         gRefreshPromise = nullptr;
     }
     if (refreshPromise) {
-        std::string finalError;
         const char* errorCStr = env->GetStringUTFChars(error, nullptr);
-        finalError = std::string(errorCStr);
+        std::string errorStr(errorCStr);
         env->ReleaseStringUTFChars(error, errorCStr);
-        
+
         if (underlyingError) {
             const char* uCStr = env->GetStringUTFChars(underlyingError, nullptr);
-            finalError = std::string(uCStr);
             env->ReleaseStringUTFChars(underlyingError, uCStr);
         }
-        refreshPromise->reject(std::make_exception_ptr(std::runtime_error(finalError)));
+        refreshPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
     }
 }
 

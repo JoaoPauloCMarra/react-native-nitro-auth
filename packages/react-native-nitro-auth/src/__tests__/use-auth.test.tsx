@@ -1,6 +1,7 @@
 import { renderHook, act } from "@testing-library/react";
 import { AuthService } from "../service";
 import { useAuth } from "../use-auth";
+import { AuthError } from "../utils/auth-error";
 import type {
   AuthProvider,
   AuthTokens,
@@ -187,12 +188,8 @@ describe("useAuth", () => {
       expect(mockLogin).toHaveBeenCalledWith("google", { useOneTap: true });
     });
 
-    it("sets error when login fails", async () => {
-      const error = new Error("network_error") as Error & {
-        underlyingError?: string;
-      };
-      error.underlyingError = "Detailed native error";
-      mockLogin.mockRejectedValueOnce(error);
+    it("sets error with structured code when login fails", async () => {
+      mockLogin.mockRejectedValueOnce(new Error("network_error"));
 
       const { result } = renderHook(() => useAuth());
 
@@ -201,16 +198,14 @@ describe("useAuth", () => {
       });
 
       expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeInstanceOf(AuthError);
       expect(result.current.error?.message).toBe("network_error");
-      const underlyingError = (
-        result.current.error as Error & { underlyingError?: string }
-      )?.underlyingError;
-      expect(underlyingError).toBe("Detailed native error");
+      expect((result.current.error as AuthError).code).toBe("network_error");
+      expect((result.current.error as AuthError).underlyingMessage).toBeUndefined();
     });
 
-    it("should handle login error", async () => {
-      const error = new Error("Login failed");
-      mockLogin.mockRejectedValue(error);
+    it("should normalize unknown error messages to 'unknown' code", async () => {
+      mockLogin.mockRejectedValue(new Error("Login failed"));
 
       const { result } = renderHook(() => useAuth());
 
@@ -219,7 +214,9 @@ describe("useAuth", () => {
       });
 
       expect(result.current.loading).toBe(false);
-      expect(result.current.error).toEqual(error);
+      expect(result.current.error).toBeInstanceOf(AuthError);
+      expect(result.current.error?.message).toBe("unknown");
+      expect((result.current.error as AuthError).underlyingMessage).toBe("Login failed");
     });
 
     it("should handle non-Error exceptions", async () => {
@@ -231,8 +228,9 @@ describe("useAuth", () => {
         await result.current.login("google").catch(() => undefined);
       });
 
-      expect(result.current.error).toBeInstanceOf(Error);
-      expect(result.current.error?.message).toBe("String error");
+      expect(result.current.error).toBeInstanceOf(AuthError);
+      expect(result.current.error?.message).toBe("unknown");
+      expect((result.current.error as AuthError).underlyingMessage).toBe("String error");
     });
 
     it("should avoid duplicate user state writes when auth callback fires during login", async () => {
@@ -302,8 +300,7 @@ describe("useAuth", () => {
     });
 
     it("should handle requestScopes error", async () => {
-      const error = new Error("Scope request failed");
-      mockRequestScopes.mockRejectedValue(error);
+      mockRequestScopes.mockRejectedValue(new Error("configuration_error"));
 
       const { result } = renderHook(() => useAuth());
 
@@ -313,7 +310,8 @@ describe("useAuth", () => {
         } catch {}
       });
 
-      expect(result.current.error).toEqual(error);
+      expect(result.current.error).toBeInstanceOf(AuthError);
+      expect((result.current.error as AuthError).code).toBe("configuration_error");
     });
   });
 
@@ -331,8 +329,7 @@ describe("useAuth", () => {
     });
 
     it("should handle revokeScopes error", async () => {
-      const error = new Error("Revoke failed");
-      mockRevokeScopes.mockRejectedValue(error);
+      mockRevokeScopes.mockRejectedValue(new Error("unknown"));
 
       const { result } = renderHook(() => useAuth());
 
@@ -342,7 +339,8 @@ describe("useAuth", () => {
         } catch {}
       });
 
-      expect(result.current.error).toEqual(error);
+      expect(result.current.error).toBeInstanceOf(AuthError);
+      expect((result.current.error as AuthError).code).toBe("unknown");
     });
   });
 
@@ -378,8 +376,7 @@ describe("useAuth", () => {
     });
 
     it("should handle refreshToken error", async () => {
-      const error = new Error("Refresh failed");
-      mockRefreshToken.mockRejectedValue(error);
+      mockRefreshToken.mockRejectedValue(new Error("refresh_failed"));
 
       const { result } = renderHook(() => useAuth());
 
@@ -389,7 +386,8 @@ describe("useAuth", () => {
         } catch {}
       });
 
-      expect(result.current.error).toEqual(error);
+      expect(result.current.error).toBeInstanceOf(AuthError);
+      expect((result.current.error as AuthError).code).toBe("refresh_failed");
     });
   });
 
