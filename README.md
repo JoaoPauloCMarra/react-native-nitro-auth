@@ -71,11 +71,11 @@ bun add react-native-nitro-auth react-native-nitro-modules
 
 ### Requirements
 
-| Dependency                   | Version     |
-| ---------------------------- | ----------- |
-| `react-native`               | `>= 0.75.0` |
-| `react-native-nitro-modules` | `>= 0.33.9` |
-| `react`                      | `*`         |
+| Dependency                   | Version      |
+| ---------------------------- | ------------ |
+| `react-native`               | `>= 0.75.0`  |
+| `react-native-nitro-modules` | `>= 0.35.0`  |
+| `react`                      | `*`          |
 
 For Expo projects, rebuild native code after installation:
 
@@ -670,17 +670,25 @@ const freshToken = await AuthService.getAccessToken();
 
 ### Standardized Error Codes
 
-Handle failures reliably with predictable error strings. Some flows can surface provider-specific codes (listed below):
+All errors thrown by `AuthService` and `useAuth` are `AuthError` instances with a type-safe `code` field (always a valid `AuthErrorCode`) and an optional `underlyingMessage` with the raw provider string when it differs from the code.
 
 ```ts
+import { AuthError } from "react-native-nitro-auth";
+
 try {
   await login("google");
 } catch (e) {
-  const error = e as Error;
-  if (error.message === "cancelled") {
-    // User closed the popup/picker
-  } else if (error.message === "network_error") {
-    // Connection issues
+  if (e instanceof AuthError) {
+    switch (e.code) {
+      case "cancelled":
+        // User closed the popup/picker
+        break;
+      case "network_error":
+        // Connection issues
+        break;
+      default:
+        console.error(e.code, e.underlyingMessage);
+    }
   }
 }
 ```
@@ -701,23 +709,23 @@ try {
 
 ### Native Error Metadata
 
-For more detailed debugging, Nitro Auth captures raw provider/native details in `underlyingError` where available:
+`AuthError` carries the raw provider/native message in `underlyingMessage` when the platform error didn't map to a known code:
 
 ```ts
-// From authenticated user (on success)
-const { user } = useAuth();
-if (user?.underlyingError) {
-  console.warn("Auth warning:", user.underlyingError);
-}
+import { AuthError } from "react-native-nitro-auth";
 
-// From error (on failure)
 try {
   await login("google");
 } catch (e) {
-  const error = e as Error & { underlyingError?: string };
-  console.log("Native error:", error.underlyingError);
+  if (e instanceof AuthError) {
+    // e.code is always a valid AuthErrorCode
+    // e.underlyingMessage is the original native string (or undefined if it equalled the code)
+    console.log(e.code, e.underlyingMessage);
+  }
 }
 ```
+
+The `AuthUser.underlyingError` field carries a raw warning string when the provider returns one alongside a successful result.
 
 ### Troubleshooting
 
@@ -797,6 +805,9 @@ This is useful for scenarios where:
 ```ts
 import {
   AuthService,
+  AuthError,
+  isAuthErrorCode,
+  toAuthErrorCode,
   SocialButton,
   useAuth,
   type UseAuthReturn,
@@ -869,7 +880,7 @@ declare function useAuth(): UseAuthReturn;
 | `user`            | `AuthUser \| undefined`                                             | Current in-memory user                               |
 | `scopes`          | `string[]`                                                          | Current granted scopes                               |
 | `loading`         | `boolean`                                                           | `true` while an auth operation is in-flight          |
-| `error`           | `Error \| undefined`                                                | Last operation error                                 |
+| `error`           | `AuthError \| undefined`                                            | Last operation error (typed, safe to switch on `.code`) |
 | `hasPlayServices` | `boolean`                                                           | Android Play Services availability                   |
 | `login`           | `(provider: AuthProvider, options?: LoginOptions) => Promise<void>` | Starts provider login                                |
 | `logout`          | `() => void`                                                        | Clears current session                               |
@@ -965,17 +976,36 @@ There is no public `setStorageAdapter`/`setJSStorageAdapter` API in this package
 | `nitroAuthWebStorage`         | `"session" \| "local" \| "memory"` | `"session"` | Storage for non-sensitive web cache                       |
 | `nitroAuthPersistTokensOnWeb` | `boolean`                          | `false`     | Persist sensitive tokens on web storage instead of memory |
 
-### Error semantics
+### `AuthError`
 
-Errors are surfaced as `Error` with `message` as a normalized code when possible, and `underlyingError` with provider/native details.
+All thrown errors from `AuthService` and `useAuth` are `AuthError` instances.
 
-| Normalized message    | Meaning                                        |
-| --------------------- | ---------------------------------------------- |
-| `cancelled`           | User cancelled popup/login flow                |
-| `timeout`             | Provider popup did not complete before timeout |
-| `popup_blocked`       | Browser blocked popup opening                  |
-| `network_error`       | Network failure                                |
-| `configuration_error` | Missing/invalid provider configuration         |
+```ts
+class AuthError extends Error {
+  readonly code: AuthErrorCode;           // Always a valid AuthErrorCode — safe to switch on
+  readonly underlyingMessage?: string;    // Raw native/platform string when it differs from code
+  static from(e: unknown): AuthError;     // Wraps any value; passes AuthError instances through
+}
+
+function isAuthErrorCode(value: string): value is AuthErrorCode;
+function toAuthErrorCode(raw: string): AuthErrorCode; // Returns "unknown" for unrecognized strings
+```
+
+| `code`                 | Meaning                                        |
+| ---------------------- | ---------------------------------------------- |
+| `cancelled`            | User cancelled the login flow                  |
+| `timeout`              | Provider popup did not complete before timeout |
+| `popup_blocked`        | Browser blocked popup opening                  |
+| `network_error`        | Network failure                                |
+| `configuration_error`  | Missing/invalid provider configuration         |
+| `unsupported_provider` | Provider not supported on this platform        |
+| `invalid_state`        | PKCE state mismatch (possible CSRF)            |
+| `invalid_nonce`        | Nonce mismatch in token response               |
+| `token_error`          | Token exchange failed                          |
+| `no_id_token`          | No `id_token` in token response                |
+| `parse_error`          | Failed to parse token response                 |
+| `refresh_failed`       | Refresh token flow failed                      |
+| `unknown`              | Unrecognized error                             |
 
 ## Quality Gates
 
