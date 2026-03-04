@@ -1,30 +1,5 @@
 {
   "name": "react-native-nitro-auth-monorepo",
-  "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
-  "scripts": {
-    "setup": "bun scripts/setup.js",
-    "publish-package": "bun scripts/publish.js",
-    "verify:core-versions": "bun scripts/verify-core-versions.ts",
-    "build": "turbo run build",
-    "lint": "turbo run lint",
-    "format": "turbo run format",
-    "format:check": "turbo run format:check",
-    "clean": "turbo run clean",
-    "codegen": "turbo run codegen",
-    "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
-    "test:coverage": "turbo run test -- --coverage",
-    "test:cpp": "turbo run test:cpp --filter=react-native-nitro-auth",
-    "start": "turbo run start --filter=example --",
-    "example:ios": "turbo run ios --filter=example",
-    "example:android": "turbo run android --filter=example",
-    "example:prebuild": "turbo run prebuild --filter=example",
-    "example:prebuild:clean": "turbo run prebuild:clean --filter=example"
-  },
   "devDependencies": {
     "@babel/core": "^7.29.0",
     "@types/jest": "^29.5.14",
@@ -47,5 +22,30 @@
     "react-native-nitro-modules": "^0.35.0",
     "react-native-web": "^0.21.2"
   },
-  "packageManager": "bun@1.3.9"
+  "packageManager": "bun@1.3.9",
+  "private": true,
+  "scripts": {
+    "setup": "bun scripts/setup.js",
+    "publish-package": "bun scripts/publish.js",
+    "verify:core-versions": "bun scripts/verify-core-versions.ts",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "format": "turbo run format",
+    "format:check": "turbo run format:check",
+    "clean": "turbo run clean",
+    "codegen": "turbo run codegen",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test -- --coverage",
+    "test:cpp": "turbo run test:cpp --filter=react-native-nitro-auth",
+    "start": "turbo run start --filter=example --",
+    "example:ios": "turbo run ios --filter=example",
+    "example:android": "turbo run android --filter=example",
+    "example:prebuild": "turbo run prebuild --filter=example",
+    "example:prebuild:clean": "turbo run prebuild:clean --filter=example"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
 }

@@ -483,7 +483,7 @@ export const FeatureDemo = () => {
         <View style={styles.headerGlowSecondary} />
         <Text style={styles.title}>Nitro Auth</Text>
         <Text style={styles.subtitle}>Modern Feature Showcase (JSI)</Text>
-        <Text style={styles.version}>v0.5.4</Text>
+        <Text style={styles.version}>v0.5.5</Text>
       </View>
 
       <View style={styles.heroPanel}>
