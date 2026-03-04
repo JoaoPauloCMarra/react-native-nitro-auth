@@ -9,7 +9,6 @@ const appConfig = {
     icon: "./assets/icon.png",
     scheme: "auth",
     userInterfaceStyle: "automatic",
-    newArchEnabled: true,
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.auth.example",

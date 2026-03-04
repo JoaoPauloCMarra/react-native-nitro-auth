@@ -20,25 +20,30 @@
 namespace margelo::nitro::NitroAuth {
 
 int initialize(JavaVM* vm) {
+  return facebook::jni::initialize(vm, []() {
+    ::margelo::nitro::NitroAuth::registerAllNatives();
+  });
+}
+
+
+
+void registerAllNatives() {
   using namespace margelo::nitro;
   using namespace margelo::nitro::NitroAuth;
-  using namespace facebook;
 
-  return facebook::jni::initialize(vm, [] {
-    // Register native JNI methods
-    
+  // Register native JNI methods
+  
 
-    // Register Nitro Hybrid Objects
-    HybridObjectRegistry::registerHybridObjectConstructor(
-      "Auth",
-      []() -> std::shared_ptr<HybridObject> {
-        static_assert(std::is_default_constructible_v<HybridAuth>,
-                      "The HybridObject \"HybridAuth\" is not default-constructible! "
-                      "Create a public constructor that takes zero arguments to be able to autolink this HybridObject.");
-        return std::make_shared<HybridAuth>();
-      }
-    );
-  });
+  // Register Nitro Hybrid Objects
+  HybridObjectRegistry::registerHybridObjectConstructor(
+    "Auth",
+    []() -> std::shared_ptr<HybridObject> {
+      static_assert(std::is_default_constructible_v<HybridAuth>,
+                    "The HybridObject \"HybridAuth\" is not default-constructible! "
+                    "Create a public constructor that takes zero arguments to be able to autolink this HybridObject.");
+      return std::make_shared<HybridAuth>();
+    }
+  );
 }
 
 } // namespace margelo::nitro::NitroAuth
