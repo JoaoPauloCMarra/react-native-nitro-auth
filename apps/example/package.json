@@ -32,7 +32,7 @@
     "react-native-nitro-modules": "^0.35.0",
     "react-native-nitro-storage": "^0.3.1",
     "react-native-safe-area-context": "5.7.0",
-    "react-native-screens": "~4.24.0",
+    "react-native-screens": "~4.23.0",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
