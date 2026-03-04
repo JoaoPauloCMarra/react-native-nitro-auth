@@ -1,9 +1,9 @@
 const projectRoot = import.meta.dir + "/..";
 
 const expectedVersions = {
-  react: "19.1.0",
-  "react-dom": "19.1.0",
-  "react-native": "0.81.5",
+  react: "19.2.0",
+  "react-dom": "19.2.0",
+  "react-native": "0.83.2",
 } as const;
 
 type DependencyName = keyof typeof expectedVersions;
