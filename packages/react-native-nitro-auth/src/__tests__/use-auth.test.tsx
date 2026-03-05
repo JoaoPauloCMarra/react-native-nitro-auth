@@ -56,6 +56,7 @@ const mockOnTokensRefreshed = jest.fn<
   ReturnType<OnTokensRefreshedFn>,
   Parameters<OnTokensRefreshedFn>
 >();
+const mockSilentRestore = jest.fn<Promise<void>, []>();
 
 // Mock the service module
 jest.mock("../service", () => ({
@@ -83,6 +84,7 @@ jest.mock("../service", () => ({
       mockOnAuthStateChanged(...args),
     onTokensRefreshed: (...args: Parameters<OnTokensRefreshedFn>) =>
       mockOnTokensRefreshed(...args),
+    silentRestore: (...args: []) => mockSilentRestore(...args),
   },
 }));
 
@@ -100,6 +102,7 @@ describe("useAuth", () => {
     mockOnAuthStateChanged.mockReturnValue(() => {});
     mockOnTokensRefreshed.mockReset();
     mockOnTokensRefreshed.mockReturnValue(() => {});
+    mockSilentRestore.mockReset();
   });
 
   it("should initialize with no user", () => {
@@ -455,6 +458,198 @@ describe("useAuth", () => {
 
       unsubscribe();
       expect(unsubscribeMock).toHaveBeenCalled();
+    });
+
+    it("callback fires and syncs state from service", () => {
+      let tokensCallback: ((tokens: AuthTokens) => void) | null = null;
+      mockOnTokensRefreshed.mockImplementation((cb) => {
+        tokensCallback = cb;
+        return () => {
+          tokensCallback = null;
+        };
+      });
+
+      const { result } = renderHook(() => useAuth());
+
+      const updatedUser: AuthUser = {
+        provider: "google",
+        email: "refreshed@example.com",
+      };
+      mockCurrentUser = updatedUser;
+      mockScopes = ["email", "profile"];
+
+      act(() => {
+        tokensCallback?.({ accessToken: "new_access", idToken: "new_id" });
+      });
+
+      expect(result.current.user).toEqual(updatedUser);
+      expect(result.current.scopes).toEqual(["email", "profile"]);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeUndefined();
+    });
+  });
+
+  describe("silentRestore", () => {
+    it("sets loading=true then loading=false on success", async () => {
+      const user: AuthUser = {
+        provider: "google",
+        email: "restored@example.com",
+      };
+      mockSilentRestore.mockImplementation(async () => {
+        mockCurrentUser = user;
+      });
+
+      const { result } = renderHook(() => useAuth());
+
+      await act(async () => {
+        await result.current.silentRestore();
+      });
+
+      expect(mockSilentRestore).toHaveBeenCalledTimes(1);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.user).toEqual(user);
+    });
+
+    it("sets error as AuthError on failure", async () => {
+      mockSilentRestore.mockRejectedValueOnce(new Error("network_error"));
+
+      const { result } = renderHook(() => useAuth());
+
+      await act(async () => {
+        await result.current.silentRestore().catch(() => undefined);
+      });
+
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeInstanceOf(AuthError);
+      expect((result.current.error as AuthError).code).toBe("network_error");
+    });
+  });
+
+  describe("getAccessToken error", () => {
+    it("sets error as AuthError when it rejects", async () => {
+      mockGetAccessToken.mockRejectedValueOnce(new Error("token_expired"));
+
+      const { result } = renderHook(() => useAuth());
+
+      let caughtError: unknown;
+      await act(async () => {
+        try {
+          await result.current.getAccessToken();
+        } catch (e) {
+          caughtError = e;
+        }
+      });
+
+      expect(caughtError).toBeDefined();
+      expect((caughtError as Error).message).toBe("token_expired");
+    });
+  });
+
+  describe("error clearing", () => {
+    it("clears error when a new operation starts", async () => {
+      mockLogin.mockRejectedValueOnce(new Error("cancelled"));
+
+      const { result } = renderHook(() => useAuth());
+
+      await act(async () => {
+        await result.current.login("google").catch(() => undefined);
+      });
+
+      expect(result.current.error).toBeInstanceOf(AuthError);
+
+      mockLogin.mockResolvedValueOnce(undefined);
+
+      await act(async () => {
+        await result.current.login("google");
+      });
+
+      expect(result.current.error).toBeUndefined();
+      expect(result.current.loading).toBe(false);
+    });
+
+    it("logout after error clears error state", async () => {
+      mockLogin.mockRejectedValueOnce(new Error("network_error"));
+
+      const { result } = renderHook(() => useAuth());
+
+      await act(async () => {
+        await result.current.login("google").catch(() => undefined);
+      });
+
+      expect(result.current.error).toBeInstanceOf(AuthError);
+
+      act(() => {
+        result.current.logout();
+      });
+
+      expect(result.current.error).toBeUndefined();
+      expect(result.current.user).toBeUndefined();
+    });
+  });
+
+  describe("areScopesEqual (order-insensitive)", () => {
+    it("treats different-order arrays as equal (no re-render)", () => {
+      let authStateCallback: ((user: AuthUser | undefined) => void) | null =
+        null;
+      mockOnAuthStateChanged.mockImplementation((cb) => {
+        authStateCallback = cb;
+        return () => {
+          authStateCallback = null;
+        };
+      });
+
+      const user: AuthUser = {
+        provider: "google",
+        email: "scopes@example.com",
+      };
+      mockCurrentUser = user;
+      mockScopes = ["email", "profile"];
+
+      let renderCount = 0;
+      const { result } = renderHook(() => {
+        renderCount += 1;
+        return useAuth();
+      });
+
+      const countAfterMount = renderCount;
+
+      mockScopes = ["profile", "email"];
+      act(() => {
+        authStateCallback?.(user);
+      });
+
+      expect(result.current.scopes).toEqual(["email", "profile"]);
+      expect(renderCount).toBe(countAfterMount);
+    });
+
+    it("treats empty arrays as equal", () => {
+      let authStateCallback: ((user: AuthUser | undefined) => void) | null =
+        null;
+      mockOnAuthStateChanged.mockImplementation((cb) => {
+        authStateCallback = cb;
+        return () => {
+          authStateCallback = null;
+        };
+      });
+
+      mockCurrentUser = undefined;
+      mockScopes = [];
+
+      let renderCount = 0;
+      const { result } = renderHook(() => {
+        renderCount += 1;
+        return useAuth();
+      });
+
+      const countAfterMount = renderCount;
+
+      mockScopes = [];
+      act(() => {
+        authStateCallback?.(undefined);
+      });
+
+      expect(result.current.scopes).toEqual([]);
+      expect(renderCount).toBe(countAfterMount);
     });
   });
 });
