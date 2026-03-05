@@ -1,3 +1,10 @@
+@file:Suppress("DEPRECATION")
+// The legacy com.google.android.gms.auth.api.signin.* API is used intentionally for:
+//   • getLastSignedInAccount  – persists session across app restarts via GMS store; no drop-in replacement
+//   • silentSignIn            – AuthorizationClient.authorize() still requires an Activity for interactive fallback
+//   • revokeAccess            – no equivalent in Credential Manager or Identity.getAuthorizationClient()
+// All modern entry-points use Credential Manager (One-Tap). Legacy is a documented fallback only.
+
 package com.auth
 
 import android.app.Activity
@@ -9,6 +16,7 @@ import android.os.Bundle
 import android.util.Base64
 import android.util.Log
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
@@ -482,7 +490,6 @@ object AuthAdapter {
         }
     }
 
-    @Suppress("DEPRECATION")
     private fun loginLegacy(
         context: Context,
         clientId: String,
@@ -533,7 +540,6 @@ object AuthAdapter {
 
     // requestScopesSync uses the legacy GoogleSignIn API to check the last signed-in account
     // because Credential Manager has no equivalent for querying existing account state.
-    @Suppress("DEPRECATION")
     @JvmStatic
     fun requestScopesSync(context: Context, scopes: Array<String>) {
         val ctx = appContext ?: context.applicationContext
@@ -565,7 +571,6 @@ object AuthAdapter {
 
     // refreshTokenSync uses the legacy silentSignIn because AuthorizationClient (the recommended
     // replacement) requires an Activity context which is not always available at refresh time.
-    @Suppress("DEPRECATION")
     @JvmStatic
     fun refreshTokenSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
@@ -609,23 +614,30 @@ object AuthAdapter {
             .isGooglePlayServicesAvailable(ctx) == ConnectionResult.SUCCESS
     }
 
-    // logoutSync / revokeAccessSync use the legacy GoogleSignIn client because Credential Manager
-    // does not expose a sign-out or revoke API for the Google ID token flow.
-    @Suppress("DEPRECATION")
+    // revokeAccessSync uses the legacy GoogleSignIn client because Credential Manager has no
+    // equivalent revoke API for the Google ID token flow.
     @JvmStatic
     fun logoutSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
+        // Clear Credential Manager state (covers One-Tap / passkey credentials).
+        moduleScope.launch {
+            try {
+                CredentialManager.create(ctx).clearCredentialState(ClearCredentialStateRequest())
+            } catch (e: Exception) {
+                Log.w(TAG, "clearCredentialState failed: ${e.message}")
+            }
+        }
+        // Also clear legacy GMS sign-in state so getLastSignedInAccount returns null.
         val clientId = getClientIdFromResources(ctx)
         if (clientId != null) {
             val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestIdToken(clientId).requestServerAuthCode(clientId).requestEmail().build()
+                .requestIdToken(clientId).requestEmail().build()
             GoogleSignIn.getClient(ctx, gso).signOut()
         }
         inMemoryMicrosoftRefreshToken = null
         inMemoryMicrosoftScopes = listOf("openid", "email", "profile", "offline_access", "User.Read")
     }
 
-    @Suppress("DEPRECATION")
     @JvmStatic
     fun revokeAccessSync(context: Context) {
         val ctx = appContext ?: context.applicationContext

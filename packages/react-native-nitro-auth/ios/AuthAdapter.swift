@@ -410,7 +410,7 @@ public class AuthAdapter: NSObject {
     if let currentUser = GIDSignIn.sharedInstance.currentUser {
       currentUser.refreshTokensIfNeeded { user, error in
         if let error = error {
-          completion(nil, error.localizedDescription)
+          completion(nil, mapError(error))
           return
         }
         guard let user = user else {
