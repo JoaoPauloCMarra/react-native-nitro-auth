@@ -47,7 +47,7 @@ std::function<void()> HybridAuth::onAuthStateChanged(const std::function<void(co
   return [weak, id]() {
     auto self = weak.lock();
     if (!self) return;
-    auto* auth = static_cast<HybridAuth*>(self.get());
+    auto* auth = dynamic_cast<HybridAuth*>(self.get());
     std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
     auth->_listeners.erase(id);
   };
@@ -62,7 +62,7 @@ std::function<void()> HybridAuth::onTokensRefreshed(const std::function<void(con
   return [weak, id]() {
     auto self = weak.lock();
     if (!self) return;
-    auto* auth = static_cast<HybridAuth*>(self.get());
+    auto* auth = dynamic_cast<HybridAuth*>(self.get());
     std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
     auth->_tokenListeners.erase(id);
   };
@@ -83,7 +83,7 @@ std::shared_ptr<Promise<void>> HybridAuth::silentRestore() {
   auto silentPromise = PlatformAuth::silentRestore();
   auto self = shared_from_this();
   silentPromise->addOnResolvedListener([self, promise](const std::optional<AuthUser>& user) {
-    auto* auth = static_cast<HybridAuth*>(self.get());
+    auto* auth = dynamic_cast<HybridAuth*>(self.get());
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
       auth->_currentUser = user;
@@ -115,7 +115,7 @@ std::shared_ptr<Promise<void>> HybridAuth::login(AuthProvider provider, const st
   auto self = shared_from_this();
   auto loginPromise = PlatformAuth::login(provider, options);
   loginPromise->addOnResolvedListener([self, promise, options](const AuthUser& user) {
-    auto* auth = static_cast<HybridAuth*>(self.get());
+    auto* auth = dynamic_cast<HybridAuth*>(self.get());
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
       auth->_currentUser = user;
@@ -147,7 +147,7 @@ std::shared_ptr<Promise<void>> HybridAuth::requestScopes(const std::vector<std::
   auto self = shared_from_this();
   auto requestPromise = PlatformAuth::requestScopes(scopes);
   requestPromise->addOnResolvedListener([self, promise, scopes](const AuthUser& user) {
-    auto* auth = static_cast<HybridAuth*>(self.get());
+    auto* auth = dynamic_cast<HybridAuth*>(self.get());
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
       auth->_currentUser = user;
@@ -234,7 +234,7 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
   auto self = shared_from_this();
   auto refreshPromise = PlatformAuth::refreshToken();
   refreshPromise->addOnResolvedListener([self, promise](const AuthTokens& tokens) {
-    auto* auth = static_cast<HybridAuth*>(self.get());
+    auto* auth = dynamic_cast<HybridAuth*>(self.get());
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
       if (auth->_currentUser) {
@@ -261,7 +261,7 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
   });
 
   refreshPromise->addOnRejectedListener([self, promise](const std::exception_ptr& error) {
-    auto* auth = static_cast<HybridAuth*>(self.get());
+    auto* auth = dynamic_cast<HybridAuth*>(self.get());
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
       if (auth->_refreshInFlight == promise) {
@@ -273,7 +273,7 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
   return promise;
 }
  
-void HybridAuth::setLoggingEnabled(bool enabled) {
+void HybridAuth::setLoggingEnabled(bool /* enabled */) {
     // Reserved for future use — logging not yet implemented in C++ layer
 }
 

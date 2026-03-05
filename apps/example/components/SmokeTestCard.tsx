@@ -216,7 +216,7 @@ export const SmokeTestCard = () => {
   const runTests = useCallback(async () => {
     const tests = buildTests(auth);
     setRunning(true);
-    setResults(tests.map((_, i) => ({ name: "", status: "pending" as const })));
+    setResults(tests.map((_) => ({ name: "", status: "pending" as const })));
 
     const outcomes: TestResult[] = [];
     for (const testFn of tests) {
@@ -299,7 +299,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148, 163, 184, 0.2)",
     boxShadow: "0 12px 26px rgba(15, 23, 42, 0.08)",
-    elevation: 2,
   },
   header: {
     flexDirection: "row",

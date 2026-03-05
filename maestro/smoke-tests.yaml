@@ -1,0 +1,37 @@
+appId: com.auth.example
+name: "Smoke Tests - All Pass"
+---
+
+# Launch fresh and clear state
+- clearState
+- launchApp
+
+# Scroll to the Smoke Tests card
+- scrollUntilVisible:
+    element: "Run All"
+    direction: DOWN
+
+# Tap "Run All" to start the smoke test suite
+- tapOn: "Run All"
+
+# Wait for tests to complete — the button changes to "Re-run"
+- extendedWaitUntil:
+    visible: "Re-run"
+    timeout: 30000
+
+# Verify no failures appear anywhere on screen
+- assertNotVisible: "failed"
+
+# Verify the summary shows all passed
+# Android: 19 tests (18 common + hasPlayServices), iOS: 18 tests
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible: "19/19 passed"
+
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible: "18/18 passed"
