@@ -16,8 +16,8 @@
 
 namespace margelo::nitro::NitroAuth {
  
- inline std::string nsToStd(NSString* _Nullable ns) {
-     if (ns == nil) return "";
+ inline std::optional<std::string> nsToStd(NSString* _Nullable ns) {
+     if (ns == nil) return std::nullopt;
      return std::string([ns UTF8String]);
  }
 
@@ -109,7 +109,14 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector
         }
         
         AuthUser user;
-        user.provider = AuthProvider::GOOGLE;
+        NSString *providerStr = [data objectForKey:@"provider"];
+        if ([providerStr isEqualToString:@"microsoft"]) {
+            user.provider = AuthProvider::MICROSOFT;
+        } else if ([providerStr isEqualToString:@"apple"]) {
+            user.provider = AuthProvider::APPLE;
+        } else {
+            user.provider = AuthProvider::GOOGLE;
+        }
         user.email = nsToStd([data objectForKey:@"email"]);
         user.name = nsToStd([data objectForKey:@"name"]);
         user.photo = nsToStd([data objectForKey:@"photo"]);

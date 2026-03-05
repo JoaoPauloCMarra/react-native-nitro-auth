@@ -1,3 +1,6 @@
+// ⚠️ TEST-ONLY: This serializer is used exclusively by unit tests.
+// It does NOT escape strings and does NOT handle all providers.
+// Do NOT use in production code — platform-native JSON APIs are used instead.
 #pragma once
 
 #include "AuthUser.hpp"

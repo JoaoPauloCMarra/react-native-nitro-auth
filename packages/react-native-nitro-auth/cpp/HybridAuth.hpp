@@ -4,6 +4,7 @@
 #include "AuthUser.hpp"
 #include "LoginOptions.hpp"
 #include "AuthTokens.hpp"
+#include <cstdint>
 #include <optional>
 #include <mutex>
 #include <memory>
@@ -41,17 +42,18 @@ private:
 private:
   std::optional<AuthUser> _currentUser;
   std::vector<std::string> _grantedScopes;
-  std::map<int, std::function<void(const std::optional<AuthUser>&)>> _listeners;
-  int _nextListenerId = 0;
-  
-  std::map<int, std::function<void(const AuthTokens&)>> _tokenListeners;
-  int _nextTokenListenerId = 0;
+  std::map<uint64_t, std::function<void(const std::optional<AuthUser>&)>> _listeners;
+  uint64_t _nextListenerId = 0;
+
+  std::map<uint64_t, std::function<void(const AuthTokens&)>> _tokenListeners;
+  uint64_t _nextTokenListenerId = 0;
   std::shared_ptr<Promise<AuthTokens>> _refreshInFlight;
   
-  std::mutex _mutex;
+  // recursive_mutex: listeners resolved inside a lock scope may re-enter Auth methods
+  // that also acquire _mutex, causing deadlock with a non-recursive mutex.
+  std::recursive_mutex _mutex;
 
   static constexpr auto TAG = "Auth";
-  static bool sLoggingEnabled;
 };
 
 } // namespace margelo::nitro::NitroAuth

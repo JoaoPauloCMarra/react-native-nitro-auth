@@ -17,8 +17,10 @@ type AuthState = {
 
 const areScopesEqual = (left: string[], right: string[]): boolean => {
   if (left.length !== right.length) return false;
-  for (let i = 0; i < left.length; i += 1) {
-    if (left[i] !== right[i]) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  for (let i = 0; i < sortedLeft.length; i += 1) {
+    if (sortedLeft[i] !== sortedRight[i]) return false;
   }
   return true;
 };
@@ -139,7 +141,7 @@ export function useAuth(): UseAuthReturn {
   }, [syncStateFromService]);
 
   useEffect(() => {
-    const unsubscribe = AuthService.onAuthStateChanged((currentUser) => {
+    const unsubscribeAuth = AuthService.onAuthStateChanged((currentUser) => {
       const nextScopes = AuthService.grantedScopes;
       setState((prev) => {
         if (
@@ -152,8 +154,14 @@ export function useAuth(): UseAuthReturn {
         return { ...prev, user: currentUser, scopes: nextScopes, loading: false };
       });
     });
-    return unsubscribe;
-  }, []);
+    const unsubscribeTokens = AuthService.onTokensRefreshed?.(() => {
+      syncStateFromService(false, undefined);
+    });
+    return () => {
+      unsubscribeAuth();
+      unsubscribeTokens?.();
+    };
+  }, [syncStateFromService]);
 
   return useMemo(
     () => ({

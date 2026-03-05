@@ -308,12 +308,13 @@ To enable Microsoft Sign-In, you need to register an application in the Azure Po
   - `nitro_auth_microsoft_client_id`
   - `nitro_auth_microsoft_tenant` (optional)
   - `nitro_auth_microsoft_b2c_domain` (optional)
-- Add the Microsoft redirect activity to `AndroidManifest.xml`:
+- `MicrosoftAuthActivity` is **automatically declared** by the library manifest — no manual `AndroidManifest.xml` entry is required for basic Microsoft OAuth redirect handling. If you need to customize the intent-filter (e.g., restrict the host/path to your specific package and client ID), you can override it in your app manifest:
 
 ```xml
 <activity
   android:name="com.auth.MicrosoftAuthActivity"
-  android:exported="true">
+  android:exported="true"
+  android:launchMode="singleTask">
   <intent-filter>
     <action android:name="android.intent.action.VIEW" />
     <category android:name="android.intent.category.DEFAULT" />
@@ -693,19 +694,21 @@ try {
 }
 ```
 
-| Error Code             | Description                                    |
-| ---------------------- | ---------------------------------------------- |
-| `cancelled`            | The user cancelled the sign-in flow            |
-| `network_error`        | A network error occurred                       |
-| `configuration_error`  | Missing client IDs or invalid setup            |
-| `unsupported_provider` | The provider is not supported on this platform |
-| `invalid_state`        | PKCE state mismatch (possible CSRF)            |
-| `invalid_nonce`        | Nonce mismatch in token response               |
-| `token_error`          | Token exchange failed                          |
-| `no_id_token`          | No `id_token` in token response                |
-| `parse_error`          | Failed to parse token response                 |
-| `refresh_failed`       | Refresh token flow failed                      |
-| `unknown`              | An unknown error occurred                      |
+| Error Code             | Description                                                     |
+| ---------------------- | --------------------------------------------------------------- |
+| `cancelled`            | The user cancelled the sign-in flow or dismissed the popup      |
+| `timeout`              | The login popup/flow timed out                                  |
+| `popup_blocked`        | The browser blocked the popup window                            |
+| `network_error`        | A network or connectivity error occurred                        |
+| `configuration_error`  | Missing client IDs, invalid tenant, or misconfigured setup      |
+| `unsupported_provider` | The provider is not supported on this platform                  |
+| `invalid_state`        | PKCE state mismatch — possible CSRF attack                      |
+| `invalid_nonce`        | Nonce mismatch in token response — possible replay attack       |
+| `token_error`          | Token exchange or storage failed                                |
+| `no_id_token`          | No `id_token` in token response                                 |
+| `parse_error`          | Failed to parse token response                                  |
+| `refresh_failed`       | Refresh token flow failed (token may be expired or revoked)     |
+| `unknown`              | An unknown or unmapped error occurred                           |
 
 ### Native Error Metadata
 
@@ -729,10 +732,12 @@ The `AuthUser.underlyingError` field carries a raw warning string when the provi
 
 ### Troubleshooting
 
-- `configuration_error`: verify client IDs, URL schemes, and redirect URIs are set for the current platform.
-- `invalid_state` or `invalid_nonce`: ensure the redirect URI in your provider console matches your app config exactly.
+- `configuration_error`: verify client IDs, URL schemes, and redirect URIs are set for the current platform. On Android, check that the `microsoftTenant` is a non-empty valid value.
+- `invalid_state` or `invalid_nonce`: ensure the redirect URI in your provider console matches your app config exactly. These indicate a potential CSRF or replay attack — do not retry silently.
+- `refresh_failed`: the refresh token is likely expired or revoked. Clear the session and prompt the user to sign in again. On Android and web, structured error details from the provider (e.g. `invalid_grant`) are surfaced via `error.underlyingMessage`.
 - `hasPlayServices` is false: prompt the user to install/update Google Play Services or disable One-Tap.
 - Apple web login fails: confirm `appleWebClientId` is set and your domain is registered with Apple.
+- Microsoft Android redirect hangs: confirm the `msauth://` redirect URI in your Azure app matches your package name and client ID.
 
 ### Automatic Token Refresh
 

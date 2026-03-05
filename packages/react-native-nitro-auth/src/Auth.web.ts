@@ -24,6 +24,7 @@ const WEB_STORAGE_MODES = new Set([
   STORAGE_MODE_MEMORY,
 ] as const);
 const inMemoryWebStorage = new Map<string, string>();
+let _appleSdkLoadPromise: Promise<void> | undefined;
 
 type WebStorageDriver = {
   save(key: string, value: string): void;
@@ -175,7 +176,8 @@ class AuthWeb implements Auth {
   private _browserStorageResolved = false;
   private _browserStorageCache: Storage | undefined;
   private _refreshPromise: Promise<AuthTokens> | undefined;
-  private _appleSdkLoadPromise: Promise<void> | undefined;
+  private _pendingGoogleNonce: string | undefined;
+  private _loginInFlight: boolean = false;
 
   constructor() {
     this._config = getConfig();
@@ -303,6 +305,7 @@ class AuthWeb implements Auth {
     const storage = this.getBrowserStorage();
     if (storage) {
       storage.removeItem(key);
+      return;
     }
     inMemoryWebStorage.delete(key);
   }
@@ -539,7 +542,7 @@ class AuthWeb implements Auth {
       const refreshToken = this.loadRefreshToken();
 
       if (!refreshToken) {
-        throw new Error("No refresh token available");
+        throw new AuthWebError('refresh_failed', 'No refresh token available');
       }
 
       const clientId = this._config.microsoftClientId;
@@ -645,13 +648,17 @@ class AuthWeb implements Auth {
 
     if (msg.includes("cancel") || msg.includes("popup_closed")) {
       mappedMsg = "cancelled";
+    } else if (msg.includes("access_denied")) {
+      mappedMsg = "cancelled";
     } else if (msg.includes("timeout")) {
       mappedMsg = "timeout";
     } else if (msg.includes("popup blocked")) {
       mappedMsg = "popup_blocked";
-    } else if (msg.includes("network")) {
+    } else if (msg.includes("network") || msg.includes("server_error") || msg.includes("temporarily_unavailable")) {
       mappedMsg = "network_error";
-    } else if (msg.includes("client id") || msg.includes("config")) {
+    } else if (msg.includes("invalid_grant") || msg.includes("invalid_token")) {
+      mappedMsg = "refresh_failed";
+    } else if (msg.includes("invalid_scope") || msg.includes("unauthorized_client") || msg.includes("invalid_client") || msg.includes("client id") || msg.includes("config")) {
       mappedMsg = "configuration_error";
     }
 
@@ -747,6 +754,21 @@ class AuthWeb implements Auth {
     scopes: string[],
     loginHint?: string,
   ): Promise<void> {
+    if (this._loginInFlight) {
+      throw new AuthWebError('cancelled', 'Another login is already in progress');
+    }
+    this._loginInFlight = true;
+    try {
+      await this._loginGoogleInner(scopes, loginHint);
+    } finally {
+      this._loginInFlight = false;
+    }
+  }
+
+  private async _loginGoogleInner(
+    scopes: string[],
+    loginHint?: string,
+  ): Promise<void> {
     const clientId = this._config.googleWebClientId;
 
     if (!clientId) {
@@ -755,6 +777,8 @@ class AuthWeb implements Auth {
       );
     }
 
+    const nonce = crypto.randomUUID();
+    this._pendingGoogleNonce = nonce;
     return new Promise((resolve, reject) => {
       const redirectUri = window.location.origin;
       const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -762,7 +786,7 @@ class AuthWeb implements Auth {
       authUrl.searchParams.set("redirect_uri", redirectUri);
       authUrl.searchParams.set("response_type", "id_token token code");
       authUrl.searchParams.set("scope", scopes.join(" "));
-      authUrl.searchParams.set("nonce", crypto.randomUUID());
+      authUrl.searchParams.set("nonce", nonce);
       authUrl.searchParams.set("access_type", "offline");
       authUrl.searchParams.set("prompt", "consent");
 
@@ -797,6 +821,13 @@ class AuthWeb implements Auth {
         if (!idToken) {
           throw new Error("No id_token in response");
         }
+
+        const decoded = this.parseJwtPayload(idToken);
+        if (decoded['nonce'] !== this._pendingGoogleNonce) {
+          this._pendingGoogleNonce = undefined;
+          throw new Error('Nonce mismatch - possible replay attack');
+        }
+        this._pendingGoogleNonce = undefined;
 
         this._grantedScopes = scopes;
         this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
@@ -838,6 +869,23 @@ class AuthWeb implements Auth {
   }
 
   private async loginMicrosoft(
+    scopes: string[],
+    loginHint?: string,
+    tenant?: string,
+    prompt?: string,
+  ): Promise<void> {
+    if (this._loginInFlight) {
+      throw new AuthWebError('cancelled', 'Another login is already in progress');
+    }
+    this._loginInFlight = true;
+    try {
+      await this._loginMicrosoftInner(scopes, loginHint, tenant, prompt);
+    } finally {
+      this._loginInFlight = false;
+    }
+  }
+
+  private async _loginMicrosoftInner(
     scopes: string[],
     loginHint?: string,
     tenant?: string,
@@ -1074,11 +1122,11 @@ class AuthWeb implements Auth {
       return;
     }
 
-    if (this._appleSdkLoadPromise) {
-      return this._appleSdkLoadPromise;
+    if (_appleSdkLoadPromise) {
+      return _appleSdkLoadPromise;
     }
 
-    this._appleSdkLoadPromise = new Promise<void>((resolve, reject) => {
+    _appleSdkLoadPromise = new Promise<void>((resolve, reject) => {
       const scriptId = "nitro-auth-apple-sdk";
       const existingScript = document.getElementById(
         scriptId,
@@ -1102,7 +1150,7 @@ class AuthWeb implements Auth {
         existingScript.addEventListener(
           "error",
           () => {
-            this._appleSdkLoadPromise = undefined;
+            _appleSdkLoadPromise = undefined;
             reject(new Error("Failed to load Apple SDK"));
           },
           { once: true },
@@ -1119,13 +1167,13 @@ class AuthWeb implements Auth {
         resolve();
       };
       script.onerror = () => {
-        this._appleSdkLoadPromise = undefined;
+        _appleSdkLoadPromise = undefined;
         reject(new Error("Failed to load Apple SDK"));
       };
       document.head.appendChild(script);
     });
 
-    return this._appleSdkLoadPromise;
+    return _appleSdkLoadPromise;
   }
 
   private async loginApple(): Promise<void> {
@@ -1199,6 +1247,7 @@ class AuthWeb implements Auth {
     logger.setEnabled(enabled);
   }
 
+  /** @internal Reserved for future use — not part of the public API */
   setWebStorageAdapter(adapter: JSStorageAdapter | undefined): void {
     this._storageAdapter = adapter
       ? this.createWebStorageDriver(adapter)

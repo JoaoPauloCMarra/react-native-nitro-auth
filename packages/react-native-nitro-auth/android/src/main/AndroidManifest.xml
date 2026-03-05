@@ -8,5 +8,17 @@
             android:name="com.auth.GoogleSignInActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:exported="false" />
+        <activity
+            android:name="com.auth.MicrosoftAuthActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="msauth" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>
