@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { AuthModule } from "../Auth.web";
+import { logger } from "../utils/logger";
 import type { AuthProvider, AuthUser } from "../Auth.nitro";
 
 export type SocialButtonVariant = "primary" | "outline" | "white" | "black";
@@ -87,7 +88,11 @@ export const SocialButton = ({
         onSuccess?.(user);
       }
     } catch (error) {
-      onError?.(error);
+      if (onError) {
+        onError(error);
+      } else if (process.env.NODE_ENV !== "production") {
+        logger.error("SocialButton unhandled error:", error);
+      }
     } finally {
       setLoading(false);
     }
@@ -125,19 +130,21 @@ export const SocialButton = ({
           <>
             {provider === "google" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
-                <Text style={{ fontSize: 18 }}>G</Text>
+                <Text style={styles.iconText}>G</Text>
               </View>
             )}
             {provider === "apple" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
-                <Text style={{ fontSize: 18, color: getTextColor(variant) }}>
+                <Text
+                  style={[styles.iconText, { color: getTextColor(variant) }]}
+                >
                   
                 </Text>
               </View>
             )}
             {provider === "microsoft" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
-                <Text style={{ fontSize: 16 }}>⊞</Text>
+                <Text style={styles.microsoftIconText}>⊞</Text>
               </View>
             )}
             <Text
@@ -177,5 +184,11 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 16,
     fontWeight: "600",
+  },
+  iconText: {
+    fontSize: 18,
+  },
+  microsoftIconText: {
+    fontSize: 16,
   },
 });

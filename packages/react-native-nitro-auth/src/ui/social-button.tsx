@@ -7,8 +7,9 @@ import {
   View,
   ActivityIndicator,
 } from "react-native";
-import { NitroModules } from "react-native-nitro-modules";
-import type { Auth, AuthProvider, AuthUser } from "../Auth.nitro";
+import { AuthService } from "../service";
+import { logger } from "../utils/logger";
+import type { AuthProvider, AuthUser } from "../Auth.nitro";
 
 export type SocialButtonVariant = "primary" | "outline" | "white" | "black";
 
@@ -56,8 +57,7 @@ const getTextColor = (variant: SocialButtonVariant): string =>
   variant === "white" || variant === "outline" ? "#000000" : "#FFFFFF";
 
 async function performLogin(provider: AuthProvider): Promise<void> {
-  const auth = NitroModules.createHybridObject<Auth>("Auth");
-  await auth.login(provider);
+  await AuthService.login(provider);
 }
 
 export const SocialButton = ({
@@ -83,12 +83,16 @@ export const SocialButton = ({
     setLoading(true);
     try {
       await performLogin(provider);
-      const user = NitroModules.createHybridObject<Auth>("Auth").currentUser;
+      const user = AuthService.currentUser;
       if (user) {
         onSuccess?.(user);
       }
     } catch (error) {
-      onError?.(error);
+      if (onError) {
+        onError(error);
+      } else if (__DEV__) {
+        logger.error("SocialButton unhandled error:", error);
+      }
     } finally {
       setLoading(false);
     }
@@ -126,19 +130,21 @@ export const SocialButton = ({
           <>
             {provider === "google" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
-                <Text style={{ fontSize: 18 }}>G</Text>
+                <Text style={styles.iconText}>G</Text>
               </View>
             )}
             {provider === "apple" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
-                <Text style={{ fontSize: 18, color: getTextColor(variant) }}>
+                <Text
+                  style={[styles.iconText, { color: getTextColor(variant) }]}
+                >
                   
                 </Text>
               </View>
             )}
             {provider === "microsoft" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
-                <Text style={{ fontSize: 16 }}>⊞</Text>
+                <Text style={styles.microsoftIconText}>⊞</Text>
               </View>
             )}
             <Text
@@ -178,5 +184,11 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 16,
     fontWeight: "600",
+  },
+  iconText: {
+    fontSize: 18,
+  },
+  microsoftIconText: {
+    fontSize: 16,
   },
 });

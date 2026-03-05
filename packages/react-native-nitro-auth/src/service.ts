@@ -29,7 +29,8 @@ export const AuthService: Auth = {
 
   async login(provider: AuthProvider, options?: LoginOptions) {
     try {
-      return await nitroAuth.login(provider, options);
+      await nitroAuth.login(provider, options);
+      return;
     } catch (e) {
       throw AuthError.from(e);
     }
@@ -37,7 +38,8 @@ export const AuthService: Auth = {
 
   async requestScopes(scopes: string[]) {
     try {
-      return await nitroAuth.requestScopes(scopes);
+      await nitroAuth.requestScopes(scopes);
+      return;
     } catch (e) {
       throw AuthError.from(e);
     }
@@ -45,7 +47,8 @@ export const AuthService: Auth = {
 
   async revokeScopes(scopes: string[]) {
     try {
-      return await nitroAuth.revokeScopes(scopes);
+      await nitroAuth.revokeScopes(scopes);
+      return;
     } catch (e) {
       throw AuthError.from(e);
     }
@@ -73,16 +76,15 @@ export const AuthService: Auth = {
 
   async silentRestore() {
     try {
-      return await nitroAuth.silentRestore();
+      await nitroAuth.silentRestore();
+      return;
     } catch (e) {
       throw AuthError.from(e);
     }
   },
 
   onAuthStateChanged(callback: (user: AuthUser | undefined) => void) {
-    return nitroAuth.onAuthStateChanged((user) => {
-      callback(user);
-    });
+    return nitroAuth.onAuthStateChanged(callback);
   },
 
   onTokensRefreshed(callback: (tokens: AuthTokens) => void) {

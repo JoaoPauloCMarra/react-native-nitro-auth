@@ -14,6 +14,7 @@ import {
   SocialButton,
   useAuth,
   AuthService,
+  AuthError,
   type AuthUser,
 } from "react-native-nitro-auth";
 import {
@@ -21,6 +22,7 @@ import {
   StorageScope,
   useStorage,
 } from "react-native-nitro-storage";
+import { SmokeTestCard } from "./SmokeTestCard";
 
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 const SHOWCASE_CAPABILITIES = [
@@ -29,9 +31,15 @@ const SHOWCASE_CAPABILITIES = [
   "Auth state listener",
   "Token refresh listener",
   "Scope request / revoke",
-  "Silent restore",
-  "Server auth code support",
-  "App-managed Disk snapshot",
+  "Silent restore (auto + manual)",
+  "Get & refresh tokens",
+  "Force account picker",
+  "Login hint",
+  "Microsoft prompt options",
+  "Microsoft B2C tenant",
+  "Server auth code",
+  "SocialButton variants",
+  "App-managed disk snapshot",
 ] as const;
 
 type AuthSnapshot = {
@@ -145,6 +153,9 @@ export const FeatureDemo = () => {
   const [variant, setVariant] = useState<
     "primary" | "outline" | "white" | "black"
   >("primary");
+  const [microsoftPrompt, setMicrosoftPrompt] = useState<
+    "login" | "consent" | "select_account" | "none" | undefined
+  >(undefined);
   const clearAuthSnapshot = useCallback(() => {
     setAuthSnapshot(EMPTY_AUTH_SNAPSHOT);
   }, [setAuthSnapshot]);
@@ -234,6 +245,23 @@ export const FeatureDemo = () => {
     void AuthService.silentRestore();
   }, []);
 
+  const handleSilentRestore = async () => {
+    try {
+      setStatus("Running silent restore...");
+      await AuthService.silentRestore();
+      setStatus(
+        AuthService.currentUser
+          ? `Silent restore: ${AuthService.currentUser.email}`
+          : "Silent restore: no session found",
+      );
+    } catch (e: unknown) {
+      const authError = AuthError.from(e);
+      setStatus(
+        `Silent restore error [${authError.code}]: ${authError.message}`,
+      );
+    }
+  };
+
   useEffect(() => {
     const unsubscribeAuth = AuthService.onAuthStateChanged((u) => {
       setStatus(u ? `Auth: ${u.email || "logged in"}` : "Auth: logged out");
@@ -320,8 +348,8 @@ export const FeatureDemo = () => {
       persistLatestAuthState();
       setStatus(`Logged in as ${AuthService.currentUser?.email}`);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setStatus(`Login error: ${msg}`);
+      const authError = AuthError.from(e);
+      setStatus(`Login error [${authError.code}]: ${authError.message}`);
     }
   };
 
@@ -335,7 +363,8 @@ export const FeatureDemo = () => {
       });
       persistLatestAuthState();
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      const authError = AuthError.from(e);
+      setStatus(`Error [${authError.code}]: ${authError.message}`);
     }
   };
 
@@ -350,7 +379,8 @@ export const FeatureDemo = () => {
       });
       persistLatestAuthState();
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      const authError = AuthError.from(e);
+      setStatus(`Error [${authError.code}]: ${authError.message}`);
     }
   };
 
@@ -360,7 +390,8 @@ export const FeatureDemo = () => {
       await requestScopes([CALENDAR_SCOPE]);
       setStatus("Calendar scope granted!");
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      const authError = AuthError.from(e);
+      setStatus(`Error [${authError.code}]: ${authError.message}`);
     }
   };
 
@@ -370,7 +401,8 @@ export const FeatureDemo = () => {
       await revokeScopes([CALENDAR_SCOPE]);
       setStatus("Calendar scope revoked!");
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      const authError = AuthError.from(e);
+      setStatus(`Error [${authError.code}]: ${authError.message}`);
     }
   };
 
@@ -383,12 +415,26 @@ export const FeatureDemo = () => {
           "openid",
           "offline_access",
         ],
+        prompt: microsoftPrompt,
       });
       persistLatestAuthState();
       setStatus("Logged in with Microsoft B2C!");
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      const authError = AuthError.from(e);
+      setStatus(`Error [${authError.code}]: ${authError.message}`);
     }
+  };
+
+  const cycleMicrosoftPrompt = () => {
+    const prompts: (typeof microsoftPrompt)[] = [
+      undefined,
+      "login",
+      "consent",
+      "select_account",
+      "none",
+    ];
+    const idx = prompts.indexOf(microsoftPrompt);
+    setMicrosoftPrompt(prompts[(idx + 1) % prompts.length]);
   };
 
   const handleGetAccessToken = async () => {
@@ -404,7 +450,8 @@ export const FeatureDemo = () => {
       }
       setStatus(token ? `Token: ${token.slice(0, 20)}...` : "No token");
     } catch (e: unknown) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      const authError = AuthError.from(e);
+      setStatus(`Error [${authError.code}]: ${authError.message}`);
     }
   };
 
@@ -423,7 +470,8 @@ export const FeatureDemo = () => {
       });
       setStatus(`Refreshed! New token: ${tokens.accessToken?.slice(0, 15)}...`);
     } catch (e: unknown) {
-      setStatus(`Refresh error: ${e instanceof Error ? e.message : String(e)}`);
+      const authError = AuthError.from(e);
+      setStatus(`Refresh error [${authError.code}]: ${authError.message}`);
     }
   };
 
@@ -483,7 +531,7 @@ export const FeatureDemo = () => {
         <View style={styles.headerGlowSecondary} />
         <Text style={styles.title}>Nitro Auth</Text>
         <Text style={styles.subtitle}>Modern Feature Showcase (JSI)</Text>
-        <Text style={styles.version}>v0.5.5</Text>
+        <Text style={styles.version}>v0.5.6</Text>
       </View>
 
       <View style={styles.heroPanel}>
@@ -650,27 +698,39 @@ export const FeatureDemo = () => {
             </View>
           ) : null}
 
-          {user?.provider === "google" && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Incremental Auth</Text>
-              <ActionButton
-                label={
-                  hasCalendarScope
-                    ? "Revoke Calendar Scope"
-                    : "Request Calendar Scope"
-                }
-                onPress={
-                  hasCalendarScope ? handleRevokeScope : handleRequestScope
-                }
-                variant={hasCalendarScope ? "danger" : "primary"}
-              />
-              <ActionButton
-                label="Force Account Picker"
-                onPress={handleForceAccountPicker}
-                variant="secondary"
-              />
-            </View>
-          )}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Incremental Auth</Text>
+            <ActionButton
+              label={
+                hasCalendarScope
+                  ? "Revoke Calendar Scope"
+                  : "Request Calendar Scope"
+              }
+              onPress={
+                hasCalendarScope ? handleRevokeScope : handleRequestScope
+              }
+              variant={hasCalendarScope ? "danger" : "primary"}
+            />
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Session Actions</Text>
+            <ActionButton
+              label="Silent Restore"
+              onPress={handleSilentRestore}
+              variant="secondary"
+            />
+            <ActionButton
+              label="Force Account Picker"
+              onPress={handleForceAccountPicker}
+              variant="secondary"
+            />
+            <ActionButton
+              label="Login with Hint (user@gmail.com)"
+              onPress={handleLoginWithHint}
+              variant="secondary"
+            />
+          </View>
 
           <ActionButton
             label={
@@ -743,9 +803,23 @@ export const FeatureDemo = () => {
               variant="secondary"
             />
             <View style={styles.spacer} />
+            <View style={styles.variantDemo}>
+              <Text style={styles.variantLabel}>
+                MS Prompt: {microsoftPrompt ?? "default"}
+              </Text>
+              <Pressable onPress={cycleMicrosoftPrompt} style={styles.cycleBtn}>
+                <Text style={styles.cycleBtnText}>Cycle</Text>
+              </Pressable>
+            </View>
             <ActionButton
               label="Login with Hint"
               onPress={handleLoginWithHint}
+              variant="secondary"
+            />
+            <View style={styles.spacer} />
+            <ActionButton
+              label="Silent Restore"
+              onPress={handleSilentRestore}
               variant="secondary"
             />
           </View>
@@ -811,6 +885,11 @@ export const FeatureDemo = () => {
         </View>
       </View>
 
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Smoke Tests</Text>
+        <SmokeTestCard />
+      </View>
+
       <View style={[styles.section, styles.lastSection]}>
         <Text style={styles.sectionTitle}>Feature Coverage</Text>
         <View style={styles.checklistCard}>
@@ -819,17 +898,24 @@ export const FeatureDemo = () => {
           <CheckItem label="Microsoft Sign-In" checked />
           <CheckItem label="One-Tap / Sheet" checked />
           <CheckItem label="Incremental Auth (Scopes)" checked />
+          <CheckItem label="Request Scopes" checked />
+          <CheckItem label="Revoke Scopes" checked />
+          <CheckItem label="Silent Restore (auto + manual)" checked />
+          <CheckItem label="Get Access Token" checked />
           <CheckItem label="Token Refresh" checked />
           <CheckItem label="Auth State Listener" checked />
           <CheckItem label="Token Refresh Listener" checked />
           <CheckItem label="App-level Disk snapshot (nitro-storage)" checked />
           <CheckItem label="Force Account Picker" checked />
           <CheckItem label="Login Hint" checked />
+          <CheckItem label="Microsoft Prompt Option" checked />
+          <CheckItem label="Microsoft B2C Tenant" checked />
           <CheckItem label="Logging Toggle" checked />
           <CheckItem label="SocialButton Variants" checked />
           <CheckItem label="Legacy Google Sign-In Toggle" checked />
           <CheckItem label="Server Auth Code" checked />
-          <CheckItem label="Error Metadata" checked />
+          <CheckItem label="Error Metadata (code + message)" checked />
+          <CheckItem label="hasPlayServices" checked />
         </View>
       </View>
     </ScrollView>
@@ -973,7 +1059,6 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     overflow: "hidden",
     boxShadow: "0 18px 34px rgba(15, 23, 42, 0.22)",
-    elevation: 8,
   },
   headerGlowPrimary: {
     position: "absolute",
@@ -1032,7 +1117,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148, 163, 184, 0.18)",
     boxShadow: "0 8px 20px rgba(30, 41, 59, 0.08)",
-    elevation: 2,
   },
   metricValue: {
     fontSize: 22,
@@ -1062,7 +1146,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148, 163, 184, 0.2)",
     boxShadow: "0 8px 24px rgba(30, 41, 59, 0.07)",
-    elevation: 2,
   },
   statusHeader: {
     flexDirection: "row",
@@ -1141,7 +1224,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148, 163, 184, 0.2)",
     boxShadow: "0 12px 26px rgba(15, 23, 42, 0.08)",
-    elevation: 2,
   },
   showcaseTitle: {
     fontSize: 13,
@@ -1175,7 +1257,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148, 163, 184, 0.2)",
     boxShadow: "0 12px 28px rgba(15, 23, 42, 0.08)",
-    elevation: 2,
   },
   avatar: {
     width: 72,
@@ -1277,7 +1358,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginVertical: 4,
     boxShadow: "0 6px 16px rgba(59, 130, 246, 0.25)",
-    elevation: 2,
   },
   actionButtonOutline: {
     borderWidth: 1,

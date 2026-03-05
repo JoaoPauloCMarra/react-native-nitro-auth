@@ -1,3 +1,10 @@
+@file:Suppress("DEPRECATION")
+// The legacy com.google.android.gms.auth.api.signin.* API is used intentionally for:
+//   • getLastSignedInAccount  – persists session across app restarts via GMS store; no drop-in replacement
+//   • silentSignIn            – AuthorizationClient.authorize() still requires an Activity for interactive fallback
+//   • revokeAccess            – no equivalent in Credential Manager or Identity.getAuthorizationClient()
+// All modern entry-points use Credential Manager (One-Tap). Legacy is a documented fallback only.
+
 package com.auth
 
 import android.app.Activity
@@ -9,6 +16,7 @@ import android.os.Bundle
 import android.util.Base64
 import android.util.Log
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
@@ -43,14 +51,24 @@ object AuthAdapter {
     private var pendingScopes: List<String> = emptyList()
     private var pendingMicrosoftScopes: List<String> = emptyList()
 
+    @Volatile
+    private var pendingOrigin: String = "login"
+    @Volatile
     private var pendingPkceVerifier: String? = null
+    @Volatile
     private var pendingState: String? = null
+    @Volatile
     private var pendingNonce: String? = null
+    @Volatile
     private var pendingMicrosoftTenant: String? = null
+    @Volatile
     private var pendingMicrosoftClientId: String? = null
+    @Volatile
     private var pendingMicrosoftB2cDomain: String? = null
 
+    @Volatile
     private var inMemoryMicrosoftRefreshToken: String? = null
+    @Volatile
     private var inMemoryMicrosoftScopes: List<String> =
         listOf("openid", "email", "profile", "offline_access", "User.Read")
 
@@ -62,6 +80,7 @@ object AuthAdapter {
 
     @JvmStatic
     private external fun nativeOnLoginSuccess(
+        origin: String,
         provider: String,
         email: String?,
         name: String?,
@@ -74,7 +93,7 @@ object AuthAdapter {
     )
 
     @JvmStatic
-    private external fun nativeOnLoginError(error: String, underlyingError: String?)
+    private external fun nativeOnLoginError(origin: String, error: String, underlyingError: String?)
 
     @JvmStatic
     private external fun nativeOnRefreshSuccess(idToken: String?, accessToken: String?, expirationTime: Long?)
@@ -127,22 +146,22 @@ object AuthAdapter {
         isInitialized = false
     }
 
-    fun onSignInSuccess(account: GoogleSignInAccount, scopes: List<String>) {
+    fun onSignInSuccess(account: GoogleSignInAccount, scopes: List<String>, origin: String = "login") {
         appContext ?: return
         val expirationTime = getJwtExpirationTimeMs(account.idToken)
-        nativeOnLoginSuccess("google", account.email, account.displayName,
+        nativeOnLoginSuccess(origin, "google", account.email, account.displayName,
             account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
             scopes.toTypedArray(), expirationTime)
     }
 
-    fun onSignInError(errorCode: Int, message: String?) {
+    fun onSignInError(errorCode: Int, message: String?, origin: String = "login") {
         val mappedError = when (errorCode) {
             12501 -> "cancelled"
             7 -> "network_error"
             8, 10 -> "configuration_error"
             else -> "unknown"
         }
-        nativeOnLoginError(mappedError, message)
+        nativeOnLoginError(origin, mappedError, message)
     }
 
     @JvmStatic
@@ -159,22 +178,22 @@ object AuthAdapter {
         prompt: String? = null
     ) {
         if (provider == "apple") {
-            nativeOnLoginError("unsupported_provider", "Apple Sign-In is not supported on Android.")
+            nativeOnLoginError("login", "unsupported_provider", "Apple Sign-In is not supported on Android.")
             return
         }
         if (provider == "microsoft") {
-            loginMicrosoft(context, scopes, loginHint, tenant, prompt)
+            loginMicrosoft(context, scopes, loginHint, tenant, prompt, "login")
             return
         }
         if (provider != "google") {
-            nativeOnLoginError("unsupported_provider", "Unsupported provider: $provider")
+            nativeOnLoginError("login", "unsupported_provider", "Unsupported provider: $provider")
             return
         }
 
         val ctx = appContext ?: context.applicationContext
         val clientId = googleClientId ?: getClientIdFromResources(ctx)
         if (clientId == null) {
-            nativeOnLoginError("configuration_error", "Google Client ID is required. Set it in app.json plugins.")
+            nativeOnLoginError("login", "configuration_error", "Google Client ID is required. Set it in app.json plugins.")
             return
         }
 
@@ -182,19 +201,20 @@ object AuthAdapter {
         pendingScopes = requestedScopes
 
         if (useLegacyGoogleSignIn) {
-            loginLegacy(context, clientId, requestedScopes, loginHint, forceAccountPicker)
+            loginLegacy(context, clientId, requestedScopes, loginHint, forceAccountPicker, "login")
             return
         }
-        loginOneTap(context, clientId, requestedScopes, loginHint, forceAccountPicker, useOneTap)
+        loginOneTap(context, clientId, requestedScopes, loginHint, forceAccountPicker, useOneTap, "login")
     }
 
-    private fun loginMicrosoft(context: Context, scopes: Array<String>?, loginHint: String?, tenant: String?, prompt: String?) {
+    private fun loginMicrosoft(context: Context, scopes: Array<String>?, loginHint: String?, tenant: String?, prompt: String?, origin: String = "login") {
         val ctx = appContext ?: context.applicationContext
         val clientId = getMicrosoftClientIdFromResources(ctx)
         if (clientId == null) {
-            nativeOnLoginError("configuration_error", "Microsoft Client ID is required. Set it in app.json plugins.")
+            nativeOnLoginError(origin, "configuration_error", "Microsoft Client ID is required. Set it in app.json plugins.")
             return
         }
+        pendingOrigin = origin
 
         val effectiveTenant = tenant ?: getMicrosoftTenantFromResources(ctx) ?: "common"
         val effectiveScopes = scopes?.toList() ?: listOf("openid", "email", "profile", "offline_access", "User.Read")
@@ -241,7 +261,7 @@ object AuthAdapter {
                 ctx.startActivity(browserIntent)
             }
         } catch (e: Exception) {
-            nativeOnLoginError("unknown", e.message)
+            nativeOnLoginError(origin, "unknown", e.message)
         }
     }
 
@@ -263,19 +283,20 @@ object AuthAdapter {
         val error = uri.getQueryParameter("error")
         val errorDescription = uri.getQueryParameter("error_description")
 
+        val origin = pendingOrigin
         if (error != null) {
             clearPkceState()
-            nativeOnLoginError(error, errorDescription)
+            nativeOnLoginError(origin, error, errorDescription)
             return
         }
         if (state != pendingState) {
             clearPkceState()
-            nativeOnLoginError("invalid_state", "State mismatch - possible CSRF attack")
+            nativeOnLoginError(origin, "invalid_state", "State mismatch - possible CSRF attack")
             return
         }
         if (code == null) {
             clearPkceState()
-            nativeOnLoginError("unknown", "No authorization code in response")
+            nativeOnLoginError(origin, "unknown", "No authorization code in response")
             return
         }
         exchangeCodeForTokens(code)
@@ -286,10 +307,11 @@ object AuthAdapter {
         val clientId = pendingMicrosoftClientId
         val tenant = pendingMicrosoftTenant
         val verifier = pendingPkceVerifier
+        val origin = pendingOrigin
 
         if (ctx == null || clientId == null || tenant == null || verifier == null) {
             clearPkceState()
-            nativeOnLoginError("invalid_state", "Missing PKCE state for token exchange")
+            nativeOnLoginError(origin, "invalid_state", "Missing PKCE state for token exchange")
             return
         }
 
@@ -301,49 +323,55 @@ object AuthAdapter {
             try {
                 val url = java.net.URL(tokenUrl)
                 val connection = url.openConnection() as java.net.HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                connection.doOutput = true
+                try {
+                    connection.connectTimeout = 15_000
+                    connection.readTimeout = 15_000
+                    connection.requestMethod = "POST"
+                    connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                    connection.doOutput = true
 
-                val postData = buildString {
-                    append("client_id=${java.net.URLEncoder.encode(clientId, "UTF-8")}")
-                    append("&code=${java.net.URLEncoder.encode(code, "UTF-8")}")
-                    append("&redirect_uri=${java.net.URLEncoder.encode(redirectUri, "UTF-8")}")
-                    append("&grant_type=authorization_code")
-                    append("&code_verifier=${java.net.URLEncoder.encode(verifier, "UTF-8")}")
-                }
-                connection.outputStream.use { it.write(postData.toByteArray()) }
+                    val postData = buildString {
+                        append("client_id=${java.net.URLEncoder.encode(clientId, "UTF-8")}")
+                        append("&code=${java.net.URLEncoder.encode(code, "UTF-8")}")
+                        append("&redirect_uri=${java.net.URLEncoder.encode(redirectUri, "UTF-8")}")
+                        append("&grant_type=authorization_code")
+                        append("&code_verifier=${java.net.URLEncoder.encode(verifier, "UTF-8")}")
+                    }
+                    connection.outputStream.use { it.write(postData.toByteArray()) }
 
-                val responseCode = connection.responseCode
-                val responseBody = if (responseCode == 200) {
-                    connection.inputStream.bufferedReader().readText()
-                } else {
-                    connection.errorStream?.bufferedReader()?.readText() ?: ""
-                }
+                    val responseCode = connection.responseCode
+                    val responseBody = if (responseCode == 200) {
+                        connection.inputStream.bufferedReader().use { it.readText() }
+                    } else {
+                        connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    }
 
-                withContext(Dispatchers.Main) {
-                    handleTokenResponse(responseCode, responseBody)
+                    withContext(Dispatchers.Main) {
+                        handleTokenResponse(responseCode, responseBody, origin)
+                    }
+                } finally {
+                    connection.disconnect()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     clearPkceState()
-                    nativeOnLoginError("network_error", e.message)
+                    nativeOnLoginError(origin, "network_error", e.message)
                 }
             }
         }
     }
 
-    private fun handleTokenResponse(responseCode: Int, responseBody: String) {
+    private fun handleTokenResponse(responseCode: Int, responseBody: String, origin: String) {
         if (responseCode != 200) {
             try {
                 val json = JSONObject(responseBody)
                 val error = json.optString("error", "token_error")
                 val desc = json.optString("error_description", "Failed to exchange code for tokens")
                 clearPkceState()
-                nativeOnLoginError(error, desc)
+                nativeOnLoginError(origin, error, desc)
             } catch (e: Exception) {
                 clearPkceState()
-                nativeOnLoginError("token_error", "Failed to exchange code for tokens")
+                nativeOnLoginError(origin, "token_error", "Failed to exchange code for tokens")
             }
             return
         }
@@ -358,14 +386,14 @@ object AuthAdapter {
 
             if (idToken.isEmpty()) {
                 clearPkceState()
-                nativeOnLoginError("no_id_token", "No id_token in token response")
+                nativeOnLoginError(origin, "no_id_token", "No id_token in token response")
                 return
             }
 
             val claims = decodeJwt(idToken)
             if (claims["nonce"] != pendingNonce) {
                 clearPkceState()
-                nativeOnLoginError("invalid_nonce", "Nonce mismatch - token may be replayed")
+                nativeOnLoginError(origin, "invalid_nonce", "Nonce mismatch - token may be replayed")
                 return
             }
 
@@ -379,16 +407,17 @@ object AuthAdapter {
 
             clearPkceState()
             nativeOnLoginSuccess(
-                "microsoft", email, name, null, idToken, accessToken, null,
+                origin, "microsoft", email, name, null, idToken, accessToken, null,
                 pendingMicrosoftScopes.toTypedArray(), expirationTime
             )
         } catch (e: Exception) {
             clearPkceState()
-            nativeOnLoginError("parse_error", e.message)
+            nativeOnLoginError(origin, "parse_error", e.message)
         }
     }
 
     private fun clearPkceState() {
+        pendingOrigin = "login"
         pendingPkceVerifier = null
         pendingState = null
         pendingNonce = null
@@ -410,6 +439,7 @@ object AuthAdapter {
             }
             result
         } catch (e: Exception) {
+            Log.w(TAG, "Failed to decode JWT: ${e.message}")
             emptyMap()
         }
     }
@@ -452,12 +482,13 @@ object AuthAdapter {
         scopes: List<String>,
         loginHint: String?,
         forceAccountPicker: Boolean,
-        useOneTap: Boolean
+        useOneTap: Boolean,
+        origin: String = "login"
     ) {
         val activity = currentActivity ?: context as? Activity
         if (activity == null) {
             Log.w(TAG, "No Activity context available for One-Tap, falling back to legacy")
-            return loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker)
+            return loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, origin)
         }
 
         val credentialManager = CredentialManager.create(activity)
@@ -474,31 +505,31 @@ object AuthAdapter {
         moduleScope.launch(Dispatchers.Main) {
             try {
                 val result = credentialManager.getCredential(context = activity, request = request)
-                handleCredentialResponse(result, scopes)
+                handleCredentialResponse(result, scopes, origin)
             } catch (e: Exception) {
                 Log.w(TAG, "One-Tap failed, falling back to legacy: ${e.message}")
-                loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker)
+                loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, origin)
             }
         }
     }
 
-    @Suppress("DEPRECATION")
     private fun loginLegacy(
         context: Context,
         clientId: String,
         scopes: List<String>,
         loginHint: String?,
-        forceAccountPicker: Boolean
+        forceAccountPicker: Boolean,
+        origin: String = "login"
     ) {
         val ctx = appContext ?: context.applicationContext
         val intent = GoogleSignInActivity.createIntent(
-            ctx, clientId, scopes.toTypedArray(), loginHint, forceAccountPicker
+            ctx, clientId, scopes.toTypedArray(), loginHint, forceAccountPicker, origin
         )
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         ctx.startActivity(intent)
     }
 
-    private fun handleCredentialResponse(response: GetCredentialResponse, scopes: List<String>) {
+    private fun handleCredentialResponse(response: GetCredentialResponse, scopes: List<String>, origin: String) {
         val credential = response.credential
         val googleIdTokenCredential = try {
             if (credential is GoogleIdTokenCredential) {
@@ -516,7 +547,7 @@ object AuthAdapter {
         if (googleIdTokenCredential != null) {
             val expirationTime = getJwtExpirationTimeMs(googleIdTokenCredential.idToken)
             nativeOnLoginSuccess(
-                "google",
+                origin, "google",
                 googleIdTokenCredential.id,
                 googleIdTokenCredential.displayName,
                 googleIdTokenCredential.profilePictureUri?.toString(),
@@ -527,13 +558,12 @@ object AuthAdapter {
             )
         } else {
             Log.w(TAG, "Unsupported credential type: ${credential.type}")
-            nativeOnLoginError("unknown", "Unsupported credential type: ${credential.type}")
+            nativeOnLoginError(origin, "unknown", "Unsupported credential type: ${credential.type}")
         }
     }
 
     // requestScopesSync uses the legacy GoogleSignIn API to check the last signed-in account
     // because Credential Manager has no equivalent for querying existing account state.
-    @Suppress("DEPRECATION")
     @JvmStatic
     fun requestScopesSync(context: Context, scopes: Array<String>) {
         val ctx = appContext ?: context.applicationContext
@@ -541,31 +571,30 @@ object AuthAdapter {
         if (account != null) {
             val newScopes = scopes.map { Scope(it) }
             if (GoogleSignIn.hasPermissions(account, *newScopes.toTypedArray())) {
-                onSignInSuccess(account, (pendingScopes + scopes.toList()).distinct())
+                onSignInSuccess(account, (pendingScopes + scopes.toList()).distinct(), "scopes")
                 return
             }
             val clientId = getClientIdFromResources(ctx)
             if (clientId == null) {
-                nativeOnLoginError("configuration_error", "Google Client ID not configured")
+                nativeOnLoginError("scopes", "configuration_error", "Google Client ID not configured")
                 return
             }
             val allScopes = (pendingScopes + scopes.toList()).distinct()
-            val intent = GoogleSignInActivity.createIntent(ctx, clientId, allScopes.toTypedArray(), account.email)
+            val intent = GoogleSignInActivity.createIntent(ctx, clientId, allScopes.toTypedArray(), account.email, origin = "scopes")
             ctx.startActivity(intent)
             return
         }
         if (inMemoryMicrosoftRefreshToken != null) {
             val mergedScopes = (inMemoryMicrosoftScopes + scopes.toList()).distinct()
             val tenant = getMicrosoftTenantFromResources(ctx)
-            loginMicrosoft(ctx, mergedScopes.toTypedArray(), null, tenant, null)
+            loginMicrosoft(ctx, mergedScopes.toTypedArray(), null, tenant, null, "scopes")
             return
         }
-        nativeOnLoginError("unknown", "No user logged in")
+        nativeOnLoginError("scopes", "unknown", "No user logged in")
     }
 
     // refreshTokenSync uses the legacy silentSignIn because AuthorizationClient (the recommended
     // replacement) requires an Activity context which is not always available at refresh time.
-    @Suppress("DEPRECATION")
     @JvmStatic
     fun refreshTokenSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
@@ -604,28 +633,35 @@ object AuthAdapter {
 
     @JvmStatic
     fun hasPlayServices(context: Context): Boolean {
-        val ctx = context.applicationContext ?: appContext ?: return false
+        val ctx = appContext ?: context.applicationContext ?: return false
         return GoogleApiAvailability.getInstance()
             .isGooglePlayServicesAvailable(ctx) == ConnectionResult.SUCCESS
     }
 
-    // logoutSync / revokeAccessSync use the legacy GoogleSignIn client because Credential Manager
-    // does not expose a sign-out or revoke API for the Google ID token flow.
-    @Suppress("DEPRECATION")
+    // revokeAccessSync uses the legacy GoogleSignIn client because Credential Manager has no
+    // equivalent revoke API for the Google ID token flow.
     @JvmStatic
     fun logoutSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
+        // Clear Credential Manager state (covers One-Tap / passkey credentials).
+        moduleScope.launch {
+            try {
+                CredentialManager.create(ctx).clearCredentialState(ClearCredentialStateRequest())
+            } catch (e: Exception) {
+                Log.w(TAG, "clearCredentialState failed: ${e.message}")
+            }
+        }
+        // Also clear legacy GMS sign-in state so getLastSignedInAccount returns null.
         val clientId = getClientIdFromResources(ctx)
         if (clientId != null) {
             val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestIdToken(clientId).requestServerAuthCode(clientId).requestEmail().build()
+                .requestIdToken(clientId).requestEmail().build()
             GoogleSignIn.getClient(ctx, gso).signOut()
         }
         inMemoryMicrosoftRefreshToken = null
         inMemoryMicrosoftScopes = listOf("openid", "email", "profile", "offline_access", "User.Read")
     }
 
-    @Suppress("DEPRECATION")
     @JvmStatic
     fun revokeAccessSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
@@ -646,12 +682,12 @@ object AuthAdapter {
 
     @JvmStatic
     fun restoreSession(context: Context) {
-        val ctx = context.applicationContext ?: appContext ?: context
+        val ctx = appContext ?: context.applicationContext ?: return
         @Suppress("DEPRECATION")
         val account = GoogleSignIn.getLastSignedInAccount(ctx)
         if (account != null) {
             val expirationTime = getJwtExpirationTimeMs(account.idToken)
-            nativeOnLoginSuccess("google", account.email, account.displayName,
+            nativeOnLoginSuccess("silent", "google", account.email, account.displayName,
                 account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
                 account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), expirationTime)
         } else {
@@ -659,7 +695,7 @@ object AuthAdapter {
             if (refreshToken != null) {
                 refreshMicrosoftToken(ctx, refreshToken)
             } else {
-                nativeOnLoginError("unknown", "No session")
+                nativeOnLoginError("silent", "unknown", "No session")
             }
         }
     }
@@ -670,7 +706,7 @@ object AuthAdapter {
         val b2cDomain = getMicrosoftB2cDomainFromResources(context)
 
         if (clientId == null) {
-            nativeOnLoginError("configuration_error", "Microsoft Client ID is required for refresh")
+            nativeOnLoginError("silent", "configuration_error", "Microsoft Client ID is required for refresh")
             return
         }
 
@@ -681,50 +717,67 @@ object AuthAdapter {
             try {
                 val url = java.net.URL(tokenUrl)
                 val connection = url.openConnection() as java.net.HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                connection.doOutput = true
+                try {
+                    connection.connectTimeout = 15_000
+                    connection.readTimeout = 15_000
+                    connection.requestMethod = "POST"
+                    connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                    connection.doOutput = true
 
-                val postData = buildString {
-                    append("client_id=${java.net.URLEncoder.encode(clientId, "UTF-8")}")
-                    append("&grant_type=refresh_token")
-                    append("&refresh_token=${java.net.URLEncoder.encode(refreshToken, "UTF-8")}")
-                }
-                connection.outputStream.use { it.write(postData.toByteArray()) }
-
-                val responseCode = connection.responseCode
-                val responseBody = if (responseCode == 200) {
-                    connection.inputStream.bufferedReader().readText()
-                } else {
-                    connection.errorStream?.bufferedReader()?.readText() ?: ""
-                }
-
-                withContext(Dispatchers.Main) {
-                    if (responseCode == 200) {
-                        val json = JSONObject(responseBody)
-                        val newIdToken = json.optString("id_token")
-                        val newAccessToken = json.optString("access_token")
-                        val newRefreshToken = json.optString("refresh_token")
-                        val expiresIn = json.optLong("expires_in", 0)
-                        val expirationTime = if (expiresIn > 0) System.currentTimeMillis() + expiresIn * 1000 else null
-                        val claims = decodeJwt(newIdToken)
-
-                        if (newRefreshToken.isNotEmpty()) inMemoryMicrosoftRefreshToken = newRefreshToken
-                        inMemoryMicrosoftScopes = pendingMicrosoftScopes.ifEmpty {
-                            listOf("openid", "email", "profile", "offline_access", "User.Read")
-                        }
-
-                        nativeOnLoginSuccess("microsoft",
-                            claims["preferred_username"] ?: claims["email"],
-                            claims["name"], null,
-                            newIdToken, newAccessToken, null, null, expirationTime)
-                    } else {
-                        nativeOnLoginError("refresh_failed", "Microsoft token refresh failed")
+                    val postData = buildString {
+                        append("client_id=${java.net.URLEncoder.encode(clientId, "UTF-8")}")
+                        append("&grant_type=refresh_token")
+                        append("&refresh_token=${java.net.URLEncoder.encode(refreshToken, "UTF-8")}")
                     }
+                    connection.outputStream.use { it.write(postData.toByteArray()) }
+
+                    val responseCode = connection.responseCode
+                    val responseBody = if (responseCode == 200) {
+                        connection.inputStream.bufferedReader().use { it.readText() }
+                    } else {
+                        connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        if (responseCode == 200) {
+                            val json = JSONObject(responseBody)
+                            val newIdToken = json.optString("id_token")
+                            val newAccessToken = json.optString("access_token")
+                            val newRefreshToken = json.optString("refresh_token")
+                            val expiresIn = json.optLong("expires_in", 0)
+                            val expirationTime = if (expiresIn > 0) System.currentTimeMillis() + expiresIn * 1000 else null
+                            val claims = decodeJwt(newIdToken)
+
+                            if (newRefreshToken.isNotEmpty()) inMemoryMicrosoftRefreshToken = newRefreshToken
+                            inMemoryMicrosoftScopes = pendingMicrosoftScopes.ifEmpty {
+                                listOf("openid", "email", "profile", "offline_access", "User.Read")
+                            }
+
+                            nativeOnLoginSuccess("silent", "microsoft",
+                                claims["preferred_username"] ?: claims["email"],
+                                claims["name"], null,
+                                newIdToken, newAccessToken, null, null, expirationTime)
+                        } else {
+                            if (responseCode in 400..499) {
+                                inMemoryMicrosoftRefreshToken = null  // Token is invalid, clear it
+                            }
+                            val mappedError = try {
+                                val json = org.json.JSONObject(responseBody)
+                                val errorCode = json.optString("error", "token_error")
+                                val errorDesc = json.optString("error_description", "Token refresh failed")
+                                Pair(errorCode, errorDesc)
+                            } catch (e: Exception) {
+                                Pair("token_error", "Token refresh failed")
+                            }
+                            nativeOnLoginError("silent", mappedError.first, mappedError.second)
+                        }
+                    }
+                } finally {
+                    connection.disconnect()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    nativeOnLoginError("network_error", e.message)
+                    nativeOnLoginError("silent", "network_error", e.message)
                 }
             }
         }
@@ -747,46 +800,64 @@ object AuthAdapter {
             try {
                 val url = java.net.URL(tokenUrl)
                 val connection = url.openConnection() as java.net.HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                connection.doOutput = true
+                try {
+                    connection.connectTimeout = 15_000
+                    connection.readTimeout = 15_000
+                    connection.requestMethod = "POST"
+                    connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                    connection.doOutput = true
 
-                val postData = buildString {
-                    append("client_id=${java.net.URLEncoder.encode(clientId, "UTF-8")}")
-                    append("&grant_type=refresh_token")
-                    append("&refresh_token=${java.net.URLEncoder.encode(refreshToken, "UTF-8")}")
-                }
-                connection.outputStream.use { it.write(postData.toByteArray()) }
-
-                val responseCode = connection.responseCode
-                val responseBody = if (responseCode == 200) {
-                    connection.inputStream.bufferedReader().readText()
-                } else {
-                    connection.errorStream?.bufferedReader()?.readText() ?: ""
-                }
-
-                withContext(Dispatchers.Main) {
-                    if (responseCode == 200) {
-                        val json = JSONObject(responseBody)
-                        val newIdToken = json.optString("id_token")
-                        val newAccessToken = json.optString("access_token")
-                        val newRefreshToken = json.optString("refresh_token")
-                        val expiresIn = json.optLong("expires_in", 0)
-                        val expirationTime = if (expiresIn > 0) System.currentTimeMillis() + expiresIn * 1000 else null
-
-                        if (newRefreshToken.isNotEmpty()) inMemoryMicrosoftRefreshToken = newRefreshToken
-                        inMemoryMicrosoftScopes = pendingMicrosoftScopes.ifEmpty {
-                            listOf("openid", "email", "profile", "offline_access", "User.Read")
-                        }
-
-                        nativeOnRefreshSuccess(
-                            newIdToken.ifEmpty { null },
-                            newAccessToken.ifEmpty { null },
-                            expirationTime
-                        )
-                    } else {
-                        nativeOnRefreshError("refresh_failed", "Microsoft token refresh failed")
+                    val postData = buildString {
+                        append("client_id=${java.net.URLEncoder.encode(clientId, "UTF-8")}")
+                        append("&grant_type=refresh_token")
+                        append("&refresh_token=${java.net.URLEncoder.encode(refreshToken, "UTF-8")}")
                     }
+                    connection.outputStream.use { it.write(postData.toByteArray()) }
+
+                    val responseCode = connection.responseCode
+                    val responseBody = if (responseCode == 200) {
+                        connection.inputStream.bufferedReader().use { it.readText() }
+                    } else {
+                        connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        if (responseCode == 200) {
+                            val json = JSONObject(responseBody)
+                            val newIdToken = json.optString("id_token")
+                            val newAccessToken = json.optString("access_token")
+                            val newRefreshToken = json.optString("refresh_token")
+                            val expiresIn = json.optLong("expires_in", 0)
+                            val expirationTime = if (expiresIn > 0) System.currentTimeMillis() + expiresIn * 1000 else null
+
+                            if (newRefreshToken.isNotEmpty()) inMemoryMicrosoftRefreshToken = newRefreshToken
+                            inMemoryMicrosoftScopes = pendingMicrosoftScopes.ifEmpty {
+                                listOf("openid", "email", "profile", "offline_access", "User.Read")
+                            }
+
+                            nativeOnRefreshSuccess(
+                                newIdToken.ifEmpty { null },
+                                newAccessToken.ifEmpty { null },
+                                expirationTime
+                            )
+                        } else {
+                            if (responseCode in 400..499) {
+                                inMemoryMicrosoftRefreshToken = null
+                            }
+                            val errorBody = responseBody
+                            val mappedError = try {
+                                val json = org.json.JSONObject(errorBody)
+                                val errorCode = json.optString("error", "token_error")
+                                val errorDesc = json.optString("error_description", "Token refresh failed")
+                                Pair(errorCode, errorDesc)
+                            } catch (e: Exception) {
+                                Pair("token_error", "Token refresh failed")
+                            }
+                            nativeOnRefreshError(mappedError.first, mappedError.second)
+                        }
+                    }
+                } finally {
+                    connection.disconnect()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {

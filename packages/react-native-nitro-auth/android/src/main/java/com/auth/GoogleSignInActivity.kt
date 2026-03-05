@@ -21,13 +21,15 @@ class GoogleSignInActivity : ComponentActivity() {
         private const val EXTRA_SCOPES = "scopes"
         private const val EXTRA_LOGIN_HINT = "login_hint"
         private const val EXTRA_FORCE_PICKER = "force_picker"
-        
-        fun createIntent(context: Context, clientId: String, scopes: Array<String>, loginHint: String?, forcePicker: Boolean = false): Intent {
+        private const val EXTRA_ORIGIN = "origin"
+
+        fun createIntent(context: Context, clientId: String, scopes: Array<String>, loginHint: String?, forcePicker: Boolean = false, origin: String = "login"): Intent {
             return Intent(context, GoogleSignInActivity::class.java).apply {
                 putExtra(EXTRA_CLIENT_ID, clientId)
                 putExtra(EXTRA_SCOPES, scopes)
                 putExtra(EXTRA_LOGIN_HINT, loginHint)
                 putExtra(EXTRA_FORCE_PICKER, forcePicker)
+                putExtra(EXTRA_ORIGIN, origin)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         }
@@ -36,13 +38,14 @@ class GoogleSignInActivity : ComponentActivity() {
     private val signInLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        val origin = intent.getStringExtra(EXTRA_ORIGIN) ?: "login"
         try {
             val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
             val account = task.getResult(ApiException::class.java)
             val scopes = intent.getStringArrayExtra(EXTRA_SCOPES)?.toList() ?: emptyList()
-            AuthAdapter.onSignInSuccess(account, scopes)
+            AuthAdapter.onSignInSuccess(account, scopes, origin)
         } catch (e: ApiException) {
-            AuthAdapter.onSignInError(e.statusCode, e.message)
+            AuthAdapter.onSignInError(e.statusCode, e.message, origin)
         }
         finish()
     }
@@ -54,8 +57,9 @@ class GoogleSignInActivity : ComponentActivity() {
         val loginHint = intent.getStringExtra(EXTRA_LOGIN_HINT)
         val forcePicker = intent.getBooleanExtra(EXTRA_FORCE_PICKER, false)
         
+        val origin = intent.getStringExtra(EXTRA_ORIGIN) ?: "login"
         if (clientId == null) {
-            AuthAdapter.onSignInError(8, "Missing client ID")
+            AuthAdapter.onSignInError(8, "Missing client ID", origin)
             finish()
             return
         }
