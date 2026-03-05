@@ -1059,7 +1059,6 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     overflow: "hidden",
     boxShadow: "0 18px 34px rgba(15, 23, 42, 0.22)",
-    elevation: 8,
   },
   headerGlowPrimary: {
     position: "absolute",
@@ -1118,7 +1117,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148, 163, 184, 0.18)",
     boxShadow: "0 8px 20px rgba(30, 41, 59, 0.08)",
-    elevation: 2,
   },
   metricValue: {
     fontSize: 22,
@@ -1148,7 +1146,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148, 163, 184, 0.2)",
     boxShadow: "0 8px 24px rgba(30, 41, 59, 0.07)",
-    elevation: 2,
   },
   statusHeader: {
     flexDirection: "row",
@@ -1227,7 +1224,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148, 163, 184, 0.2)",
     boxShadow: "0 12px 26px rgba(15, 23, 42, 0.08)",
-    elevation: 2,
   },
   showcaseTitle: {
     fontSize: 13,
@@ -1261,7 +1257,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148, 163, 184, 0.2)",
     boxShadow: "0 12px 28px rgba(15, 23, 42, 0.08)",
-    elevation: 2,
   },
   avatar: {
     width: 72,
@@ -1363,7 +1358,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginVertical: 4,
     boxShadow: "0 6px 16px rgba(59, 130, 246, 0.25)",
-    elevation: 2,
   },
   actionButtonOutline: {
     borderWidth: 1,

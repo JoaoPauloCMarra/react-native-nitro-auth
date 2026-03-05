@@ -153,6 +153,7 @@ const parseAuthWebExtraConfig = (value: unknown): AuthWebExtraConfig => {
 
 const getConfig = (): AuthWebExtraConfig => {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Constants = require("expo-constants").default;
     return parseAuthWebExtraConfig(Constants.expoConfig?.extra);
   } catch (error) {
@@ -542,7 +543,7 @@ class AuthWeb implements Auth {
       const refreshToken = this.loadRefreshToken();
 
       if (!refreshToken) {
-        throw new AuthWebError('refresh_failed', 'No refresh token available');
+        throw new AuthWebError("refresh_failed", "No refresh token available");
       }
 
       const clientId = this._config.microsoftClientId;
@@ -654,11 +655,21 @@ class AuthWeb implements Auth {
       mappedMsg = "timeout";
     } else if (msg.includes("popup blocked")) {
       mappedMsg = "popup_blocked";
-    } else if (msg.includes("network") || msg.includes("server_error") || msg.includes("temporarily_unavailable")) {
+    } else if (
+      msg.includes("network") ||
+      msg.includes("server_error") ||
+      msg.includes("temporarily_unavailable")
+    ) {
       mappedMsg = "network_error";
     } else if (msg.includes("invalid_grant") || msg.includes("invalid_token")) {
       mappedMsg = "refresh_failed";
-    } else if (msg.includes("invalid_scope") || msg.includes("unauthorized_client") || msg.includes("invalid_client") || msg.includes("client id") || msg.includes("config")) {
+    } else if (
+      msg.includes("invalid_scope") ||
+      msg.includes("unauthorized_client") ||
+      msg.includes("invalid_client") ||
+      msg.includes("client id") ||
+      msg.includes("config")
+    ) {
       mappedMsg = "configuration_error";
     }
 
@@ -755,7 +766,10 @@ class AuthWeb implements Auth {
     loginHint?: string,
   ): Promise<void> {
     if (this._loginInFlight) {
-      throw new AuthWebError('cancelled', 'Another login is already in progress');
+      throw new AuthWebError(
+        "cancelled",
+        "Another login is already in progress",
+      );
     }
     this._loginInFlight = true;
     try {
@@ -823,9 +837,9 @@ class AuthWeb implements Auth {
         }
 
         const decoded = this.parseJwtPayload(idToken);
-        if (decoded['nonce'] !== this._pendingGoogleNonce) {
+        if (decoded["nonce"] !== this._pendingGoogleNonce) {
           this._pendingGoogleNonce = undefined;
-          throw new Error('Nonce mismatch - possible replay attack');
+          throw new Error("Nonce mismatch - possible replay attack");
         }
         this._pendingGoogleNonce = undefined;
 
@@ -875,7 +889,10 @@ class AuthWeb implements Auth {
     prompt?: string,
   ): Promise<void> {
     if (this._loginInFlight) {
-      throw new AuthWebError('cancelled', 'Another login is already in progress');
+      throw new AuthWebError(
+        "cancelled",
+        "Another login is already in progress",
+      );
     }
     this._loginInFlight = true;
     try {

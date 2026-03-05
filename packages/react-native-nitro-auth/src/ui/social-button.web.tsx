@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { AuthModule } from "../Auth.web";
+import { logger } from "../utils/logger";
 import type { AuthProvider, AuthUser } from "../Auth.nitro";
 
 export type SocialButtonVariant = "primary" | "outline" | "white" | "black";
@@ -89,8 +90,8 @@ export const SocialButton = ({
     } catch (error) {
       if (onError) {
         onError(error);
-      } else if (process.env.NODE_ENV !== 'production') {
-        console.error('[NitroAuth] SocialButton unhandled error:', error);
+      } else if (process.env.NODE_ENV !== "production") {
+        logger.error("SocialButton unhandled error:", error);
       }
     } finally {
       setLoading(false);
@@ -134,7 +135,9 @@ export const SocialButton = ({
             )}
             {provider === "apple" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
-                <Text style={[styles.iconText, { color: getTextColor(variant) }]}>
+                <Text
+                  style={[styles.iconText, { color: getTextColor(variant) }]}
+                >
                   
                 </Text>
               </View>

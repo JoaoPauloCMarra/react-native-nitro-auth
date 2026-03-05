@@ -27,7 +27,8 @@ export const AuthService: Auth = {
 
   async login(provider: AuthProvider, options?: LoginOptions) {
     try {
-      return await AuthModule.login(provider, options);
+      await AuthModule.login(provider, options);
+      return;
     } catch (e) {
       throw AuthError.from(e);
     }
@@ -35,7 +36,8 @@ export const AuthService: Auth = {
 
   async requestScopes(scopes: string[]) {
     try {
-      return await AuthModule.requestScopes(scopes);
+      await AuthModule.requestScopes(scopes);
+      return;
     } catch (e) {
       throw AuthError.from(e);
     }
@@ -43,7 +45,8 @@ export const AuthService: Auth = {
 
   async revokeScopes(scopes: string[]) {
     try {
-      return await AuthModule.revokeScopes(scopes);
+      await AuthModule.revokeScopes(scopes);
+      return;
     } catch (e) {
       throw AuthError.from(e);
     }
@@ -71,7 +74,8 @@ export const AuthService: Auth = {
 
   async silentRestore() {
     try {
-      return await AuthModule.silentRestore();
+      await AuthModule.silentRestore();
+      return;
     } catch (e) {
       throw AuthError.from(e);
     }

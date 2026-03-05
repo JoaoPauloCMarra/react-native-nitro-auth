@@ -201,7 +201,9 @@ describe("useAuth", () => {
       expect(result.current.error).toBeInstanceOf(AuthError);
       expect(result.current.error?.message).toBe("network_error");
       expect((result.current.error as AuthError).code).toBe("network_error");
-      expect((result.current.error as AuthError).underlyingMessage).toBeUndefined();
+      expect(
+        (result.current.error as AuthError).underlyingMessage,
+      ).toBeUndefined();
     });
 
     it("should normalize unknown error messages to 'unknown' code", async () => {
@@ -216,7 +218,9 @@ describe("useAuth", () => {
       expect(result.current.loading).toBe(false);
       expect(result.current.error).toBeInstanceOf(AuthError);
       expect(result.current.error?.message).toBe("unknown");
-      expect((result.current.error as AuthError).underlyingMessage).toBe("Login failed");
+      expect((result.current.error as AuthError).underlyingMessage).toBe(
+        "Login failed",
+      );
     });
 
     it("should handle non-Error exceptions", async () => {
@@ -230,7 +234,9 @@ describe("useAuth", () => {
 
       expect(result.current.error).toBeInstanceOf(AuthError);
       expect(result.current.error?.message).toBe("unknown");
-      expect((result.current.error as AuthError).underlyingMessage).toBe("String error");
+      expect((result.current.error as AuthError).underlyingMessage).toBe(
+        "String error",
+      );
     });
 
     it("should avoid duplicate user state writes when auth callback fires during login", async () => {
@@ -311,7 +317,9 @@ describe("useAuth", () => {
       });
 
       expect(result.current.error).toBeInstanceOf(AuthError);
-      expect((result.current.error as AuthError).code).toBe("configuration_error");
+      expect((result.current.error as AuthError).code).toBe(
+        "configuration_error",
+      );
     });
   });
 

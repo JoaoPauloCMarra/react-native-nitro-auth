@@ -57,7 +57,12 @@ export function useAuth(): UseAuthReturn {
         ) {
           return prev;
         }
-        return { user: nextUser, scopes: nextScopes, loading: nextLoading, error: nextError };
+        return {
+          user: nextUser,
+          scopes: nextScopes,
+          loading: nextLoading,
+          error: nextError,
+        };
       });
     },
     [],
@@ -151,7 +156,12 @@ export function useAuth(): UseAuthReturn {
         ) {
           return prev;
         }
-        return { ...prev, user: currentUser, scopes: nextScopes, loading: false };
+        return {
+          ...prev,
+          user: currentUser,
+          scopes: nextScopes,
+          loading: false,
+        };
       });
     });
     const unsubscribeTokens = AuthService.onTokensRefreshed?.(() => {
@@ -175,6 +185,15 @@ export function useAuth(): UseAuthReturn {
       refreshToken,
       silentRestore,
     }),
-    [state, login, logout, requestScopes, revokeScopes, getAccessToken, refreshToken, silentRestore],
+    [
+      state,
+      login,
+      logout,
+      requestScopes,
+      revokeScopes,
+      getAccessToken,
+      refreshToken,
+      silentRestore,
+    ],
   );
 }
