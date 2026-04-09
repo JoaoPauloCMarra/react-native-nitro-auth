@@ -39,6 +39,7 @@
     "build": "turbo run build",
     "codegen": "turbo run codegen",
     "clean": "turbo run clean",
+    "format:check": "turbo run format:check",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",

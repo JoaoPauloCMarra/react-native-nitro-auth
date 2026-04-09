@@ -33,6 +33,7 @@
     "build": "bob build",
     "clean": "rimraf lib nitrogen/generated",
     "codegen": "nitrogen --logLevel=\"debug\"",
+    "format:check": "eslint .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "jest",
