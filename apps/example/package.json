@@ -9,6 +9,7 @@
     "android": "expo run:android",
     "prebuild": "expo prebuild",
     "prebuild:clean": "expo prebuild --clean",
+    "format:check": "eslint .",
     "lint": "eslint . --fix",
     "typecheck": "tsc --noEmit"
   },

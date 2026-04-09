@@ -8,6 +8,8 @@ export type AuthErrorCode =
   | "popup_blocked"
   | "network_error"
   | "configuration_error"
+  | "not_signed_in"
+  | "operation_in_progress"
   | "unsupported_provider"
   | "invalid_state"
   | "invalid_nonce"
@@ -25,7 +27,7 @@ export interface LoginOptions {
   useOneTap?: boolean;
   /** (iOS only) Use native sign-in sheet */
   useSheet?: boolean;
-  /** Force account picker to show, ignoring any cached session or loginHint */
+  /** Force account picker to show, ignoring any cached session or loginHint. On Android Google, this uses the legacy chooser path. */
   forceAccountPicker?: boolean;
   /** (Android only) Use legacy Google Sign-In flow (e.g. for serverAuthCode) */
   useLegacyGoogleSignIn?: boolean;

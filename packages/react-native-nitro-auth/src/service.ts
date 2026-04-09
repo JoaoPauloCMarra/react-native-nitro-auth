@@ -8,28 +8,33 @@ import type {
 } from "./Auth.nitro";
 import { AuthError } from "./utils/auth-error";
 
-const nitroAuth = NitroModules.createHybridObject<Auth>("Auth");
+let nitroAuth: Auth | undefined;
+
+function getNitroAuth(): Auth {
+  nitroAuth ??= NitroModules.createHybridObject<Auth>("Auth");
+  return nitroAuth;
+}
 
 export const AuthService: Auth = {
   get name() {
-    return nitroAuth.name;
+    return getNitroAuth().name;
   },
 
   get currentUser() {
-    return nitroAuth.currentUser;
+    return getNitroAuth().currentUser;
   },
 
   get grantedScopes() {
-    return nitroAuth.grantedScopes;
+    return getNitroAuth().grantedScopes;
   },
 
   get hasPlayServices() {
-    return nitroAuth.hasPlayServices;
+    return getNitroAuth().hasPlayServices;
   },
 
   async login(provider: AuthProvider, options?: LoginOptions) {
     try {
-      await nitroAuth.login(provider, options);
+      await getNitroAuth().login(provider, options);
       return;
     } catch (e) {
       throw AuthError.from(e);
@@ -38,7 +43,7 @@ export const AuthService: Auth = {
 
   async requestScopes(scopes: string[]) {
     try {
-      await nitroAuth.requestScopes(scopes);
+      await getNitroAuth().requestScopes(scopes);
       return;
     } catch (e) {
       throw AuthError.from(e);
@@ -47,7 +52,7 @@ export const AuthService: Auth = {
 
   async revokeScopes(scopes: string[]) {
     try {
-      await nitroAuth.revokeScopes(scopes);
+      await getNitroAuth().revokeScopes(scopes);
       return;
     } catch (e) {
       throw AuthError.from(e);
@@ -56,7 +61,7 @@ export const AuthService: Auth = {
 
   async getAccessToken() {
     try {
-      return await nitroAuth.getAccessToken();
+      return await getNitroAuth().getAccessToken();
     } catch (e) {
       throw AuthError.from(e);
     }
@@ -64,19 +69,19 @@ export const AuthService: Auth = {
 
   async refreshToken() {
     try {
-      return await nitroAuth.refreshToken();
+      return await getNitroAuth().refreshToken();
     } catch (e) {
       throw AuthError.from(e);
     }
   },
 
   logout() {
-    nitroAuth.logout();
+    getNitroAuth().logout();
   },
 
   async silentRestore() {
     try {
-      await nitroAuth.silentRestore();
+      await getNitroAuth().silentRestore();
       return;
     } catch (e) {
       throw AuthError.from(e);
@@ -84,22 +89,22 @@ export const AuthService: Auth = {
   },
 
   onAuthStateChanged(callback: (user: AuthUser | undefined) => void) {
-    return nitroAuth.onAuthStateChanged(callback);
+    return getNitroAuth().onAuthStateChanged(callback);
   },
 
   onTokensRefreshed(callback: (tokens: AuthTokens) => void) {
-    return nitroAuth.onTokensRefreshed(callback);
+    return getNitroAuth().onTokensRefreshed(callback);
   },
 
   setLoggingEnabled(enabled: boolean) {
-    nitroAuth.setLoggingEnabled(enabled);
+    getNitroAuth().setLoggingEnabled(enabled);
   },
 
   dispose() {
-    nitroAuth.dispose();
+    getNitroAuth().dispose();
   },
 
   equals(other: Parameters<Auth["equals"]>[0]): boolean {
-    return nitroAuth.equals(other);
+    return getNitroAuth().equals(other);
   },
 };

@@ -10,6 +10,8 @@ const VALID_CODES = [
   "popup_blocked",
   "network_error",
   "configuration_error",
+  "not_signed_in",
+  "operation_in_progress",
   "unsupported_provider",
   "invalid_state",
   "invalid_nonce",

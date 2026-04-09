@@ -18,7 +18,23 @@ namespace margelo::nitro::NitroAuth {
  
  inline std::optional<std::string> nsToStd(NSString* _Nullable ns) {
      if (ns == nil) return std::nullopt;
-     return std::string([ns UTF8String]);
+     std::string value([ns UTF8String]);
+     if (value.empty()) return std::nullopt;
+     return value;
+ }
+
+ inline std::optional<std::vector<std::string>> nsArrayToStd(NSArray<NSString*>* _Nullable nsArray) {
+     if (nsArray == nil || nsArray.count == 0) return std::nullopt;
+
+     std::vector<std::string> values;
+     values.reserve(nsArray.count);
+     for (NSString* value in nsArray) {
+         if (value.length == 0) continue;
+         values.emplace_back([value UTF8String]);
+     }
+
+     if (values.empty()) return std::nullopt;
+     return values;
  }
 
 std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, const std::optional<LoginOptions>& options) {
@@ -85,6 +101,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         user.idToken = nsToStd([data objectForKey:@"idToken"]);
         if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
         if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
+        if ([data objectForKey:@"scopes"]) user.scopes = nsArrayToStd([data objectForKey:@"scopes"]);
         if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
         if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
         
@@ -123,6 +140,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector
         user.idToken = nsToStd([data objectForKey:@"idToken"]);
         if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
         if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
+        if ([data objectForKey:@"scopes"]) user.scopes = nsArrayToStd([data objectForKey:@"scopes"]);
         if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
         if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
         promise->resolve(user);
@@ -168,6 +186,7 @@ std::shared_ptr<Promise<std::optional<AuthUser>>> PlatformAuth::silentRestore() 
         user.idToken = nsToStd([data objectForKey:@"idToken"]);
         if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
         if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
+        if ([data objectForKey:@"scopes"]) user.scopes = nsArrayToStd([data objectForKey:@"scopes"]);
         if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
         if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
         promise->resolve(user);

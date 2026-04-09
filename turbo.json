@@ -15,6 +15,11 @@
       "inputs": ["src/**/*.{ts,tsx}", "eslint.config.*"],
       "outputs": [".cache/eslint/.eslintcache"]
     },
+    "format:check": {
+      "dependsOn": ["^format:check"],
+      "inputs": ["**/*.{js,cjs,mjs,ts,tsx}"],
+      "outputs": []
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "inputs": ["src/**/*.{ts,tsx}", "tsconfig.json"],

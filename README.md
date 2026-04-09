@@ -701,6 +701,8 @@ try {
 | `popup_blocked`        | The browser blocked the popup window                            |
 | `network_error`        | A network or connectivity error occurred                        |
 | `configuration_error`  | Missing client IDs, invalid tenant, or misconfigured setup      |
+| `not_signed_in`        | The operation requires an authenticated user/session            |
+| `operation_in_progress`| Another auth flow of the same kind is already running           |
 | `unsupported_provider` | The provider is not supported on this platform                  |
 | `invalid_state`        | PKCE state mismatch — possible CSRF attack                      |
 | `invalid_nonce`        | Nonce mismatch in token response — possible replay attack       |
@@ -803,6 +805,8 @@ This is useful for scenarios where:
 - You need to ensure the user can select any account they've added to their device
 - The cached session is interfering with the expected account selection UX
 
+On Android, `forceAccountPicker` routes through the legacy Google Sign-In chooser to guarantee the account picker appears. Credential Manager / One-Tap remains the default when the chooser is not forced.
+
 ## API Reference
 
 ### Package Exports
@@ -830,7 +834,7 @@ import {
 | Type              | Definition                                                                                                                                                                                                                                    |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AuthProvider`    | `"google" \| "apple" \| "microsoft"`                                                                                                                                                                                                          |
-| `AuthErrorCode`   | `"cancelled" \| "timeout" \| "popup_blocked" \| "network_error" \| "configuration_error" \| "unsupported_provider" \| "invalid_state" \| "invalid_nonce" \| "token_error" \| "no_id_token" \| "parse_error" \| "refresh_failed" \| "unknown"` |
+| `AuthErrorCode`   | `"cancelled" \| "timeout" \| "popup_blocked" \| "network_error" \| "configuration_error" \| "not_signed_in" \| "operation_in_progress" \| "unsupported_provider" \| "invalid_state" \| "invalid_nonce" \| "token_error" \| "no_id_token" \| "parse_error" \| "refresh_failed" \| "unknown"` |
 | `MicrosoftPrompt` | `"login" \| "consent" \| "select_account" \| "none"`                                                                                                                                                                                          |
 
 ### `AuthUser`
@@ -869,7 +873,7 @@ import {
 | `loginHint`             | `string`          | All       | Prefills account identifier                                                       |
 | `useOneTap`             | `boolean`         | Android   | Use Credential Manager/One-Tap flow                                               |
 | `useSheet`              | `boolean`         | iOS       | Use native Google Sign-In sheet                                                   |
-| `forceAccountPicker`    | `boolean`         | All       | Always show account chooser                                                       |
+| `forceAccountPicker`    | `boolean`         | All       | Always show account chooser; Android Google uses the legacy chooser path          |
 | `useLegacyGoogleSignIn` | `boolean`         | Android   | Use legacy Google Sign-In (required when you need `serverAuthCode`)               |
 | `tenant`                | `string`          | Microsoft | Tenant (`common`, `organizations`, `consumers`, tenant id, or full authority URL) |
 | `prompt`                | `MicrosoftPrompt` | Microsoft | Prompt behavior                                                                   |
@@ -1003,6 +1007,8 @@ function toAuthErrorCode(raw: string): AuthErrorCode; // Returns "unknown" for u
 | `popup_blocked`        | Browser blocked popup opening                  |
 | `network_error`        | Network failure                                |
 | `configuration_error`  | Missing/invalid provider configuration         |
+| `not_signed_in`        | Operation requires an active authenticated user |
+| `operation_in_progress`| Another auth flow is already running           |
 | `unsupported_provider` | Provider not supported on this platform        |
 | `invalid_state`        | PKCE state mismatch (possible CSRF)            |
 | `invalid_nonce`        | Nonce mismatch in token response               |

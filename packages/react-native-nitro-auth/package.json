@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-auth",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "High-performance authentication library for React Native with Google Sign-In, Apple Sign-In, and Microsoft Sign-In support, powered by Nitro Modules (JSI)",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -33,9 +33,10 @@
     "build": "bob build",
     "clean": "rimraf lib nitrogen/generated",
     "codegen": "nitrogen --logLevel=\"debug\"",
+    "format:check": "eslint .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-"test": "jest",
+    "test": "jest",
     "test:coverage": "jest --coverage",
     "test:cpp": "node scripts/test-cpp.js",
     "prepublishOnly": "bun run clean && bun run build",
@@ -86,7 +87,7 @@
     "jest-environment-jsdom": "^29.7.0",
     "react": "19.2.0",
     "react-native": "0.83.2",
-    "react-native-nitro-modules": "^0.35.0",
+    "react-native-nitro-modules": "^0.35.4",
     "react-native-web": "^0.21.2",
     "typescript": "^5.9.3"
   },

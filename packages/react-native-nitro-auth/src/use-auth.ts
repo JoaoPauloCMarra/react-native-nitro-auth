@@ -8,6 +8,8 @@ import type {
 import { AuthService } from "./service";
 import { AuthError } from "./utils/auth-error";
 
+const EMPTY_SCOPES: string[] = [];
+
 type AuthState = {
   user: AuthUser | undefined;
   scopes: string[];
@@ -16,13 +18,25 @@ type AuthState = {
 };
 
 const areScopesEqual = (left: string[], right: string[]): boolean => {
+  if (left === right) return true;
   if (left.length !== right.length) return false;
-  const sortedLeft = [...left].sort();
-  const sortedRight = [...right].sort();
-  for (let i = 0; i < sortedLeft.length; i += 1) {
-    if (sortedLeft[i] !== sortedRight[i]) return false;
+
+  let matchesInOrder = true;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) {
+      matchesInOrder = false;
+      break;
+    }
   }
-  return true;
+  if (matchesInOrder) return true;
+
+  const remaining = new Set(left);
+  for (const scope of right) {
+    if (!remaining.delete(scope)) {
+      return false;
+    }
+  }
+  return remaining.size === 0;
 };
 
 export type UseAuthReturn = AuthState & {
@@ -85,7 +99,22 @@ export function useAuth(): UseAuthReturn {
 
   const logout = useCallback(() => {
     AuthService.logout();
-    setState({ user: undefined, scopes: [], loading: false, error: undefined });
+    setState((prev) => {
+      if (
+        prev.user === undefined &&
+        prev.scopes.length === 0 &&
+        prev.loading === false &&
+        prev.error === undefined
+      ) {
+        return prev;
+      }
+      return {
+        user: undefined,
+        scopes: EMPTY_SCOPES,
+        loading: false,
+        error: undefined,
+      };
+    });
   }, []);
 
   const requestScopes = useCallback(
