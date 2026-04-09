@@ -3,7 +3,8 @@
 //   • getLastSignedInAccount  – persists session across app restarts via GMS store; no drop-in replacement
 //   • silentSignIn            – AuthorizationClient.authorize() still requires an Activity for interactive fallback
 //   • revokeAccess            – no equivalent in Credential Manager or Identity.getAuthorizationClient()
-// All modern entry-points use Credential Manager (One-Tap). Legacy is a documented fallback only.
+// All modern entry-points use Credential Manager (One-Tap) unless the caller explicitly needs
+// Android's account chooser semantics, which still require the legacy Google Sign-In flow.
 
 package com.auth
 
@@ -40,11 +41,14 @@ import java.util.UUID
 
 object AuthAdapter {
     private const val TAG = "AuthAdapter"
+    private val defaultMicrosoftScopes =
+        listOf("openid", "email", "profile", "offline_access", "User.Read")
 
     @Volatile
     private var isInitialized = false
 
     private var appContext: Context? = null
+    @Volatile
     private var currentActivity: Activity? = null
     private var googleSignInClient: GoogleSignInClient? = null
     private var lifecycleCallbacks: Application.ActivityLifecycleCallbacks? = null
@@ -65,18 +69,22 @@ object AuthAdapter {
     private var pendingMicrosoftClientId: String? = null
     @Volatile
     private var pendingMicrosoftB2cDomain: String? = null
+    @Volatile
+    private var microsoftAuthInProgress = false
 
     @Volatile
     private var inMemoryMicrosoftRefreshToken: String? = null
     @Volatile
     private var inMemoryMicrosoftScopes: List<String> =
-        listOf("openid", "email", "profile", "offline_access", "User.Read")
+        defaultMicrosoftScopes
 
     // Module-scoped coroutine scope — cancelled on module invalidation via dispose().
     private var moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @JvmStatic
     private external fun nativeInitialize(context: Context)
+    @JvmStatic
+    private external fun nativeDispose()
 
     @JvmStatic
     private external fun nativeOnLoginSuccess(
@@ -136,6 +144,8 @@ object AuthAdapter {
     fun dispose() {
         moduleScope.cancel()
         moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        runCatching { nativeDispose() }
+            .onFailure { Log.w(TAG, "Failed to dispose NitroAuth native bridge", it) }
 
         val app = appContext as? Application
         lifecycleCallbacks?.let { app?.unregisterActivityLifecycleCallbacks(it) }
@@ -200,7 +210,7 @@ object AuthAdapter {
         val requestedScopes = scopes?.toList() ?: listOf("email", "profile")
         pendingScopes = requestedScopes
 
-        if (useLegacyGoogleSignIn) {
+        if (useLegacyGoogleSignIn || forceAccountPicker) {
             loginLegacy(context, clientId, requestedScopes, loginHint, forceAccountPicker, "login")
             return
         }
@@ -217,9 +227,21 @@ object AuthAdapter {
         pendingOrigin = origin
 
         val effectiveTenant = tenant ?: getMicrosoftTenantFromResources(ctx) ?: "common"
-        val effectiveScopes = scopes?.toList() ?: listOf("openid", "email", "profile", "offline_access", "User.Read")
+        val effectiveScopes = scopes?.toList() ?: defaultMicrosoftScopes
         val effectivePrompt = prompt ?: "select_account"
-        pendingMicrosoftScopes = effectiveScopes
+
+        synchronized(this) {
+            if (microsoftAuthInProgress) {
+                nativeOnLoginError(
+                    origin,
+                    "operation_in_progress",
+                    "Microsoft authentication already in progress",
+                )
+                return
+            }
+            microsoftAuthInProgress = true
+            pendingMicrosoftScopes = effectiveScopes
+        }
 
         val codeVerifier = generateCodeVerifier()
         val codeChallenge = generateCodeChallenge(codeVerifier)
@@ -261,6 +283,7 @@ object AuthAdapter {
                 ctx.startActivity(browserIntent)
             }
         } catch (e: Exception) {
+            clearPkceState()
             nativeOnLoginError(origin, "unknown", e.message)
         }
     }
@@ -399,16 +422,15 @@ object AuthAdapter {
 
             val email = claims["preferred_username"] ?: claims["email"]
             val name = claims["name"]
+            val grantedScopes = pendingMicrosoftScopes.ifEmpty { defaultMicrosoftScopes }
 
             if (refreshToken.isNotEmpty()) inMemoryMicrosoftRefreshToken = refreshToken
-            inMemoryMicrosoftScopes = pendingMicrosoftScopes.ifEmpty {
-                listOf("openid", "email", "profile", "offline_access", "User.Read")
-            }
+            inMemoryMicrosoftScopes = grantedScopes
 
             clearPkceState()
             nativeOnLoginSuccess(
                 origin, "microsoft", email, name, null, idToken, accessToken, null,
-                pendingMicrosoftScopes.toTypedArray(), expirationTime
+                grantedScopes.toTypedArray(), expirationTime
             )
         } catch (e: Exception) {
             clearPkceState()
@@ -424,6 +446,8 @@ object AuthAdapter {
         pendingMicrosoftTenant = null
         pendingMicrosoftClientId = null
         pendingMicrosoftB2cDomain = null
+        pendingMicrosoftScopes = emptyList()
+        microsoftAuthInProgress = false
     }
 
     private fun decodeJwt(token: String): Map<String, String> {
@@ -590,7 +614,7 @@ object AuthAdapter {
             loginMicrosoft(ctx, mergedScopes.toTypedArray(), null, tenant, null, "scopes")
             return
         }
-        nativeOnLoginError("scopes", "unknown", "No user logged in")
+        nativeOnLoginError("scopes", "not_signed_in", "No user logged in")
     }
 
     // refreshTokenSync uses the legacy silentSignIn because AuthorizationClient (the recommended
@@ -628,7 +652,7 @@ object AuthAdapter {
             refreshMicrosoftTokenForRefresh(ctx, refreshToken)
             return
         }
-        nativeOnRefreshError("unknown", "No user logged in")
+        nativeOnRefreshError("not_signed_in", "No user logged in")
     }
 
     @JvmStatic
@@ -659,7 +683,7 @@ object AuthAdapter {
             GoogleSignIn.getClient(ctx, gso).signOut()
         }
         inMemoryMicrosoftRefreshToken = null
-        inMemoryMicrosoftScopes = listOf("openid", "email", "profile", "offline_access", "User.Read")
+        inMemoryMicrosoftScopes = defaultMicrosoftScopes
     }
 
     @JvmStatic
@@ -672,7 +696,7 @@ object AuthAdapter {
             GoogleSignIn.getClient(ctx, gso).revokeAccess()
         }
         inMemoryMicrosoftRefreshToken = null
-        inMemoryMicrosoftScopes = listOf("openid", "email", "profile", "offline_access", "User.Read")
+        inMemoryMicrosoftScopes = defaultMicrosoftScopes
     }
 
     private fun getClientIdFromResources(context: Context): String? {
@@ -695,7 +719,7 @@ object AuthAdapter {
             if (refreshToken != null) {
                 refreshMicrosoftToken(ctx, refreshToken)
             } else {
-                nativeOnLoginError("silent", "unknown", "No session")
+                nativeOnLoginError("silent", "not_signed_in", "No session")
             }
         }
     }
@@ -704,6 +728,7 @@ object AuthAdapter {
         val clientId = getMicrosoftClientIdFromResources(context)
         val tenant = getMicrosoftTenantFromResources(context) ?: "common"
         val b2cDomain = getMicrosoftB2cDomainFromResources(context)
+        val effectiveScopes = inMemoryMicrosoftScopes.ifEmpty { defaultMicrosoftScopes }
 
         if (clientId == null) {
             nativeOnLoginError("silent", "configuration_error", "Microsoft Client ID is required for refresh")
@@ -749,14 +774,12 @@ object AuthAdapter {
                             val claims = decodeJwt(newIdToken)
 
                             if (newRefreshToken.isNotEmpty()) inMemoryMicrosoftRefreshToken = newRefreshToken
-                            inMemoryMicrosoftScopes = pendingMicrosoftScopes.ifEmpty {
-                                listOf("openid", "email", "profile", "offline_access", "User.Read")
-                            }
+                            inMemoryMicrosoftScopes = effectiveScopes
 
                             nativeOnLoginSuccess("silent", "microsoft",
                                 claims["preferred_username"] ?: claims["email"],
                                 claims["name"], null,
-                                newIdToken, newAccessToken, null, null, expirationTime)
+                                newIdToken, newAccessToken, null, effectiveScopes.toTypedArray(), expirationTime)
                         } else {
                             if (responseCode in 400..499) {
                                 inMemoryMicrosoftRefreshToken = null  // Token is invalid, clear it
@@ -787,6 +810,7 @@ object AuthAdapter {
         val clientId = getMicrosoftClientIdFromResources(context)
         val tenant = getMicrosoftTenantFromResources(context) ?: "common"
         val b2cDomain = getMicrosoftB2cDomainFromResources(context)
+        val effectiveScopes = inMemoryMicrosoftScopes.ifEmpty { defaultMicrosoftScopes }
 
         if (clientId == null) {
             nativeOnRefreshError("configuration_error", "Microsoft Client ID not configured")
@@ -831,9 +855,7 @@ object AuthAdapter {
                             val expirationTime = if (expiresIn > 0) System.currentTimeMillis() + expiresIn * 1000 else null
 
                             if (newRefreshToken.isNotEmpty()) inMemoryMicrosoftRefreshToken = newRefreshToken
-                            inMemoryMicrosoftScopes = pendingMicrosoftScopes.ifEmpty {
-                                listOf("openid", "email", "profile", "offline_access", "User.Read")
-                            }
+                            inMemoryMicrosoftScopes = effectiveScopes
 
                             nativeOnRefreshSuccess(
                                 newIdToken.ifEmpty { null },

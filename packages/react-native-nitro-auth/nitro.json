@@ -9,7 +9,10 @@
   },
   "autolinking": {
     "Auth": {
-      "cpp": "HybridAuth"
+      "all": {
+        "language": "c++",
+        "implementationClassName": "HybridAuth"
+      }
     }
   }
 }

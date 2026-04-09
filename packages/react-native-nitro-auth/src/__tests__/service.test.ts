@@ -69,7 +69,12 @@ jest.mock("react-native-nitro-modules", () => {
 });
 
 describe("AuthService", () => {
+  const native = () =>
+    (NitroModules.createHybridObject as jest.Mock).mock.results[0]
+      .value as MockHybridObject;
+
   beforeEach(() => {
+    void AuthService.currentUser;
     mockCurrentUser = undefined;
     mockGetCurrentUser.mockClear();
     onAuthStateChangedCallback = null;
@@ -114,10 +119,6 @@ describe("AuthService", () => {
   });
 
   describe("error wrapping", () => {
-    const native = () =>
-      (NitroModules.createHybridObject as jest.Mock).mock.results[0]
-        .value as MockHybridObject;
-
     it("login wraps native error in AuthError", async () => {
       native().login.mockRejectedValueOnce(new Error("network_error"));
       const error = await AuthService.login("google").catch((e: unknown) => e);
@@ -176,10 +177,6 @@ describe("AuthService", () => {
   });
 
   describe("silentRestore", () => {
-    const native = () =>
-      (NitroModules.createHybridObject as jest.Mock).mock.results[0]
-        .value as MockHybridObject;
-
     it("resolves on success", async () => {
       native().silentRestore.mockResolvedValueOnce(undefined);
       await expect(AuthService.silentRestore()).resolves.toBeUndefined();
@@ -187,10 +184,6 @@ describe("AuthService", () => {
   });
 
   describe("setLoggingEnabled", () => {
-    const native = () =>
-      (NitroModules.createHybridObject as jest.Mock).mock.results[0]
-        .value as MockHybridObject;
-
     it("forwards boolean to native module", () => {
       AuthService.setLoggingEnabled(true);
       expect(native().setLoggingEnabled).toHaveBeenCalledWith(true);
@@ -198,5 +191,14 @@ describe("AuthService", () => {
       AuthService.setLoggingEnabled(false);
       expect(native().setLoggingEnabled).toHaveBeenCalledWith(false);
     });
+  });
+
+  it("maps operation_in_progress as a structured AuthError code", async () => {
+    native().login.mockRejectedValueOnce(new Error("operation_in_progress"));
+
+    const error = await AuthService.login("google").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(AuthError);
+    expect((error as AuthError).code).toBe("operation_in_progress");
   });
 });

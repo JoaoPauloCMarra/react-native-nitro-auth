@@ -531,7 +531,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginError(
     if (loginPromise) loginPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
     if (scopesPromise) scopesPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
     if (silentPromise) {
-        if (errorStr == "No session") silentPromise->resolve(std::nullopt);
+        if (errorStr == "not_signed_in") silentPromise->resolve(std::nullopt);
         else silentPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
     }
 }

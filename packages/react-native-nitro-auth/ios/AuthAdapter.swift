@@ -25,8 +25,7 @@ public class AuthAdapter: NSObject {
       let serverClientId = Bundle.main.object(forInfoDictionaryKey: "GIDServerClientID") as? String
       
       DispatchQueue.main.async {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let rootVC = windowScene.windows.first?.rootViewController else {
+        guard let rootVC = presentingViewController() else {
           completion(nil, "no_window")
           return
         }
@@ -62,8 +61,7 @@ public class AuthAdapter: NSObject {
       objc_setAssociatedObject(controller, &delegateHandle, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
       DispatchQueue.main.async {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first else {
+        guard let window = activeWindow() else {
           completion(nil, "no_window")
           return
         }
@@ -191,14 +189,8 @@ public class AuthAdapter: NSObject {
           completion: completion
         )
       }
-      
-      guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-            let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first,
-            let rootVC = window.rootViewController else {
-        completion(nil, "no_window")
-        return
-      }
-      guard let window = rootVC.view.window else {
+
+      guard let window = activeWindow() else {
         completion(nil, "no_window")
         return
       }
@@ -325,6 +317,7 @@ public class AuthAdapter: NSObject {
           "idToken": idToken,
           "accessToken": accessToken,
           "serverAuthCode": "",
+          "scopes": scopes,
           "expirationTime": expirationTime,
           "underlyingError": ""
         ]
@@ -431,8 +424,7 @@ public class AuthAdapter: NSObject {
   public static func addScopes(scopes: [String], completion: @escaping (NSDictionary?, String?) -> Void) {
     if let currentUser = GIDSignIn.sharedInstance.currentUser {
       DispatchQueue.main.async {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let rootVC = windowScene.windows.first?.rootViewController else {
+        guard let rootVC = presentingViewController() else {
           completion(nil, "no_window")
           return
         }
@@ -512,6 +504,7 @@ public class AuthAdapter: NSObject {
   private static func tryMicrosoftSilentRefresh(completion: @escaping (NSDictionary?) -> Void) {
     tokenStoreLock.lock()
     let refreshToken = inMemoryMicrosoftRefreshToken
+    let currentScopes = inMemoryMicrosoftScopes
     tokenStoreLock.unlock()
     guard let refreshToken = refreshToken else {
       completion(nil)
@@ -592,6 +585,7 @@ public class AuthAdapter: NSObject {
           "idToken": idToken,
           "accessToken": accessToken,
           "serverAuthCode": "",
+          "scopes": currentScopes,
           "expirationTime": expirationTime
         ]
         completion(resultData as NSDictionary)
@@ -696,6 +690,41 @@ public class AuthAdapter: NSObject {
     inMemoryMicrosoftScopes = defaultMicrosoftScopes
     inMemoryGoogleServerAuthCode = nil
     tokenStoreLock.unlock()
+  }
+
+  private static func activeWindow() -> UIWindow? {
+    let windowScenes = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .filter {
+        $0.activationState == .foregroundActive ||
+          $0.activationState == .foregroundInactive
+      }
+
+    for scene in windowScenes {
+      if let keyWindow = scene.windows.first(where: { $0.isKeyWindow }) {
+        return keyWindow
+      }
+    }
+
+    return windowScenes.lazy.compactMap { $0.windows.first }.first
+  }
+
+  private static func presentingViewController() -> UIViewController? {
+    guard let rootViewController = activeWindow()?.rootViewController else {
+      return nil
+    }
+
+    var current = rootViewController
+    while let presented = current.presentedViewController {
+      current = presented
+    }
+    if let navigationController = current as? UINavigationController {
+      return navigationController.visibleViewController ?? navigationController
+    }
+    if let tabBarController = current as? UITabBarController {
+      return tabBarController.selectedViewController ?? tabBarController
+    }
+    return current
   }
 }
 
