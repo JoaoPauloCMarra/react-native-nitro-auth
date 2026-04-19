@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-auth",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "High-performance authentication library for React Native with Google Sign-In, Apple Sign-In, and Microsoft Sign-In support, powered by Nitro Modules (JSI)",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -39,9 +39,10 @@
     "test": "jest",
     "test:coverage": "jest --coverage",
     "test:cpp": "node scripts/test-cpp.js",
-    "prepublishOnly": "bun run clean && bun run build",
-    "prepack": "node -e \"const fs=require('fs'); fs.copyFileSync('../../README.md','./README.md'); try{fs.copyFileSync('../../LICENSE','./LICENSE')}catch(e){}\"",
-    "postpack": "node -e \"const fs=require('fs'); ['./README.md','./LICENSE'].forEach(f=>fs.existsSync(f)&&fs.unlinkSync(f))\""
+    "prepublishOnly": "bun run clean && bun run codegen && bun run build && bun run typecheck && bun run lint && bun run test && bun run test:cpp",
+    "prepack": "bun ../../scripts/sync-package-docs.ts",
+    "pack:dry-run": "bun pm pack --dry-run",
+    "publish:dry-run": "bun publish --dry-run --access public"
   },
   "keywords": [
     "react-native",
@@ -80,13 +81,13 @@
     "access": "public"
   },
   "devDependencies": {
-    "@expo/config-plugins": "^55.0.6",
+    "@expo/config-plugins": "^55.0.8",
     "@react-native/babel-preset": "^0.83.0",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^22.19.11",
     "jest-environment-jsdom": "^29.7.0",
     "react": "19.2.0",
-    "react-native": "0.83.2",
+    "react-native": "0.83.4",
     "react-native-nitro-modules": "^0.35.4",
     "react-native-web": "^0.21.2",
     "typescript": "^5.9.3"

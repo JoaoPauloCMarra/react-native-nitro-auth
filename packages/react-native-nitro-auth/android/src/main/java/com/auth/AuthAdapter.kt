@@ -142,6 +142,7 @@ object AuthAdapter {
     }
 
     fun dispose() {
+        clearPkceState()
         moduleScope.cancel()
         moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         runCatching { nativeDispose() }
@@ -309,7 +310,8 @@ object AuthAdapter {
         val origin = pendingOrigin
         if (error != null) {
             clearPkceState()
-            nativeOnLoginError(origin, error, errorDescription)
+            val mappedError = mapMicrosoftOAuthError(error)
+            nativeOnLoginError(origin, mappedError, errorDescription ?: error)
             return
         }
         if (state != pendingState) {
@@ -391,7 +393,7 @@ object AuthAdapter {
                 val error = json.optString("error", "token_error")
                 val desc = json.optString("error_description", "Failed to exchange code for tokens")
                 clearPkceState()
-                nativeOnLoginError(origin, error, desc)
+                nativeOnLoginError(origin, mapMicrosoftOAuthError(error), desc)
             } catch (e: Exception) {
                 clearPkceState()
                 nativeOnLoginError(origin, "token_error", "Failed to exchange code for tokens")
@@ -438,6 +440,7 @@ object AuthAdapter {
         }
     }
 
+    @Synchronized
     private fun clearPkceState() {
         pendingOrigin = "login"
         pendingPkceVerifier = null
@@ -448,6 +451,16 @@ object AuthAdapter {
         pendingMicrosoftB2cDomain = null
         pendingMicrosoftScopes = emptyList()
         microsoftAuthInProgress = false
+    }
+
+    private fun mapMicrosoftOAuthError(error: String): String {
+        return when (error) {
+            "access_denied", "interaction_required" -> "cancelled"
+            "invalid_client", "unauthorized_client" -> "configuration_error"
+            "invalid_grant", "invalid_request", "invalid_scope" -> "token_error"
+            "temporarily_unavailable", "server_error" -> "network_error"
+            else -> "token_error"
+        }
     }
 
     private fun decodeJwt(token: String): Map<String, String> {
@@ -594,8 +607,10 @@ object AuthAdapter {
         val account = GoogleSignIn.getLastSignedInAccount(ctx)
         if (account != null) {
             val newScopes = scopes.map { Scope(it) }
+            val grantedScopes = account.grantedScopes?.map { it.scopeUri }.orEmpty()
+            val allScopes = (grantedScopes + scopes.toList()).distinct()
             if (GoogleSignIn.hasPermissions(account, *newScopes.toTypedArray())) {
-                onSignInSuccess(account, (pendingScopes + scopes.toList()).distinct(), "scopes")
+                onSignInSuccess(account, allScopes, "scopes")
                 return
             }
             val clientId = getClientIdFromResources(ctx)
@@ -603,7 +618,6 @@ object AuthAdapter {
                 nativeOnLoginError("scopes", "configuration_error", "Google Client ID not configured")
                 return
             }
-            val allScopes = (pendingScopes + scopes.toList()).distinct()
             val intent = GoogleSignInActivity.createIntent(ctx, clientId, allScopes.toTypedArray(), account.email, origin = "scopes")
             ctx.startActivity(intent)
             return
@@ -667,6 +681,7 @@ object AuthAdapter {
     @JvmStatic
     fun logoutSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
+        clearPkceState()
         // Clear Credential Manager state (covers One-Tap / passkey credentials).
         moduleScope.launch {
             try {
@@ -689,6 +704,7 @@ object AuthAdapter {
     @JvmStatic
     fun revokeAccessSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
+        clearPkceState()
         val clientId = getClientIdFromResources(ctx)
         if (clientId != null) {
             val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -788,7 +804,7 @@ object AuthAdapter {
                                 val json = org.json.JSONObject(responseBody)
                                 val errorCode = json.optString("error", "token_error")
                                 val errorDesc = json.optString("error_description", "Token refresh failed")
-                                Pair(errorCode, errorDesc)
+                                Pair(mapMicrosoftOAuthError(errorCode), errorDesc)
                             } catch (e: Exception) {
                                 Pair("token_error", "Token refresh failed")
                             }
@@ -871,7 +887,7 @@ object AuthAdapter {
                                 val json = org.json.JSONObject(errorBody)
                                 val errorCode = json.optString("error", "token_error")
                                 val errorDesc = json.optString("error_description", "Token refresh failed")
-                                Pair(errorCode, errorDesc)
+                                Pair(mapMicrosoftOAuthError(errorCode), errorDesc)
                             } catch (e: Exception) {
                                 Pair("token_error", "Token refresh failed")
                             }

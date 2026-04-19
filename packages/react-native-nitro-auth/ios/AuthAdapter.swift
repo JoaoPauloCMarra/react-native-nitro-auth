@@ -261,7 +261,7 @@ public class AuthAdapter: NSObject {
     
     URLSession.shared.dataTask(with: request) { data, response, error in
       DispatchQueue.main.async {
-        if let error = error {
+        if error != nil {
           completion(nil, "network_error")
           return
         }
@@ -626,7 +626,7 @@ public class AuthAdapter: NSObject {
       .data(using: .utf8)
     URLSession.shared.dataTask(with: request) { data, response, error in
       DispatchQueue.main.async {
-        if let error = error {
+        if error != nil {
           completion(nil, "network_error")
           return
         }
