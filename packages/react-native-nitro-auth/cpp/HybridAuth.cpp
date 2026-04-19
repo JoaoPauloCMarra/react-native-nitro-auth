@@ -2,6 +2,7 @@
 #include "PlatformAuth.hpp"
 #include <algorithm>
 #include <chrono>
+#include <stdexcept>
 
 namespace margelo::nitro::NitroAuth {
 
@@ -69,10 +70,19 @@ std::function<void()> HybridAuth::onTokensRefreshed(const std::function<void(con
 }
 
 void HybridAuth::logout() {
+  std::shared_ptr<Promise<AuthTokens>> refreshInFlight;
   {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
+    _sessionGeneration++;
     _currentUser = std::nullopt;
     _grantedScopes.clear();
+    refreshInFlight = _refreshInFlight;
+    _refreshInFlight = nullptr;
+  }
+  if (refreshInFlight) {
+    refreshInFlight->reject(
+      std::make_exception_ptr(std::runtime_error("not_signed_in"))
+    );
   }
   PlatformAuth::logout();
   notifyAuthStateChanged();
@@ -80,12 +90,21 @@ void HybridAuth::logout() {
 
 std::shared_ptr<Promise<void>> HybridAuth::silentRestore() {
   auto promise = Promise<void>::create();
+  uint64_t generation;
+  {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    generation = _sessionGeneration;
+  }
   auto silentPromise = PlatformAuth::silentRestore();
   auto self = shared_from_this();
-  silentPromise->addOnResolvedListener([self, promise](const std::optional<AuthUser>& user) {
+  silentPromise->addOnResolvedListener([self, promise, generation](const std::optional<AuthUser>& user) {
     auto* auth = dynamic_cast<HybridAuth*>(self.get());
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
+      if (auth->_sessionGeneration != generation) {
+        promise->resolve();
+        return;
+      }
       auth->_currentUser = user;
       if (user) {
         if (user->scopes) {
@@ -111,13 +130,24 @@ std::shared_ptr<Promise<void>> HybridAuth::silentRestore() {
 
 std::shared_ptr<Promise<void>> HybridAuth::login(AuthProvider provider, const std::optional<LoginOptions>& options) {
   auto promise = Promise<void>::create();
+  uint64_t generation;
+  {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    generation = _sessionGeneration;
+  }
   
   auto self = shared_from_this();
   auto loginPromise = PlatformAuth::login(provider, options);
-  loginPromise->addOnResolvedListener([self, promise, options](const AuthUser& user) {
+  loginPromise->addOnResolvedListener([self, promise, options, generation](const AuthUser& user) {
     auto* auth = dynamic_cast<HybridAuth*>(self.get());
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
+      if (auth->_sessionGeneration != generation) {
+        promise->reject(
+          std::make_exception_ptr(std::runtime_error("cancelled"))
+        );
+        return;
+      }
       auth->_currentUser = user;
       if (user.scopes && !user.scopes->empty()) {
         auth->_grantedScopes = *user.scopes;
@@ -144,12 +174,23 @@ std::shared_ptr<Promise<void>> HybridAuth::login(AuthProvider provider, const st
 
 std::shared_ptr<Promise<void>> HybridAuth::requestScopes(const std::vector<std::string>& scopes) {
   auto promise = Promise<void>::create();
+  uint64_t generation;
+  {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    generation = _sessionGeneration;
+  }
   auto self = shared_from_this();
   auto requestPromise = PlatformAuth::requestScopes(scopes);
-  requestPromise->addOnResolvedListener([self, promise, scopes](const AuthUser& user) {
+  requestPromise->addOnResolvedListener([self, promise, scopes, generation](const AuthUser& user) {
     auto* auth = dynamic_cast<HybridAuth*>(self.get());
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
+      if (auth->_sessionGeneration != generation) {
+        promise->reject(
+          std::make_exception_ptr(std::runtime_error("cancelled"))
+        );
+        return;
+      }
       auth->_currentUser = user;
       for (const auto& scope : scopes) {
         if (std::find(auth->_grantedScopes.begin(), auth->_grantedScopes.end(), scope) == auth->_grantedScopes.end()) {
@@ -191,9 +232,11 @@ std::shared_ptr<Promise<void>> HybridAuth::revokeScopes(const std::vector<std::s
 std::shared_ptr<Promise<std::optional<std::string>>> HybridAuth::getAccessToken() {
   auto promise = Promise<std::optional<std::string>>::create();
   bool needsRefresh = false;
+  std::optional<std::string> cachedAccessToken;
   {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
     if (_currentUser && _currentUser->accessToken) {
+      cachedAccessToken = _currentUser->accessToken;
       if (_currentUser->expirationTime) {
         auto now = std::chrono::system_clock::now().time_since_epoch() / std::chrono::milliseconds(1);
         if (now + 300000 > *_currentUser->expirationTime) needsRefresh = true;
@@ -210,8 +253,8 @@ std::shared_ptr<Promise<std::optional<std::string>>> HybridAuth::getAccessToken(
 
   if (needsRefresh) {
     auto refreshPromise = refreshToken();
-    refreshPromise->addOnResolvedListener([promise](const AuthTokens& tokens) {
-      promise->resolve(tokens.accessToken);
+    refreshPromise->addOnResolvedListener([promise, cachedAccessToken](const AuthTokens& tokens) {
+      promise->resolve(tokens.accessToken.has_value() ? tokens.accessToken : cachedAccessToken);
     });
     refreshPromise->addOnRejectedListener([promise](const std::exception_ptr& error) {
       promise->reject(error);
@@ -222,21 +265,26 @@ std::shared_ptr<Promise<std::optional<std::string>>> HybridAuth::getAccessToken(
 
 std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
   std::shared_ptr<Promise<AuthTokens>> promise;
+  uint64_t generation;
   {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
     if (_refreshInFlight) {
       return _refreshInFlight;
     }
+    generation = _sessionGeneration;
     promise = Promise<AuthTokens>::create();
     _refreshInFlight = promise;
   }
 
   auto self = shared_from_this();
   auto refreshPromise = PlatformAuth::refreshToken();
-  refreshPromise->addOnResolvedListener([self, promise](const AuthTokens& tokens) {
+  refreshPromise->addOnResolvedListener([self, promise, generation](const AuthTokens& tokens) {
     auto* auth = dynamic_cast<HybridAuth*>(self.get());
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
+      if (auth->_sessionGeneration != generation) {
+        return;
+      }
       if (auth->_currentUser) {
         if (tokens.accessToken.has_value()) {
           auth->_currentUser->accessToken = tokens.accessToken;
@@ -260,10 +308,13 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
     promise->resolve(tokens);
   });
 
-  refreshPromise->addOnRejectedListener([self, promise](const std::exception_ptr& error) {
+  refreshPromise->addOnRejectedListener([self, promise, generation](const std::exception_ptr& error) {
     auto* auth = dynamic_cast<HybridAuth*>(self.get());
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
+      if (auth->_sessionGeneration != generation) {
+        return;
+      }
       if (auth->_refreshInFlight == promise) {
         auth->_refreshInFlight = nullptr;
       }

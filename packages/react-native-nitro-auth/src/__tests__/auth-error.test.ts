@@ -48,6 +48,13 @@ describe("toAuthErrorCode", () => {
     expect(toAuthErrorCode("bogus")).toBe("unknown");
   });
 
+  it("returns structured code from prefixed platform messages", () => {
+    expect(toAuthErrorCode("token_error: invalid_grant")).toBe("token_error");
+    expect(toAuthErrorCode("cancelled: user closed the browser")).toBe(
+      "cancelled",
+    );
+  });
+
   it("returns 'unknown' for empty string", () => {
     expect(toAuthErrorCode("")).toBe("unknown");
   });
@@ -79,6 +86,12 @@ describe("AuthError", () => {
       const err = new AuthError(new Error("fetch failed"));
       expect(err.code).toBe("unknown");
       expect(err.underlyingMessage).toBe("fetch failed");
+    });
+
+    it("wraps prefixed native messages with structured code", () => {
+      const err = new AuthError(new Error("operation_in_progress: login"));
+      expect(err.code).toBe("operation_in_progress");
+      expect(err.underlyingMessage).toBe("operation_in_progress: login");
     });
 
     it("wraps non-Error input: string", () => {

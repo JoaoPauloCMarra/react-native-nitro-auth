@@ -23,7 +23,16 @@ export function isAuthErrorCode(value: string): value is AuthErrorCode {
 }
 
 export function toAuthErrorCode(raw: string): AuthErrorCode {
-  return isAuthErrorCode(raw) ? raw : "unknown";
+  if (isAuthErrorCode(raw)) {
+    return raw;
+  }
+
+  const prefix = raw.split(":", 1)[0]?.trim();
+  if (prefix && isAuthErrorCode(prefix)) {
+    return prefix;
+  }
+
+  return "unknown";
 }
 
 /**

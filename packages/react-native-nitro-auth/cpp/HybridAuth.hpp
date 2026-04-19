@@ -48,6 +48,7 @@ private:
   std::map<uint64_t, std::function<void(const AuthTokens&)>> _tokenListeners;
   uint64_t _nextTokenListenerId = 0;
   std::shared_ptr<Promise<AuthTokens>> _refreshInFlight;
+  uint64_t _sessionGeneration = 0;
   
   // recursive_mutex: listeners resolved inside a lock scope may re-enter Auth methods
   // that also acquire _mutex, causing deadlock with a non-recursive mutex.

@@ -10,26 +10,26 @@
     "prebuild": "expo prebuild",
     "prebuild:clean": "expo prebuild --clean",
     "format:check": "eslint .",
-    "lint": "eslint . --fix",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@babel/runtime": "^7.28.6",
-    "dotenv": "^17.3.1",
-    "expo": "~55.0.5",
-    "expo-asset": "~55.0.8",
-    "expo-build-properties": "~55.0.9",
-    "expo-constants": "~55.0.7",
-    "expo-linking": "~55.0.7",
-    "expo-router": "~55.0.4",
-    "expo-status-bar": "~55.0.4",
-    "expo-system-ui": "~55.0.9",
+    "@babel/runtime": "^7.29.2",
+    "dotenv": "^17.4.2",
+    "expo": "~55.0.15",
+    "expo-asset": "~55.0.15",
+    "expo-build-properties": "~55.0.13",
+    "expo-constants": "~55.0.14",
+    "expo-linking": "~55.0.13",
+    "expo-router": "~55.0.12",
+    "expo-status-bar": "~55.0.5",
+    "expo-system-ui": "~55.0.15",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "react-native": "0.83.2",
-    "react-native-nitro-auth": "*",
-    "react-native-nitro-modules": "^0.35.0",
-    "react-native-nitro-storage": "^0.4.1",
+    "react-native": "0.83.4",
+    "react-native-nitro-auth": "workspace:*",
+    "react-native-nitro-modules": "^0.35.4",
+    "react-native-nitro-storage": "^0.5.0",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
     "react-native-web": "^0.21.2"
@@ -37,7 +37,7 @@
   "devDependencies": {
     "babel-plugin-module-resolver": "^5.0.2",
     "babel-preset-expo": "~55.0.10",
-    "eslint": "^10.0.2",
-    "eslint-config-expo-magic": "^2.0.2"
+    "eslint": "^10.2.1",
+    "eslint-config-expo-magic": "^2.4.0"
   }
 }
