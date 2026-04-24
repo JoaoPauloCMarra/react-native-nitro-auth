@@ -1,5 +1,10 @@
 # react-native-nitro-auth
 
+![npm](https://img.shields.io/badge/npm-v0.5.9-f97316?style=flat-square)
+![license](https://img.shields.io/badge/license-MIT-007ec6?style=flat-square)
+![react-native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb?style=flat-square)
+![nitro-modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.35.0-black?style=flat-square)
+
 Fast React Native authentication for Google Sign-In, Apple Sign-In, and Microsoft Entra ID, built on Nitro Modules and JSI.
 
 `react-native-nitro-auth` gives Expo and React Native apps one typed API for native social login, web OAuth, token refresh, incremental scopes, and auth state listeners without owning your app's long-term token storage.
