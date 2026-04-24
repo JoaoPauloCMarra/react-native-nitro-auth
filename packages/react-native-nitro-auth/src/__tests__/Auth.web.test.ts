@@ -1,3 +1,5 @@
+import { TextDecoder, TextEncoder } from "util";
+
 const CACHE_KEY = "nitro_auth_user";
 const SCOPES_KEY = "nitro_auth_scopes";
 const MS_REFRESH_TOKEN_KEY = "nitro_auth_microsoft_refresh_token";
@@ -17,6 +19,17 @@ type TestAuthModule = {
   grantedScopes: string[];
   logout: () => void;
   login: (provider: "google" | "apple" | "microsoft") => Promise<void>;
+  onAuthStateChanged: (
+    callback: (user: TestAuthUser | undefined) => void,
+  ) => () => void;
+  onTokensRefreshed: (
+    callback: (tokens: {
+      accessToken?: string;
+      idToken?: string;
+      refreshToken?: string;
+      expirationTime?: number;
+    }) => void,
+  ) => () => void;
   getAccessToken: () => Promise<string | undefined>;
   refreshToken: () => Promise<{
     accessToken?: string;
@@ -58,6 +71,15 @@ const createJwtWithUrlSafePayload = (payload: Record<string, unknown>) => {
   return `${header}.${body}.sig`;
 };
 
+const createJwtWithPayload = (payload: Record<string, unknown>) => {
+  const header = createBase64UrlSegmentFromObject({
+    alg: "none",
+    typ: "JWT",
+  });
+  const body = createBase64UrlSegmentFromObject(payload);
+  return `${header}.${body}.sig`;
+};
+
 const loadAuthModule = async (
   extra?: Record<string, unknown>,
 ): Promise<TestAuthModule> => {
@@ -76,6 +98,7 @@ const loadAuthModule = async (
 
 describe("AuthModule (web)", () => {
   const originalWindowOpen = window.open;
+  const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
     localStorage.clear();
@@ -89,6 +112,27 @@ describe("AuthModule (web)", () => {
         value: () => "test-random-uuid",
       });
     }
+    if (typeof globalThis.TextEncoder !== "function") {
+      Object.defineProperty(globalThis, "TextEncoder", {
+        configurable: true,
+        value: TextEncoder,
+      });
+    }
+    if (typeof globalThis.TextDecoder !== "function") {
+      Object.defineProperty(globalThis, "TextDecoder", {
+        configurable: true,
+        value: TextDecoder,
+      });
+    }
+    Object.defineProperty(globalThis.crypto, "subtle", {
+      configurable: true,
+      value: {
+        digest: jest.fn<
+          Promise<ArrayBuffer>,
+          [AlgorithmIdentifier, BufferSource]
+        >(async () => new ArrayBuffer(32)),
+      },
+    });
   });
 
   afterEach(() => {
@@ -96,6 +140,11 @@ describe("AuthModule (web)", () => {
       configurable: true,
       writable: true,
       value: originalWindowOpen,
+    });
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: originalFetch,
     });
   });
 
@@ -185,6 +234,86 @@ describe("AuthModule (web)", () => {
     expect(popup.close).toHaveBeenCalledTimes(1);
   });
 
+  it("maps concurrent login attempts to operation_in_progress", async () => {
+    jest.useFakeTimers();
+    const popup = {
+      closed: false,
+      close: jest.fn(),
+      location: {
+        href: "https://accounts.google.com/signin",
+      },
+    } as unknown as Window;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(() => popup),
+    });
+
+    const auth = await loadAuthModule({
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+    });
+
+    const firstLogin = auth.login("google");
+    await expect(auth.login("google")).rejects.toThrow("operation_in_progress");
+    await Promise.all([
+      expect(firstLogin).rejects.toThrow("timeout"),
+      jest.advanceTimersByTimeAsync(120001),
+    ]);
+  });
+
+  it("normalizes Google OAuth denial to cancelled", async () => {
+    jest.useFakeTimers();
+    const popup = {
+      closed: false,
+      close: jest.fn(),
+      location: {
+        href: `${window.location.origin}#error=access_denied&error_description=user%20closed`,
+      },
+    } as unknown as Window;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(() => popup),
+    });
+
+    const auth = await loadAuthModule({
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+    });
+
+    const loginPromise = auth.login("google");
+    await Promise.all([
+      expect(loginPromise).rejects.toThrow("cancelled"),
+      jest.advanceTimersByTimeAsync(101),
+    ]);
+    expect(popup.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("normalizes missing Google id tokens to no_id_token", async () => {
+    jest.useFakeTimers();
+    const popup = {
+      closed: false,
+      close: jest.fn(),
+      location: {
+        href: `${window.location.origin}#access_token=access-token`,
+      },
+    } as unknown as Window;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(() => popup),
+    });
+
+    const auth = await loadAuthModule({
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+    });
+
+    const loginPromise = auth.login("google");
+    await Promise.all([
+      expect(loginPromise).rejects.toThrow("no_id_token"),
+      jest.advanceTimersByTimeAsync(101),
+    ]);
+  });
+
   it("deduplicates concurrent token refresh calls", async () => {
     const expSoon = Date.now() + 60_000;
     const refreshedToken = "new-access-token";
@@ -232,6 +361,56 @@ describe("AuthModule (web)", () => {
     expect(tokenA).toBe(refreshedToken);
     expect(tokenB).toBe(refreshedToken);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps token listener notifications stable while listeners unsubscribe", async () => {
+    const expSoon = Date.now() + 60_000;
+
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "microsoft",
+        idToken: "cached-id-token",
+        expirationTime: expSoon,
+      }),
+    );
+    localStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
+
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: true,
+      microsoftClientId: "test-client-id",
+    });
+
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(
+        async () =>
+          ({
+            ok: true,
+            json: async () => ({
+              id_token: "cached-id-token",
+              access_token: "new-access-token",
+              expires_in: 3600,
+            }),
+          }) as Response,
+      ),
+    });
+
+    let unsubscribeB: () => void = () => undefined;
+    const listenerA = jest.fn(() => {
+      unsubscribeB();
+    });
+    const listenerB = jest.fn();
+
+    auth.onTokensRefreshed(listenerA);
+    unsubscribeB = auth.onTokensRefreshed(listenerB);
+
+    await auth.refreshToken();
+
+    expect(listenerA).toHaveBeenCalledTimes(1);
+    expect(listenerB).toHaveBeenCalledTimes(1);
   });
 
   it("reuses resolved browser storage without probing on every operation", async () => {
@@ -349,5 +528,161 @@ describe("AuthModule (web)", () => {
     await auth.refreshToken();
 
     expect(auth.currentUser?.email).toBe(email);
+  });
+
+  it("ignores invalid expires_in values during Microsoft refresh", async () => {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "microsoft",
+        expirationTime: Date.now() + 60_000,
+      }),
+    );
+    localStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
+
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: true,
+      microsoftClientId: "test-client-id",
+    });
+
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(
+        async () =>
+          ({
+            ok: true,
+            json: async () => ({
+              access_token: "new-access",
+              expires_in: "not-a-number",
+            }),
+          }) as Response,
+      ),
+    });
+
+    const tokens = await auth.refreshToken();
+
+    expect(tokens.expirationTime).toBeUndefined();
+    expect(auth.currentUser?.expirationTime).toBeUndefined();
+  });
+
+  it("normalizes Microsoft state mismatches to invalid_state", async () => {
+    jest.useFakeTimers();
+    const popup = {
+      closed: false,
+      close: jest.fn(),
+      location: {
+        href: "",
+      },
+    } as unknown as Window;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(() => {
+        popup.location.href = `${window.location.origin}?code=auth-code&state=wrong-state`;
+        return popup;
+      }),
+    });
+
+    const auth = await loadAuthModule({
+      microsoftClientId: "test-client-id",
+    });
+
+    const loginPromise = auth.login("microsoft");
+    await Promise.all([
+      expect(loginPromise).rejects.toThrow("invalid_state"),
+      jest.advanceTimersByTimeAsync(101),
+    ]);
+  });
+
+  it("normalizes Microsoft token responses without id tokens to no_id_token", async () => {
+    jest.useFakeTimers();
+    const popup = {
+      closed: false,
+      close: jest.fn(),
+      location: {
+        href: "",
+      },
+    } as unknown as Window;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: jest.fn((url: string) => {
+        const state = new URL(url).searchParams.get("state");
+        popup.location.href = `${window.location.origin}?code=auth-code&state=${state}`;
+        return popup;
+      }),
+    });
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(
+        async () =>
+          ({
+            ok: true,
+            json: async () => ({
+              access_token: "access-token",
+            }),
+          }) as Response,
+      ),
+    });
+
+    const auth = await loadAuthModule({
+      microsoftClientId: "test-client-id",
+    });
+
+    const loginPromise = auth.login("microsoft");
+    await Promise.all([
+      expect(loginPromise).rejects.toThrow("no_id_token"),
+      jest.advanceTimersByTimeAsync(101),
+    ]);
+  });
+
+  it("normalizes Microsoft nonce mismatches to invalid_nonce", async () => {
+    jest.useFakeTimers();
+    const idToken = createJwtWithPayload({
+      nonce: "different-nonce",
+    });
+    const popup = {
+      closed: false,
+      close: jest.fn(),
+      location: {
+        href: "",
+      },
+    } as unknown as Window;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: jest.fn((url: string) => {
+        const state = new URL(url).searchParams.get("state");
+        popup.location.href = `${window.location.origin}?code=auth-code&state=${state}`;
+        return popup;
+      }),
+    });
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(
+        async () =>
+          ({
+            ok: true,
+            json: async () => ({
+              id_token: idToken,
+              access_token: "access-token",
+            }),
+          }) as Response,
+      ),
+    });
+
+    const auth = await loadAuthModule({
+      microsoftClientId: "test-client-id",
+    });
+
+    const loginPromise = auth.login("microsoft");
+    await Promise.all([
+      expect(loginPromise).rejects.toThrow("invalid_nonce"),
+      jest.advanceTimersByTimeAsync(101),
+    ]);
   });
 });

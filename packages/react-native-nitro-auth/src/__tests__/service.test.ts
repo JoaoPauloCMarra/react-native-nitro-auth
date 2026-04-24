@@ -1,4 +1,5 @@
 import { NitroModules } from "react-native-nitro-modules";
+import { createAuthService } from "../create-auth-service";
 import { AuthService } from "../service";
 import { AuthError } from "../utils/auth-error";
 import type { AuthTokens, AuthUser } from "../Auth.nitro";
@@ -200,5 +201,56 @@ describe("AuthService", () => {
 
     expect(error).toBeInstanceOf(AuthError);
     expect((error as AuthError).code).toBe("operation_in_progress");
+  });
+
+  it("forwards every synchronous Auth member through the service factory", () => {
+    const auth = native();
+    auth.grantedScopes = ["email"];
+    auth.hasPlayServices = false;
+    auth.equals.mockReturnValueOnce(true);
+
+    const service = createAuthService(() => auth);
+    const unsubscribeAuth = jest.fn();
+    const unsubscribeTokens = jest.fn();
+    auth.onAuthStateChanged.mockReturnValueOnce(unsubscribeAuth);
+    auth.onTokensRefreshed.mockReturnValueOnce(unsubscribeTokens);
+
+    const authCallback = jest.fn();
+    const tokenCallback = jest.fn();
+
+    expect(service.name).toBe("Auth");
+    expect(service.currentUser).toBeUndefined();
+    expect(service.grantedScopes).toEqual(["email"]);
+    expect(service.hasPlayServices).toBe(false);
+    expect(service.onAuthStateChanged(authCallback)).toBe(unsubscribeAuth);
+    expect(service.onTokensRefreshed(tokenCallback)).toBe(unsubscribeTokens);
+    service.logout();
+    service.setLoggingEnabled(true);
+    service.dispose();
+    expect(service.equals(auth)).toBe(true);
+
+    expect(auth.logout).toHaveBeenCalledTimes(1);
+    expect(auth.setLoggingEnabled).toHaveBeenCalledWith(true);
+    expect(auth.dispose).toHaveBeenCalledTimes(1);
+    expect(auth.equals).toHaveBeenCalledWith(auth);
+  });
+
+  it("normalizes optional native members that older native builds may omit", () => {
+    const auth = native();
+    const partialAuth = {
+      ...auth,
+      grantedScopes: undefined,
+      onAuthStateChanged: undefined,
+      onTokensRefreshed: undefined,
+      setLoggingEnabled: undefined,
+    } as unknown as MockHybridObject;
+    const service = createAuthService(() => partialAuth);
+
+    expect(service.grantedScopes).toEqual([]);
+    expect(service.onAuthStateChanged(jest.fn())).toEqual(expect.any(Function));
+    expect(service.onTokensRefreshed(jest.fn())).toEqual(expect.any(Function));
+    expect(() => {
+      service.setLoggingEnabled(true);
+    }).not.toThrow();
   });
 });

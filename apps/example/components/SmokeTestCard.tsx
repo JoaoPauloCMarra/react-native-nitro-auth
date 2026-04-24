@@ -27,6 +27,7 @@ type TestResult = {
 
 type TestCase = {
   name: string;
+  unsupportedReason?: string;
   run: () => Promise<TestResult> | TestResult;
 };
 
@@ -36,6 +37,14 @@ function pass(name: string): TestResult {
 
 function skip(name: string, detail: string): TestResult {
   return { name, status: "skip", detail };
+}
+
+function initialResult(item: TestCase): TestResult {
+  if (item.unsupportedReason) {
+    return skip(item.name, item.unsupportedReason);
+  }
+
+  return { name: item.name, status: "pending" };
 }
 
 function assert(condition: boolean, message: string) {
@@ -62,8 +71,17 @@ function test(name: string, run: () => void | Promise<void>): TestCase {
   };
 }
 
+function unsupported(name: string, detail: string): TestCase {
+  return {
+    name,
+    unsupportedReason: detail,
+    run: () => skip(name, detail),
+  };
+}
+
 function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
-  return [
+  const currentUser = AuthService.currentUser;
+  const tests: TestCase[] = [
     test("AuthService is available", () => {
       assert(AuthService != null, "AuthService is null");
     }),
@@ -126,6 +144,10 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
       unsubscribeAuth();
       unsubscribeTokens();
     }),
+    test("setLoggingEnabled toggles without throwing", () => {
+      AuthService.setLoggingEnabled(true);
+      AuthService.setLoggingEnabled(false);
+    }),
     test("silentRestore resolves", async () => {
       await AuthService.silentRestore();
     }),
@@ -165,12 +187,55 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
         "unknown strings should map to unknown",
       );
     }),
-    test("AuthProvider union accepts supported providers", () => {
-      const providers: AuthProvider[] = ["google", "apple", "microsoft"];
-      assert(providers.length === 3, "expected three providers");
+    test("Google login method is available", () => {
+      const provider: AuthProvider = "google";
+      assert(provider === "google", "google provider literal mismatch");
     }),
+    Platform.OS === "android"
+      ? unsupported(
+          "Apple login method is platform-gated",
+          "Unavailable on Android",
+        )
+      : test("Apple login method is available", () => {
+          const provider: AuthProvider = "apple";
+          assert(provider === "apple", "apple provider literal mismatch");
+        }),
+    test("Microsoft login method is available", () => {
+      const provider: AuthProvider = "microsoft";
+      assert(provider === "microsoft", "microsoft provider literal mismatch");
+    }),
+    currentUser
+      ? test("refreshToken validates the active session", async () => {
+          await AuthService.refreshToken();
+        })
+      : unsupported(
+          "refreshToken validates the active session",
+          "Sign in first",
+        ),
+    currentUser && currentUser.provider !== "apple"
+      ? test("requestScopes validates the active provider", async () => {
+          await AuthService.requestScopes(["email"]);
+        })
+      : unsupported(
+          "requestScopes validates the active provider",
+          currentUser ? "Scopes are not supported for Apple" : "Sign in first",
+        ),
+    currentUser && currentUser.provider !== "apple"
+      ? test("revokeScopes validates the active provider", async () => {
+          await AuthService.revokeScopes(["email"]);
+        })
+      : unsupported(
+          "revokeScopes validates the active provider",
+          currentUser ? "Scopes are not supported for Apple" : "Sign in first",
+        ),
+    unsupported(
+      "logout validates the active session",
+      "Manual destructive action",
+    ),
     {
       name: "Android Play Services is present",
+      unsupportedReason:
+        Platform.OS === "android" ? undefined : "Only runs on Android",
       run: () => {
         if (Platform.OS !== "android") {
           return skip(
@@ -183,6 +248,8 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
       },
     },
   ];
+
+  return tests;
 }
 
 export function SmokeTestCard() {
@@ -193,18 +260,17 @@ export function SmokeTestCard() {
 
   const runTests = useCallback(async () => {
     setRunning(true);
-    setResults(tests.map((item) => ({ name: item.name, status: "pending" })));
+    setResults(tests.map((item) => initialResult(item)));
 
     const outcomes: TestResult[] = [];
     for (const item of tests) {
-      const result = await item.run();
+      const result = item.unsupportedReason
+        ? skip(item.name, item.unsupportedReason)
+        : await item.run();
       outcomes.push(result);
       setResults([
         ...outcomes,
-        ...tests.slice(outcomes.length).map((next) => ({
-          name: next.name,
-          status: "pending" as const,
-        })),
+        ...tests.slice(outcomes.length).map((next) => initialResult(next)),
       ]);
     }
 
@@ -245,7 +311,10 @@ export function SmokeTestCard() {
       </View>
 
       {results.map((result) => (
-        <View key={result.name} style={styles.row}>
+        <View
+          key={result.name}
+          style={[styles.row, result.status === "skip" && styles.rowSkipped]}
+        >
           <Text style={[styles.status, statusTextStyle(result.status)]}>
             {result.status.toUpperCase()}
           </Text>
@@ -332,6 +401,9 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     paddingVertical: 8,
+  },
+  rowSkipped: {
+    opacity: 0.52,
   },
   status: {
     fontSize: 10,

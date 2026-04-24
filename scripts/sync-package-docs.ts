@@ -3,6 +3,10 @@ const packageRoot = `${projectRoot}/packages/react-native-nitro-auth`;
 
 const docs = [
   { source: `${projectRoot}/README.md`, target: `${packageRoot}/README.md` },
+  {
+    source: `${projectRoot}/CHANGELOG.md`,
+    target: `${packageRoot}/CHANGELOG.md`,
+  },
   { source: `${projectRoot}/LICENSE`, target: `${packageRoot}/LICENSE` },
 ] as const;
 

@@ -13,15 +13,16 @@ Fast React Native authentication for Google Sign-In, Apple Sign-In, and Microsof
 - Typed `useAuth()` hook, `AuthService`, `SocialButton`, and `AuthError`.
 - App-owned persistence model: tokens stay in memory unless your app stores a snapshot.
 - Built-in flows for silent restore, token refresh, account picker, login hints, and incremental Google scopes.
+- Consistent `AuthError` mapping for async `AuthService` failures on native and web.
 
 ## Choose Your Path
 
-| Need | Use |
-| --- | --- |
-| Google, Apple, or Microsoft sign-in in an Expo or React Native app | `react-native-nitro-auth` |
-| Generic OAuth or OIDC provider not covered by this package | `expo-auth-session` or `react-native-app-auth` |
+| Need                                                                   | Use                                                               |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Google, Apple, or Microsoft sign-in in an Expo or React Native app     | `react-native-nitro-auth`                                         |
+| Generic OAuth or OIDC provider not covered by this package             | `expo-auth-session` or `react-native-app-auth`                    |
 | Firebase user management, password auth, MFA, and hosted auth platform | `@react-native-firebase/auth`, Auth0, Authgear, or your IDaaS SDK |
-| Server-side session validation | Your backend; client JWT decode is display-only |
+| Server-side session validation                                         | Your backend; client JWT decode is display-only                   |
 
 ## Install
 
@@ -43,12 +44,12 @@ cd ios && pod install
 
 ## Requirements
 
-| Runtime | Requirement |
-| --- | --- |
-| React Native | `>=0.75` |
-| Nitro Modules | `>=0.35` |
-| iOS | 15.1+ recommended |
-| Android | min SDK 24+ recommended |
+| Runtime               | Requirement                              |
+| --------------------- | ---------------------------------------- |
+| React Native          | `>=0.75`                                 |
+| Nitro Modules         | `>=0.35`                                 |
+| iOS                   | 15.1+ recommended                        |
+| Android               | min SDK 24+ recommended                  |
 | Expo example baseline | Expo SDK 55, React Native 0.83, React 19 |
 
 ## Expo Setup
@@ -102,19 +103,19 @@ export default {
 
 ### Plugin Options
 
-| Option | Platform | Purpose |
-| --- | --- | --- |
-| `ios.googleClientId` | iOS | Google iOS OAuth client ID |
-| `ios.googleServerClientId` | iOS | Google web/server client ID for server auth code flows |
-| `ios.googleUrlScheme` | iOS | Reversed iOS client ID URL scheme |
-| `ios.appleSignIn` | iOS | Adds Apple Sign-In entitlement when `true` |
-| `ios.microsoftClientId` | iOS | Microsoft app/client ID |
-| `ios.microsoftTenant` | iOS | Microsoft tenant, `common`, `organizations`, `consumers`, or tenant ID |
-| `ios.microsoftB2cDomain` | iOS | Azure AD B2C domain |
-| `android.googleClientId` | Android | Google web OAuth client ID |
-| `android.microsoftClientId` | Android | Microsoft app/client ID |
-| `android.microsoftTenant` | Android | Microsoft tenant |
-| `android.microsoftB2cDomain` | Android | Azure AD B2C domain |
+| Option                       | Platform | Purpose                                                                |
+| ---------------------------- | -------- | ---------------------------------------------------------------------- |
+| `ios.googleClientId`         | iOS      | Google iOS OAuth client ID                                             |
+| `ios.googleServerClientId`   | iOS      | Google web/server client ID for server auth code flows                 |
+| `ios.googleUrlScheme`        | iOS      | Reversed iOS client ID URL scheme                                      |
+| `ios.appleSignIn`            | iOS      | Adds Apple Sign-In entitlement when `true`                             |
+| `ios.microsoftClientId`      | iOS      | Microsoft app/client ID                                                |
+| `ios.microsoftTenant`        | iOS      | Microsoft tenant, `common`, `organizations`, `consumers`, or tenant ID |
+| `ios.microsoftB2cDomain`     | iOS      | Azure AD B2C domain                                                    |
+| `android.googleClientId`     | Android  | Google web OAuth client ID                                             |
+| `android.microsoftClientId`  | Android  | Microsoft app/client ID                                                |
+| `android.microsoftTenant`    | Android  | Microsoft tenant                                                       |
+| `android.microsoftB2cDomain` | Android  | Azure AD B2C domain                                                    |
 
 ## Provider Setup
 
@@ -239,16 +240,16 @@ await login("microsoft", {
 });
 ```
 
-| Option | Applies to | Notes |
-| --- | --- | --- |
-| `scopes` | Google, Microsoft | Requested OAuth scopes |
-| `loginHint` | Google, Microsoft | Prefills account selection when supported |
-| `useOneTap` | Android Google | Enables Credential Manager auto-select |
-| `useSheet` | iOS Google | Uses native sign-in sheet behavior |
-| `forceAccountPicker` | Google | Forces account picker |
-| `useLegacyGoogleSignIn` | Android Google | Uses legacy Google Sign-In path for server auth code |
-| `tenant` | Microsoft | Overrides configured tenant |
-| `prompt` | Microsoft | `login`, `consent`, `select_account`, or `none` |
+| Option                  | Applies to        | Notes                                                |
+| ----------------------- | ----------------- | ---------------------------------------------------- |
+| `scopes`                | Google, Microsoft | Requested OAuth scopes                               |
+| `loginHint`             | Google, Microsoft | Prefills account selection when supported            |
+| `useOneTap`             | Android Google    | Enables Credential Manager auto-select               |
+| `useSheet`              | iOS Google        | Uses native sign-in sheet behavior                   |
+| `forceAccountPicker`    | Google            | Forces account picker                                |
+| `useLegacyGoogleSignIn` | Android Google    | Uses legacy Google Sign-In path for server auth code |
+| `tenant`                | Microsoft         | Overrides configured tenant                          |
+| `prompt`                | Microsoft         | `login`, `consent`, `select_account`, or `none`      |
 
 ## Incremental Scopes
 
@@ -288,7 +289,7 @@ extra: {
 
 ## Error Contract
 
-All public async APIs throw `AuthError`.
+All public async APIs throw `AuthError`, including provider errors surfaced by native and web `AuthService` implementations.
 
 ```ts
 try {
@@ -411,16 +412,16 @@ The demo includes:
 
 ## Troubleshooting
 
-| Symptom | Check |
-| --- | --- |
-| `configuration_error` on Google | Client ID is missing or wrong for the current platform |
-| Google works in debug but not release | Add release SHA-1/SHA-256 fingerprints to Google Cloud Console |
-| Android `hasPlayServices` is false | Use an emulator image with Google Play Services |
-| Apple email/name missing | Apple only returns these fields on first authorization |
-| Microsoft `invalid_state` | Redirect URI or app resume path is wrong, or an old auth redirect completed late |
-| Microsoft `token_error` | Check tenant, client ID, redirect URI, and requested scopes |
-| Web popup blocked | Call `login()` from a user gesture such as a button press |
-| `operation_in_progress` | A provider flow is already active; wait for it to finish or sign out |
+| Symptom                               | Check                                                                            |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| `configuration_error` on Google       | Client ID is missing or wrong for the current platform                           |
+| Google works in debug but not release | Add release SHA-1/SHA-256 fingerprints to Google Cloud Console                   |
+| Android `hasPlayServices` is false    | Use an emulator image with Google Play Services                                  |
+| Apple email/name missing              | Apple only returns these fields on first authorization                           |
+| Microsoft `invalid_state`             | Redirect URI or app resume path is wrong, or an old auth redirect completed late |
+| Microsoft `token_error`               | Check tenant, client ID, redirect URI, and requested scopes                      |
+| Web popup blocked                     | Call `login()` from a user gesture such as a button press                        |
+| `operation_in_progress`               | A provider flow is already active; wait for it to finish or sign out             |
 
 ## Production Notes
 
@@ -433,13 +434,26 @@ The demo includes:
 ## Release Checks
 
 ```sh
-bun run codegen
-bun run build
+bun run publish-package:dry-run
+```
+
+The publish script runs frozen install, core-version verification, codegen, build, lint, typecheck, Jest, JS coverage, C++ tests, C++ coverage, Expo Doctor, package docs sync, pack dry run, and `bun publish --dry-run --ignore-scripts`.
+
+For faster local iteration before the full release dry run:
+
+```sh
 bun run check
 bun run test:cpp
-bun example:prebuild:clean
-bun example:ios
-bun example:android
+bun run --cwd packages/react-native-nitro-auth test:coverage -- --runInBand
+bun run --cwd packages/react-native-nitro-auth test:cpp:coverage
+```
+
+Before shipping provider or native config changes, also verify the example app:
+
+```sh
+bun run example:prebuild
+bun run example:android
+bun run example:ios
 ```
 
 ## License

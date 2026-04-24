@@ -22,14 +22,16 @@ module.exports = {
     "!src/index.web.ts",
     "!src/service.web.ts",
     "!src/global.d.ts",
+    // Browser OAuth is covered by behavior tests, but not included in the
+    // package coverage gate because provider redirect branches are environment-owned.
     "!src/Auth.web.ts",
   ],
   coverageThreshold: {
     global: {
-      branches: 50,
-      functions: 80,
-      lines: 80,
-      statements: 80,
+      branches: 90,
+      functions: 90,
+      lines: 90,
+      statements: 90,
     },
   },
 };

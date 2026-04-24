@@ -38,6 +38,7 @@ public:
 private:
   void notifyAuthStateChanged();
   void notifyTokensRefreshed(const AuthTokens& tokens);
+  std::shared_ptr<Promise<AuthTokens>> advanceSessionGenerationLocked();
 
 private:
   std::optional<AuthUser> _currentUser;
