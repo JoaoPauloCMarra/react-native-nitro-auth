@@ -272,8 +272,11 @@ export function FeatureDemo() {
   }
 
   useEffect(() => {
-    void AuthService.silentRestore();
-  }, []);
+    AuthService.silentRestore().catch((e: unknown) => {
+      const error = AuthError.from(e);
+      setNotice(getErrorStatus(error), "error");
+    });
+  }, [setNotice]);
 
   useEffect(() => {
     const unsubscribeAuth = AuthService.onAuthStateChanged((nextUser) => {
@@ -320,6 +323,16 @@ export function FeatureDemo() {
 
   function getProviderDisabled(provider: AuthProvider): boolean {
     return provider === "apple" && Platform.OS === "android";
+  }
+
+  function getProviderUnavailableText(
+    provider: AuthProvider,
+  ): string | undefined {
+    if (provider === "apple" && Platform.OS === "android") {
+      return "Unavailable on Android";
+    }
+
+    return undefined;
   }
 
   async function loginWithProvider(provider: AuthProvider) {
@@ -491,22 +504,39 @@ export function FeatureDemo() {
             </Pressable>
           </View>
 
-          {PROVIDERS.map((provider) => (
-            <View key={provider.id} style={styles.providerCard}>
-              <View style={styles.providerCopy}>
-                <Text style={styles.providerTitle}>{provider.title}</Text>
-                <Text style={styles.providerSubtitle}>{provider.subtitle}</Text>
+          {PROVIDERS.map((provider) => {
+            const unavailableText = getProviderUnavailableText(provider.id);
+
+            return (
+              <View
+                key={provider.id}
+                style={[
+                  styles.providerCard,
+                  unavailableText ? styles.providerCardDisabled : null,
+                ]}
+              >
+                <View style={styles.providerCopy}>
+                  <Text style={styles.providerTitle}>{provider.title}</Text>
+                  <Text style={styles.providerSubtitle}>
+                    {provider.subtitle}
+                  </Text>
+                  {unavailableText ? (
+                    <Text style={styles.unavailableText}>
+                      {unavailableText}
+                    </Text>
+                  ) : null}
+                </View>
+                <SocialButton
+                  provider={provider.id}
+                  variant={provider.id === "apple" ? "black" : buttonVariant}
+                  disabled={Boolean(unavailableText)}
+                  onPress={() => {
+                    void loginWithProvider(provider.id);
+                  }}
+                />
               </View>
-              <SocialButton
-                provider={provider.id}
-                variant={provider.id === "apple" ? "black" : buttonVariant}
-                disabled={getProviderDisabled(provider.id)}
-                onPress={() => {
-                  void loginWithProvider(provider.id);
-                }}
-              />
-            </View>
-          ))}
+            );
+          })}
         </View>
 
         <View style={styles.section}>
@@ -585,16 +615,33 @@ export function FeatureDemo() {
               label="Get token"
               onPress={() => void getAccessToken()}
             />
-            <ActionButton label="Refresh" onPress={() => void refreshToken()} />
+            <ActionButton
+              label="Refresh"
+              disabled={!auth.user}
+              disabledReason="Sign in first"
+              onPress={() => void refreshToken()}
+            />
             <ActionButton
               label={hasCalendarScope ? "Revoke scope" : "Request scope"}
+              disabled={!auth.user || auth.user.provider === "apple"}
+              disabledReason={
+                auth.user?.provider === "apple"
+                  ? "Not supported for Apple"
+                  : "Sign in first"
+              }
               onPress={() => void requestOrRevokeCalendarScope()}
             />
             <ActionButton
               label="Account picker"
               onPress={() => void forceAccountPicker()}
             />
-            <ActionButton label="Sign out" tone="danger" onPress={logout} />
+            <ActionButton
+              label="Sign out"
+              tone="danger"
+              disabled={!auth.user && !snapshot.user}
+              disabledReason="No session"
+              onPress={logout}
+            />
           </View>
         </View>
 
@@ -703,17 +750,32 @@ function ActionButton({
   label,
   onPress,
   tone = "primary",
+  disabled = false,
+  disabledReason,
 }: {
   label: string;
   onPress: () => void;
   tone?: "primary" | "danger";
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
   const buttonStyle = tone === "danger" ? styles.actionButtonDanger : null;
   const textStyle = tone === "danger" ? styles.actionButtonTextDanger : null;
 
   return (
-    <Pressable style={[styles.actionButton, buttonStyle]} onPress={onPress}>
+    <Pressable
+      style={[
+        styles.actionButton,
+        buttonStyle,
+        disabled ? styles.actionButtonDisabled : null,
+      ]}
+      onPress={onPress}
+      disabled={disabled}
+    >
       <Text style={[styles.actionButtonText, textStyle]}>{label}</Text>
+      {disabled && disabledReason ? (
+        <Text style={styles.actionButtonHint}>{disabledReason}</Text>
+      ) : null}
     </Pressable>
   );
 }
@@ -927,6 +989,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 12,
   },
+  providerCardDisabled: {
+    backgroundColor: "#f1f5f9",
+    opacity: 0.58,
+  },
   providerCopy: {
     marginBottom: 12,
   },
@@ -940,6 +1006,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
+  },
+  unavailableText: {
+    color: "#92400e",
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 6,
   },
   sessionCard: {
     alignItems: "center",
@@ -1029,10 +1101,20 @@ const styles = StyleSheet.create({
   actionButtonDanger: {
     backgroundColor: "#dc2626",
   },
+  actionButtonDisabled: {
+    backgroundColor: "#94a3b8",
+    opacity: 0.62,
+  },
   actionButtonText: {
     color: "#ffffff",
     fontSize: 13,
     fontWeight: "800",
+  },
+  actionButtonHint: {
+    color: "#f8fafc",
+    fontSize: 10,
+    fontWeight: "700",
+    marginTop: 3,
   },
   actionButtonTextDanger: {
     color: "#ffffff",

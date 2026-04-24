@@ -10,6 +10,10 @@ import { AuthError } from "./utils/auth-error";
 
 const EMPTY_SCOPES: string[] = [];
 
+function normalizeScopes(scopes: string[] | undefined): string[] {
+  return Array.isArray(scopes) ? scopes : EMPTY_SCOPES;
+}
+
 type AuthState = {
   user: AuthUser | undefined;
   scopes: string[];
@@ -53,7 +57,7 @@ export type UseAuthReturn = AuthState & {
 export function useAuth(): UseAuthReturn {
   const [state, setState] = useState<AuthState>({
     user: AuthService.currentUser,
-    scopes: AuthService.grantedScopes,
+    scopes: normalizeScopes(AuthService.grantedScopes),
     loading: false,
     error: undefined,
   });
@@ -61,7 +65,7 @@ export function useAuth(): UseAuthReturn {
   const syncStateFromService = useCallback(
     (nextLoading: boolean, nextError: AuthError | undefined) => {
       const nextUser = AuthService.currentUser;
-      const nextScopes = AuthService.grantedScopes;
+      const nextScopes = normalizeScopes(AuthService.grantedScopes);
       setState((prev) => {
         if (
           prev.loading === nextLoading &&
@@ -176,7 +180,7 @@ export function useAuth(): UseAuthReturn {
 
   useEffect(() => {
     const unsubscribeAuth = AuthService.onAuthStateChanged((currentUser) => {
-      const nextScopes = AuthService.grantedScopes;
+      const nextScopes = normalizeScopes(AuthService.grantedScopes);
       setState((prev) => {
         if (
           prev.user === currentUser &&

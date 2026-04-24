@@ -4,6 +4,7 @@ import type {
   AuthProvider,
   LoginOptions,
   AuthTokens,
+  AuthErrorCode,
 } from "./Auth.nitro";
 import type { JSStorageAdapter } from "./js-storage-adapter";
 import { logger } from "./utils/logger";
@@ -23,6 +24,24 @@ const WEB_STORAGE_MODES = new Set([
   STORAGE_MODE_LOCAL,
   STORAGE_MODE_MEMORY,
 ] as const);
+const WEB_AUTH_ERROR_CODES: ReadonlySet<string> = new Set<AuthErrorCode>([
+  "cancelled",
+  "timeout",
+  "popup_blocked",
+  "network_error",
+  "configuration_error",
+  "not_signed_in",
+  "operation_in_progress",
+  "unsupported_provider",
+  "invalid_state",
+  "invalid_nonce",
+  "token_error",
+  "no_id_token",
+  "parse_error",
+  "refresh_failed",
+  "unknown",
+]);
+const JWT_BASE64_URL_RE = /^[A-Za-z0-9_-]+$/;
 const inMemoryWebStorage = new Map<string, string>();
 let _appleSdkLoadPromise: Promise<void> | undefined;
 
@@ -60,7 +79,7 @@ type JsonObject = Record<string, unknown>;
 class AuthWebError extends Error {
   public readonly underlyingError?: string;
 
-  constructor(message: string, underlyingError?: string) {
+  constructor(message: AuthErrorCode, underlyingError?: string) {
     super(message);
     this.name = "AuthWebError";
     this.underlyingError = underlyingError;
@@ -86,7 +105,28 @@ const getOptionalNumber = (
   key: string,
 ): number | undefined => {
   const candidate = source[key];
-  return typeof candidate === "number" ? candidate : undefined;
+  return typeof candidate === "number" && Number.isFinite(candidate)
+    ? candidate
+    : undefined;
+};
+
+const parseExpiresInSeconds = (value: unknown): number | undefined => {
+  const candidate =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim().length > 0
+        ? Number(value)
+        : undefined;
+
+  if (
+    typeof candidate !== "number" ||
+    !Number.isFinite(candidate) ||
+    candidate < 0
+  ) {
+    return undefined;
+  }
+
+  return candidate;
 };
 
 const parseAuthUser = (value: unknown): AuthUser | undefined => {
@@ -123,6 +163,9 @@ const parseScopes = (value: unknown): string[] | undefined => {
 
   return value.filter((scope): scope is string => typeof scope === "string");
 };
+
+const isAuthErrorCode = (value: string): value is AuthErrorCode =>
+  WEB_AUTH_ERROR_CODES.has(value);
 
 const parseAuthWebExtraConfig = (value: unknown): AuthWebExtraConfig => {
   if (!isJsonObject(value)) {
@@ -438,29 +481,67 @@ class AuthWeb implements Auth {
   }
 
   private notify() {
-    this._listeners.forEach((l) => {
-      l(this._currentUser);
-    });
+    for (const listener of [...this._listeners]) {
+      listener(this._currentUser);
+    }
+  }
+
+  private notifyTokenListeners(tokens: AuthTokens): void {
+    for (const listener of [...this._tokenListeners]) {
+      listener(tokens);
+    }
+  }
+
+  private async runLoginOperation(
+    operation: () => Promise<void>,
+  ): Promise<void> {
+    if (this._loginInFlight) {
+      throw new AuthWebError(
+        "operation_in_progress",
+        "Another login is already in progress",
+      );
+    }
+
+    this._loginInFlight = true;
+    try {
+      await operation();
+    } finally {
+      this._loginInFlight = false;
+    }
   }
 
   async login(provider: AuthProvider, options?: LoginOptions): Promise<void> {
     const loginHint = options?.loginHint;
     logger.log(`Starting login with ${provider}`, { scopes: options?.scopes });
     try {
-      if (provider === "google") {
-        const scopes = options?.scopes ?? DEFAULT_SCOPES;
-        await this.loginGoogle(scopes, loginHint);
-      } else if (provider === "microsoft") {
-        const scopes = options?.scopes ?? MS_DEFAULT_SCOPES;
-        await this.loginMicrosoft(
-          scopes,
-          loginHint,
-          options?.tenant,
-          options?.prompt,
+      await this.runLoginOperation(async () => {
+        if (provider === "google") {
+          const scopes = options?.scopes ?? DEFAULT_SCOPES;
+          await this.loginGoogle(scopes, loginHint);
+          return;
+        }
+
+        if (provider === "microsoft") {
+          const scopes = options?.scopes ?? MS_DEFAULT_SCOPES;
+          await this.loginMicrosoft(
+            scopes,
+            loginHint,
+            options?.tenant,
+            options?.prompt,
+          );
+          return;
+        }
+
+        if (provider === "apple") {
+          await this.loginApple();
+          return;
+        }
+
+        throw new AuthWebError(
+          "unsupported_provider",
+          `Unsupported auth provider: ${provider}`,
         );
-      } else {
-        await this.loginApple();
-      }
+      });
       logger.log(`Login successful with ${provider}`);
     } catch (e: unknown) {
       const error = this.mapError(e);
@@ -482,11 +563,14 @@ class AuthWeb implements Auth {
     logger.log("Requesting additional scopes:", scopes);
     const newScopes = [...new Set([...this._grantedScopes, ...scopes])];
     try {
-      if (provider === "google") {
-        await this.loginGoogle(newScopes);
-      } else {
+      await this.runLoginOperation(async () => {
+        if (provider === "google") {
+          await this.loginGoogle(newScopes);
+          return;
+        }
+
         await this.loginMicrosoft(newScopes);
-      }
+      });
     } catch (e) {
       const error = this.mapError(e);
       logger.error("Requesting scopes failed:", error.message);
@@ -573,7 +657,8 @@ class AuthWeb implements Auth {
 
       const json = await this.parseResponseObject(response);
       if (!response.ok) {
-        throw new Error(
+        throw new AuthWebError(
+          "refresh_failed",
           getOptionalString(json, "error_description") ??
             getOptionalString(json, "error") ??
             "Token refresh failed",
@@ -583,16 +668,12 @@ class AuthWeb implements Auth {
       const idToken = getOptionalString(json, "id_token");
       const accessToken = getOptionalString(json, "access_token");
       const newRefreshToken = getOptionalString(json, "refresh_token");
-      const expiresInSeconds = getOptionalNumber(json, "expires_in");
 
       if (newRefreshToken) {
         this.saveRefreshToken(newRefreshToken);
       }
 
-      const expirationTime =
-        typeof expiresInSeconds === "number"
-          ? Date.now() + expiresInSeconds * 1000
-          : undefined;
+      const expirationTime = this.getExpirationTime(json["expires_in"]);
 
       const effectiveIdToken = idToken ?? this._currentUser.idToken;
       const claims = effectiveIdToken
@@ -614,9 +695,7 @@ class AuthWeb implements Auth {
         refreshToken: newRefreshToken ?? undefined,
         expirationTime,
       };
-      this._tokenListeners.forEach((l) => {
-        l(tokens);
-      });
+      this.notifyTokenListeners(tokens);
       return tokens;
     }
 
@@ -636,18 +715,22 @@ class AuthWeb implements Auth {
       refreshToken: this._currentUser.refreshToken,
       expirationTime: this._currentUser.expirationTime,
     };
-    this._tokenListeners.forEach((l) => {
-      l(tokens);
-    });
+    this.notifyTokenListeners(tokens);
     return tokens;
   }
 
   private mapError(error: unknown): Error {
+    if (error instanceof AuthWebError) {
+      return error;
+    }
+
     const rawMessage = error instanceof Error ? error.message : String(error);
     const msg = rawMessage.toLowerCase();
-    let mappedMsg = rawMessage;
+    let mappedMsg: AuthErrorCode = "unknown";
 
-    if (msg.includes("cancel") || msg.includes("popup_closed")) {
+    if (isAuthErrorCode(rawMessage)) {
+      mappedMsg = rawMessage;
+    } else if (msg.includes("cancel") || msg.includes("popup_closed")) {
       mappedMsg = "cancelled";
     } else if (msg.includes("access_denied")) {
       mappedMsg = "cancelled";
@@ -655,6 +738,21 @@ class AuthWeb implements Auth {
       mappedMsg = "timeout";
     } else if (msg.includes("popup blocked")) {
       mappedMsg = "popup_blocked";
+    } else if (msg.includes("login is already in progress")) {
+      mappedMsg = "operation_in_progress";
+    } else if (msg.includes("state mismatch")) {
+      mappedMsg = "invalid_state";
+    } else if (msg.includes("nonce mismatch")) {
+      mappedMsg = "invalid_nonce";
+    } else if (msg.includes("no id_token") || msg.includes("no_id_token")) {
+      mappedMsg = "no_id_token";
+    } else if (msg.includes("invalid jwt") || msg.includes("json")) {
+      mappedMsg = "parse_error";
+    } else if (
+      msg.includes("no user logged in") ||
+      msg.includes("not signed in")
+    ) {
+      mappedMsg = "not_signed_in";
     } else if (
       msg.includes("network") ||
       msg.includes("server_error") ||
@@ -677,26 +775,105 @@ class AuthWeb implements Auth {
   }
 
   private async parseResponseObject(response: Response): Promise<JsonObject> {
-    const parsed: unknown = await response.json();
+    let parsed: unknown;
+    try {
+      parsed = await response.json();
+    } catch (error) {
+      throw new AuthWebError("parse_error", String(error));
+    }
+
     if (!isJsonObject(parsed)) {
-      throw new Error("Expected JSON object response from auth provider");
+      throw new AuthWebError(
+        "parse_error",
+        "Expected JSON object response from auth provider",
+      );
     }
     return parsed;
   }
 
   private parseJwtPayload(token: string): JsonObject {
-    const payload = token.split(".")[1];
-    if (!payload) {
-      throw new Error("Invalid JWT payload");
+    const parts = token.split(".");
+    const payload = parts[1];
+    if (
+      parts.length < 2 ||
+      !payload ||
+      payload.length % 4 === 1 ||
+      !JWT_BASE64_URL_RE.test(payload)
+    ) {
+      throw new AuthWebError("parse_error", "Invalid JWT payload");
     }
 
-    const normalizedPayload = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padding = "=".repeat((4 - (normalizedPayload.length % 4)) % 4);
-    const decoded: unknown = JSON.parse(atob(`${normalizedPayload}${padding}`));
-    if (!isJsonObject(decoded)) {
-      throw new Error("Expected JWT payload to be an object");
+    try {
+      const normalizedPayload = payload.replace(/-/g, "+").replace(/_/g, "/");
+      const padding = "=".repeat((4 - (normalizedPayload.length % 4)) % 4);
+      const binary = atob(`${normalizedPayload}${padding}`);
+      const decodedText =
+        typeof TextDecoder === "function"
+          ? new TextDecoder().decode(
+              Uint8Array.from(binary, (char) => char.charCodeAt(0)),
+            )
+          : decodeURIComponent(
+              Array.from(
+                binary,
+                (char) =>
+                  `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`,
+              ).join(""),
+            );
+      const decoded: unknown = JSON.parse(decodedText);
+      if (!isJsonObject(decoded)) {
+        throw new Error("Expected JWT payload to be an object");
+      }
+      return decoded;
+    } catch (error) {
+      if (error instanceof AuthWebError) {
+        throw error;
+      }
+      throw new AuthWebError("parse_error", String(error));
     }
-    return decoded;
+  }
+
+  private mapOAuthErrorCode(error: string): AuthErrorCode {
+    const normalizedError = error.trim().toLowerCase();
+    if (
+      normalizedError === "access_denied" ||
+      normalizedError === "popup_closed_by_user" ||
+      normalizedError === "user_cancelled"
+    ) {
+      return "cancelled";
+    }
+
+    if (
+      normalizedError === "server_error" ||
+      normalizedError === "temporarily_unavailable"
+    ) {
+      return "network_error";
+    }
+
+    if (
+      normalizedError === "invalid_client" ||
+      normalizedError === "invalid_scope" ||
+      normalizedError === "unauthorized_client"
+    ) {
+      return "configuration_error";
+    }
+
+    if (
+      normalizedError === "invalid_grant" ||
+      normalizedError === "invalid_token"
+    ) {
+      return "token_error";
+    }
+
+    return "unknown";
+  }
+
+  private getExpirationTime(expiresIn: unknown): number | undefined {
+    const expiresInSeconds = parseExpiresInSeconds(expiresIn);
+    if (expiresInSeconds === undefined) {
+      return undefined;
+    }
+
+    return Date.now() + expiresInSeconds * 1000;
   }
 
   private waitForPopupRedirect(
@@ -750,7 +927,8 @@ class AuthWeb implements Auth {
         }
 
         cleanup(intervalId, timeoutId, true);
-        void Promise.resolve(onRedirect(url))
+        void Promise.resolve()
+          .then(() => onRedirect(url))
           .then(() => {
             resolve();
           })
@@ -762,24 +940,6 @@ class AuthWeb implements Auth {
   }
 
   private async loginGoogle(
-    scopes: string[],
-    loginHint?: string,
-  ): Promise<void> {
-    if (this._loginInFlight) {
-      throw new AuthWebError(
-        "cancelled",
-        "Another login is already in progress",
-      );
-    }
-    this._loginInFlight = true;
-    try {
-      await this._loginGoogleInner(scopes, loginHint);
-    } finally {
-      this._loginInFlight = false;
-    }
-  }
-
-  private async _loginGoogleInner(
     scopes: string[],
     loginHint?: string,
   ): Promise<void> {
@@ -831,15 +991,27 @@ class AuthWeb implements Auth {
         const accessToken = params.get("access_token");
         const expiresIn = params.get("expires_in");
         const code = params.get("code");
+        const error = params.get("error");
+        const errorDescription = params.get("error_description");
+
+        if (error) {
+          throw new AuthWebError(
+            this.mapOAuthErrorCode(error),
+            errorDescription ?? error,
+          );
+        }
 
         if (!idToken) {
-          throw new Error("No id_token in response");
+          throw new AuthWebError("no_id_token", "No id_token in response");
         }
 
         const decoded = this.parseJwtPayload(idToken);
         if (decoded["nonce"] !== this._pendingGoogleNonce) {
           this._pendingGoogleNonce = undefined;
-          throw new Error("Nonce mismatch - possible replay attack");
+          throw new AuthWebError(
+            "invalid_nonce",
+            "Nonce mismatch - possible replay attack",
+          );
         }
         this._pendingGoogleNonce = undefined;
 
@@ -852,9 +1024,7 @@ class AuthWeb implements Auth {
           accessToken: accessToken ?? undefined,
           serverAuthCode: code ?? undefined,
           scopes,
-          expirationTime: expiresIn
-            ? Date.now() + parseInt(expiresIn, 10) * 1000
-            : undefined,
+          expirationTime: this.getExpirationTime(expiresIn),
           ...this.decodeGoogleJwt(idToken),
         };
         this.updateUser(user);
@@ -883,26 +1053,6 @@ class AuthWeb implements Auth {
   }
 
   private async loginMicrosoft(
-    scopes: string[],
-    loginHint?: string,
-    tenant?: string,
-    prompt?: string,
-  ): Promise<void> {
-    if (this._loginInFlight) {
-      throw new AuthWebError(
-        "cancelled",
-        "Another login is already in progress",
-      );
-    }
-    this._loginInFlight = true;
-    try {
-      await this._loginMicrosoftInner(scopes, loginHint, tenant, prompt);
-    } finally {
-      this._loginInFlight = false;
-    }
-  }
-
-  private async _loginMicrosoftInner(
     scopes: string[],
     loginHint?: string,
     tenant?: string,
@@ -978,15 +1128,24 @@ class AuthWeb implements Auth {
           const errorDescription = urlObj.searchParams.get("error_description");
 
           if (error) {
-            throw new Error(errorDescription ?? error);
+            throw new AuthWebError(
+              this.mapOAuthErrorCode(error),
+              errorDescription ?? error,
+            );
           }
 
           if (returnedState !== state) {
-            throw new Error("State mismatch - possible CSRF attack");
+            throw new AuthWebError(
+              "invalid_state",
+              "State mismatch - possible CSRF attack",
+            );
           }
 
           if (!code) {
-            throw new Error("No authorization code in response");
+            throw new AuthWebError(
+              "token_error",
+              "No authorization code in response",
+            );
           }
 
           await this.exchangeMicrosoftCodeForTokens(
@@ -1061,7 +1220,8 @@ class AuthWeb implements Auth {
     const json = await this.parseResponseObject(response);
 
     if (!response.ok) {
-      throw new Error(
+      throw new AuthWebError(
+        "token_error",
         getOptionalString(json, "error_description") ??
           getOptionalString(json, "error") ??
           "Token exchange failed",
@@ -1070,18 +1230,20 @@ class AuthWeb implements Auth {
 
     const idToken = getOptionalString(json, "id_token");
     if (!idToken) {
-      throw new Error("No id_token in token response");
+      throw new AuthWebError("no_id_token", "No id_token in token response");
     }
 
     const claims = this.decodeMicrosoftJwt(idToken);
     const payload = this.parseJwtPayload(idToken);
     if (getOptionalString(payload, "nonce") !== expectedNonce) {
-      throw new Error("Nonce mismatch - token may be replayed");
+      throw new AuthWebError(
+        "invalid_nonce",
+        "Nonce mismatch - token may be replayed",
+      );
     }
 
     const accessToken = getOptionalString(json, "access_token");
     const refreshToken = getOptionalString(json, "refresh_token");
-    const expiresInSeconds = getOptionalNumber(json, "expires_in");
 
     if (refreshToken) {
       this.saveRefreshToken(refreshToken);
@@ -1096,10 +1258,7 @@ class AuthWeb implements Auth {
       accessToken: accessToken ?? undefined,
       refreshToken: refreshToken ?? undefined,
       scopes,
-      expirationTime:
-        typeof expiresInSeconds === "number"
-          ? Date.now() + expiresInSeconds * 1000
-          : undefined,
+      expirationTime: this.getExpirationTime(json["expires_in"]),
       ...claims,
     };
     this.updateUser(user);
