@@ -1,6 +1,6 @@
 # react-native-nitro-auth
 
-![npm](https://img.shields.io/badge/npm-v0.5.9-f97316?style=flat-square)
+![npm](https://img.shields.io/badge/npm-v0.5.10-f97316?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-007ec6?style=flat-square)
 ![react-native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb?style=flat-square)
 ![nitro-modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.35.0-black?style=flat-square)

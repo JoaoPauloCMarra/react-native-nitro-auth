@@ -52,7 +52,7 @@
     },
     "packages/react-native-nitro-auth": {
       "name": "react-native-nitro-auth",
-      "version": "0.5.9",
+      "version": "0.5.10",
       "devDependencies": {
         "@expo/config-plugins": "^55.0.8",
         "@react-native/babel-preset": "^0.83.6",
