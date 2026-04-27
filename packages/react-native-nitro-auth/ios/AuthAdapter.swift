@@ -10,6 +10,7 @@ public class AuthAdapter: NSObject {
   private static var inMemoryMicrosoftRefreshToken: String?
   private static var inMemoryMicrosoftScopes: [String] = defaultMicrosoftScopes
   private static var inMemoryGoogleServerAuthCode: String?
+  private static var activeMicrosoftWebAuthSession: ASWebAuthenticationSession?
   private static let tokenStoreLock = NSLock()
 
   @objc
@@ -135,22 +136,32 @@ public class AuthAdapter: NSObject {
     let callbackScheme = "msauth.\(bundleId)"
     
     DispatchQueue.main.async {
+      guard self.activeMicrosoftWebAuthSession == nil else {
+        completion(nil, "operation_in_progress")
+        return
+      }
+
+      let completeAndClearSession = { (data: NSDictionary?, error: String?) in
+        self.activeMicrosoftWebAuthSession = nil
+        completion(data, error)
+      }
+
       let session = ASWebAuthenticationSession(url: authUrl, callbackURLScheme: callbackScheme) { callbackURL, error in
         if let error = error {
           let nsError = error as NSError
           if nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
-            completion(nil, "cancelled")
+            completeAndClearSession(nil, "cancelled")
           } else if nsError.domain.lowercased().contains("network") || nsError.code == NSURLErrorNotConnectedToInternet {
-            completion(nil, "network_error")
+            completeAndClearSession(nil, "network_error")
           } else {
-            completion(nil, "unknown")
+            completeAndClearSession(nil, "unknown")
           }
           return
         }
 
         guard let callbackURL = callbackURL,
               let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
-          completion(nil, "unknown")
+          completeAndClearSession(nil, "unknown")
           return
         }
 
@@ -163,20 +174,21 @@ public class AuthAdapter: NSObject {
           // OAuth error codes are already structured (e.g. "access_denied").
           // Map well-known ones; fall back to "unknown".
           let mapped = mapOAuthError(errorCode)
-          completion(nil, mapped)
+          completeAndClearSession(nil, mapped)
           return
         }
 
         guard let returnedState = params["state"], returnedState == state else {
-          completion(nil, "invalid_state")
+          completeAndClearSession(nil, "invalid_state")
           return
         }
 
         guard let code = params["code"] else {
-          completion(nil, "unknown")
+          completeAndClearSession(nil, "unknown")
           return
         }
         
+        self.activeMicrosoftWebAuthSession = nil
         exchangeCodeForTokens(
           code: code,
           codeVerifier: codeVerifier,
@@ -191,14 +203,17 @@ public class AuthAdapter: NSObject {
       }
 
       guard let window = activeWindow() else {
-        completion(nil, "no_window")
+        completeAndClearSession(nil, "no_window")
         return
       }
       let contextProvider = WebAuthContextProvider(anchor: window)
       session.presentationContextProvider = contextProvider
       objc_setAssociatedObject(session, &contextProviderHandle, contextProvider, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
       session.prefersEphemeralWebBrowserSession = false
-      session.start()
+      self.activeMicrosoftWebAuthSession = session
+      if !session.start() {
+        completeAndClearSession(nil, "unknown")
+      }
     }
   }
   
@@ -685,6 +700,10 @@ public class AuthAdapter: NSObject {
   @objc
   public static func logout() {
     GIDSignIn.sharedInstance.signOut()
+    DispatchQueue.main.async {
+      self.activeMicrosoftWebAuthSession?.cancel()
+      self.activeMicrosoftWebAuthSession = nil
+    }
     tokenStoreLock.lock()
     inMemoryMicrosoftRefreshToken = nil
     inMemoryMicrosoftScopes = defaultMicrosoftScopes

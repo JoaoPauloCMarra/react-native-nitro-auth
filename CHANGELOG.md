@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.10 - 2026-04-27
+
+### Fixed
+
+- Fixed iOS Microsoft sign-in so `ASWebAuthenticationSession` is retained until callback or cancellation and duplicate sessions fail with `operation_in_progress`.
+- Fixed the example app header so it displays the current package version.
+
+### Verified
+
+- `bun run check:ci`
+- `bunx expo install --check --cwd apps/example`
+- `bunx expo-doctor@latest apps/example`
+- `bun run example:prebuild`
+- `bun run publish-package:dry-run`
+
 ## 0.5.9 - 2026-04-24
 
 ### Added

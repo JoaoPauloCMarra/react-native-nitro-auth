@@ -27,7 +27,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { SmokeTestCard } from "./SmokeTestCard";
 
-const PACKAGE_VERSION = "0.5.8";
+const PACKAGE_VERSION = "0.5.10";
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
 const PROVIDERS: readonly {
