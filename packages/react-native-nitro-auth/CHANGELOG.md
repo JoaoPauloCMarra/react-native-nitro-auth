@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.11 - 2026-05-05
+
+### Changed
+
+- Updated the Expo example to the Expo SDK 55 recommended `expo@~55.0.23` patch and Android API 36 target.
+
+### Fixed
+
+- Wrapped synchronous native service failures in `AuthError` so public service errors keep a consistent code contract.
+
+### Verified
+
+- `bun install --frozen-lockfile`
+- `bunx expo install --check --cwd apps/example`
+- `bunx expo-doctor@latest apps/example`
+- `bun run check:ci`
+- `bun run --cwd packages/react-native-nitro-auth test:coverage -- --runInBand`
+- `bun run --cwd packages/react-native-nitro-auth test:cpp:coverage`
+- `bun run example:prebuild`
+- `bun run publish-package:dry-run`
+
 ## 0.5.10 - 2026-04-27
 
 ### Fixed
