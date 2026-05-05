@@ -65,6 +65,8 @@ jobs:
           fi
 
       - name: Validate publish package
+        env:
+          NITRO_AUTH_DRY_RUN_PUBLISHER: npm
         run: bun scripts/publish.js --dry-run --skip-git-check
 
       - name: Resolve npm dist tag

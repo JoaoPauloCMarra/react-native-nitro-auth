@@ -28,6 +28,7 @@ const skipExpoDoctor = hasFlag("--skip-expo-doctor");
 const quick = hasFlag("--quick");
 const tag = getArgValue("--tag") || "latest";
 const otp = getArgValue("--otp");
+const dryRunPublisher = process.env.NITRO_AUTH_DRY_RUN_PUBLISHER || "bun";
 
 function hasFlag(name) {
   return args.includes(name);
@@ -166,6 +167,13 @@ function buildPublishArgs() {
   return publishArgs;
 }
 
+function buildPublishCommand(publishArgs) {
+  const publishBin =
+    dryRun && dryRunPublisher === "npm" ? "npm publish" : "bun publish";
+
+  return `${publishBin} ${publishArgs.join(" ")}`;
+}
+
 function getReleaseSteps() {
   const steps = [
     [
@@ -261,7 +269,7 @@ async function main() {
   }
 
   log(dryRun ? "Running publish dry run..." : "Publishing to npm...", "cyan");
-  must(`bun publish ${publishArgs.join(" ")}`, {
+  must(buildPublishCommand(publishArgs), {
     cwd: packageDir,
     label: dryRun ? "Publish dry run" : "Publish package",
   });
