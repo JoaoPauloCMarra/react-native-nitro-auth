@@ -77,9 +77,33 @@ describe("AuthService", () => {
   beforeEach(() => {
     void AuthService.currentUser;
     mockCurrentUser = undefined;
-    mockGetCurrentUser.mockClear();
+    mockGetCurrentUser.mockReset();
+    mockGetCurrentUser.mockImplementation(() => mockCurrentUser);
     onAuthStateChangedCallback = null;
-    mockState.hybridObject?.onAuthStateChanged.mockClear();
+    const hybridObject = mockState.hybridObject;
+    if (hybridObject) {
+      hybridObject.login.mockReset();
+      hybridObject.logout.mockReset();
+      hybridObject.requestScopes.mockReset();
+      hybridObject.revokeScopes.mockReset();
+      hybridObject.getAccessToken.mockReset();
+      hybridObject.refreshToken.mockReset();
+      hybridObject.silentRestore.mockReset();
+      hybridObject.onAuthStateChanged.mockReset();
+      hybridObject.onTokensRefreshed.mockReset();
+      hybridObject.setLoggingEnabled.mockReset();
+      hybridObject.dispose.mockReset();
+      hybridObject.equals.mockReset();
+      hybridObject.onAuthStateChanged.mockImplementation(
+        (callback: (user: AuthUser | undefined) => void) => {
+          onAuthStateChangedCallback = callback;
+          return jest.fn();
+        },
+      );
+      hybridObject.onTokensRefreshed.mockImplementation(
+        (_callback: (tokens: AuthTokens) => void) => jest.fn(),
+      );
+    }
   });
 
   it("should create hybrid object with correct name", () => {
@@ -175,6 +199,70 @@ describe("AuthService", () => {
       expect(error).toBe(original);
       expect((error as AuthError).code).toBe("cancelled");
     });
+
+    it("wraps sync native method errors in AuthError", () => {
+      native().logout.mockImplementationOnce(() => {
+        throw new Error("not_signed_in");
+      });
+
+      let error: unknown;
+      try {
+        AuthService.logout();
+      } catch (e) {
+        error = e;
+      }
+
+      expect(error).toBeInstanceOf(AuthError);
+      expect((error as AuthError).code).toBe("not_signed_in");
+    });
+
+    it("wraps dispose native errors in AuthError", () => {
+      native().dispose.mockImplementationOnce(() => {
+        throw new Error("configuration_error");
+      });
+
+      let error: unknown;
+      try {
+        AuthService.dispose();
+      } catch (e) {
+        error = e;
+      }
+
+      expect(error).toBeInstanceOf(AuthError);
+      expect((error as AuthError).code).toBe("configuration_error");
+    });
+
+    it("wraps equals native errors in AuthError", () => {
+      native().equals.mockImplementationOnce(() => {
+        throw new Error("unknown");
+      });
+
+      let error: unknown;
+      try {
+        AuthService.equals(native());
+      } catch (e) {
+        error = e;
+      }
+
+      expect(error).toBeInstanceOf(AuthError);
+      expect((error as AuthError).code).toBe("unknown");
+    });
+
+    it("wraps sync native getter errors in AuthError", () => {
+      mockGetCurrentUser.mockImplementationOnce(() => {
+        throw new Error("configuration_error");
+      });
+
+      let error: unknown;
+      try {
+        void AuthService.currentUser;
+      } catch (e) {
+        error = e;
+      }
+
+      expect(error).toBeInstanceOf(AuthError);
+      expect((error as AuthError).code).toBe("configuration_error");
+    });
   });
 
   describe("silentRestore", () => {
@@ -207,6 +295,10 @@ describe("AuthService", () => {
     const auth = native();
     auth.grantedScopes = ["email"];
     auth.hasPlayServices = false;
+    auth.logout.mockClear();
+    auth.setLoggingEnabled.mockClear();
+    auth.dispose.mockClear();
+    auth.equals.mockClear();
     auth.equals.mockReturnValueOnce(true);
 
     const service = createAuthService(() => auth);

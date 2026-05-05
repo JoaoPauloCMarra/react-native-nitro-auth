@@ -24,23 +24,33 @@ async function wrapAuthOperation<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
+function wrapSyncAuthOperation<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (e) {
+    throw AuthError.from(e);
+  }
+}
+
 export function createAuthService(getAuth: AuthSource): Auth {
   return {
     get name() {
-      return getAuth().name;
+      return wrapSyncAuthOperation(() => getAuth().name);
     },
 
     get currentUser() {
-      return getAuth().currentUser;
+      return wrapSyncAuthOperation(() => getAuth().currentUser);
     },
 
     get grantedScopes() {
-      const scopes = getAuth().grantedScopes;
-      return Array.isArray(scopes) ? scopes : [];
+      return wrapSyncAuthOperation(() => {
+        const scopes = getAuth().grantedScopes;
+        return Array.isArray(scopes) ? scopes : [];
+      });
     },
 
     get hasPlayServices() {
-      return getAuth().hasPlayServices;
+      return wrapSyncAuthOperation(() => getAuth().hasPlayServices);
     },
 
     login(provider: AuthProvider, options?: LoginOptions) {
@@ -64,7 +74,9 @@ export function createAuthService(getAuth: AuthSource): Auth {
     },
 
     logout() {
-      getAuth().logout();
+      wrapSyncAuthOperation(() => {
+        getAuth().logout();
+      });
     },
 
     silentRestore() {
@@ -72,26 +84,34 @@ export function createAuthService(getAuth: AuthSource): Auth {
     },
 
     onAuthStateChanged(callback: (user: AuthUser | undefined) => void) {
-      const auth = getAuth() as AuthWithOptionalNativeMembers;
-      return auth.onAuthStateChanged?.(callback) ?? (() => {});
+      return wrapSyncAuthOperation(() => {
+        const auth = getAuth() as AuthWithOptionalNativeMembers;
+        return auth.onAuthStateChanged?.(callback) ?? (() => {});
+      });
     },
 
     onTokensRefreshed(callback: (tokens: AuthTokens) => void) {
-      const auth = getAuth() as AuthWithOptionalNativeMembers;
-      return auth.onTokensRefreshed?.(callback) ?? (() => {});
+      return wrapSyncAuthOperation(() => {
+        const auth = getAuth() as AuthWithOptionalNativeMembers;
+        return auth.onTokensRefreshed?.(callback) ?? (() => {});
+      });
     },
 
     setLoggingEnabled(enabled: boolean) {
-      const auth = getAuth() as AuthWithOptionalNativeMembers;
-      auth.setLoggingEnabled?.(enabled);
+      wrapSyncAuthOperation(() => {
+        const auth = getAuth() as AuthWithOptionalNativeMembers;
+        auth.setLoggingEnabled?.(enabled);
+      });
     },
 
     dispose() {
-      getAuth().dispose();
+      wrapSyncAuthOperation(() => {
+        getAuth().dispose();
+      });
     },
 
     equals(other: Parameters<Auth["equals"]>[0]): boolean {
-      return getAuth().equals(other);
+      return wrapSyncAuthOperation(() => getAuth().equals(other));
     },
   };
 }
