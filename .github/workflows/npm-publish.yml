@@ -3,6 +3,7 @@ name: Publish npm
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 env:
   BUN_VERSION: "1.3.10"
@@ -35,8 +36,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang llvm
 
-      - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@latest
+      - name: Install npm for trusted publishing
+        run: |
+          bun install -g npm@latest
+          NPM_BIN="$(bun pm bin -g)"
+          printf '%s\n' "$NPM_BIN" >> "$GITHUB_PATH"
+          "$NPM_BIN/npm" --version
 
       - uses: actions/cache@v5
         with:
@@ -49,6 +54,7 @@ jobs:
           restore-keys: ${{ runner.os }}-bun-
 
       - name: Verify release tag
+        if: github.event_name == 'release'
         run: |
           PACKAGE_VERSION="$(node -p "require('./${PACKAGE_DIR}/package.json').version")"
           RELEASE_TAG="${GITHUB_REF_NAME#v}"
@@ -59,9 +65,12 @@ jobs:
           fi
 
       - name: Validate publish package
+        env:
+          NITRO_AUTH_DRY_RUN_PUBLISHER: npm
         run: bun scripts/publish.js --dry-run --skip-git-check
 
       - name: Resolve npm dist tag
+        if: github.event_name == 'release'
         id: dist-tag
         run: |
           PACKAGE_VERSION="$(node -p "require('./${PACKAGE_DIR}/package.json').version")"
@@ -72,5 +81,6 @@ jobs:
           fi
 
       - name: Publish to npm
+        if: github.event_name == 'release'
         working-directory: ${{ env.PACKAGE_DIR }}
         run: npm publish --access public --tag "${{ steps.dist-tag.outputs.tag }}" --ignore-scripts
