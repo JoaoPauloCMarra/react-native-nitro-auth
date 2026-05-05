@@ -30,6 +30,11 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Install C++ coverage tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm
+
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
 
