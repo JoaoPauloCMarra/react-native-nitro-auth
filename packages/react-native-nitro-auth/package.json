@@ -20,6 +20,7 @@
     "CHANGELOG.md",
     "*.podspec",
     "app.plugin.js",
+    ".watchmanconfig",
     "!**/__tests__",
     "!**/__fixtures__",
     "!**/__mocks__",
