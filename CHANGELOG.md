@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.12 - 2026-05-13
+
+### Changed
+
+- Updated the Expo example to the current SDK 55 recommended `expo`, `expo-build-properties`, and `expo-system-ui` patch ranges.
+
+### Fixed
+
+- Fixed the Android example launcher icon by adding an adaptive icon foreground and dark brand background.
+- Normalized web `SocialButton` and native login failures so presentation-anchor and missing-code errors surface as stable `AuthError` codes.
+- Shipped package-level Watchman ignores for Android CMake cache output so consumers avoid noisy native build watcher events.
+
 ## 0.5.11 - 2026-05-05
 
 ### Changed

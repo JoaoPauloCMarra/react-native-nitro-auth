@@ -27,7 +27,7 @@ public class AuthAdapter: NSObject {
       
       DispatchQueue.main.async {
         guard let rootVC = presentingViewController() else {
-          completion(nil, "no_window")
+          completion(nil, "configuration_error")
           return
         }
 
@@ -63,7 +63,7 @@ public class AuthAdapter: NSObject {
 
       DispatchQueue.main.async {
         guard let window = activeWindow() else {
-          completion(nil, "no_window")
+          completion(nil, "configuration_error")
           return
         }
         let contextProvider = AppleSignInContextProvider(anchor: window)
@@ -184,7 +184,7 @@ public class AuthAdapter: NSObject {
         }
 
         guard let code = params["code"] else {
-          completeAndClearSession(nil, "unknown")
+          completeAndClearSession(nil, "token_error")
           return
         }
         
@@ -203,7 +203,7 @@ public class AuthAdapter: NSObject {
       }
 
       guard let window = activeWindow() else {
-        completeAndClearSession(nil, "no_window")
+        completeAndClearSession(nil, "configuration_error")
         return
       }
       let contextProvider = WebAuthContextProvider(anchor: window)
@@ -440,7 +440,7 @@ public class AuthAdapter: NSObject {
     if let currentUser = GIDSignIn.sharedInstance.currentUser {
       DispatchQueue.main.async {
         guard let rootVC = presentingViewController() else {
-          completion(nil, "no_window")
+          completion(nil, "configuration_error")
           return
         }
         currentUser.addScopes(scopes, presenting: rootVC) { result, error in

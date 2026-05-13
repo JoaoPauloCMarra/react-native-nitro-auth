@@ -321,7 +321,7 @@ object AuthAdapter {
         }
         if (code == null) {
             clearPkceState()
-            nativeOnLoginError(origin, "unknown", "No authorization code in response")
+            nativeOnLoginError(origin, "token_error", "No authorization code in response")
             return
         }
         exchangeCodeForTokens(code)

@@ -22,7 +22,7 @@
     "react-native-web": "^0.21.2",
     "react-native-safe-area-context": "5.6.2",
     "react-native-screens": "4.23.0",
-    "expo": "~55.0.23",
+    "expo": "~55.0.24",
     "expo-asset": "~55.0.17",
     "expo-constants": "~55.0.16",
     "expo-linking": "~55.0.15",

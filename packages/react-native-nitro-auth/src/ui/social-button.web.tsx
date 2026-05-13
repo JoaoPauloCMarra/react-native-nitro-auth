@@ -7,7 +7,7 @@ import {
   View,
   ActivityIndicator,
 } from "react-native";
-import { AuthModule } from "../Auth.web";
+import { AuthService } from "../service.web";
 import { logger } from "../utils/logger";
 import type { AuthProvider, AuthUser } from "../Auth.nitro";
 
@@ -57,7 +57,7 @@ const getTextColor = (variant: SocialButtonVariant): string =>
   variant === "white" || variant === "outline" ? "#000000" : "#FFFFFF";
 
 async function performLogin(provider: AuthProvider): Promise<void> {
-  await AuthModule.login(provider);
+  await AuthService.login(provider);
 }
 
 export const SocialButton = ({
@@ -83,7 +83,7 @@ export const SocialButton = ({
     setLoading(true);
     try {
       await performLogin(provider);
-      const user = AuthModule.currentUser;
+      const user = AuthService.currentUser;
       if (user) {
         onSuccess?.(user);
       }

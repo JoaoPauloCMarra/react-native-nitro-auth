@@ -55,6 +55,13 @@ describe("toAuthErrorCode", () => {
     );
   });
 
+  it("normalizes legacy native no_window errors to configuration_error", () => {
+    expect(toAuthErrorCode("no_window")).toBe("configuration_error");
+    expect(toAuthErrorCode("no_window: missing presentation anchor")).toBe(
+      "configuration_error",
+    );
+  });
+
   it("returns 'unknown' for empty string", () => {
     expect(toAuthErrorCode("")).toBe("unknown");
   });

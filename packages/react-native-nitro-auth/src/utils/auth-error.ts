@@ -18,16 +18,30 @@ const AUTH_ERROR_CODES: ReadonlySet<string> = new Set<AuthErrorCode>([
   "unknown",
 ]);
 
+const LEGACY_AUTH_ERROR_CODES: Readonly<Record<string, AuthErrorCode>> = {
+  no_window: "configuration_error",
+};
+
 export function isAuthErrorCode(value: string): value is AuthErrorCode {
   return AUTH_ERROR_CODES.has(value);
 }
 
 export function toAuthErrorCode(raw: string): AuthErrorCode {
+  const normalized = LEGACY_AUTH_ERROR_CODES[raw];
+  if (normalized) {
+    return normalized;
+  }
+
   if (isAuthErrorCode(raw)) {
     return raw;
   }
 
   const prefix = raw.split(":", 1)[0]?.trim();
+  const normalizedPrefix = prefix ? LEGACY_AUTH_ERROR_CODES[prefix] : undefined;
+  if (normalizedPrefix) {
+    return normalizedPrefix;
+  }
+
   if (prefix && isAuthErrorCode(prefix)) {
     return prefix;
   }

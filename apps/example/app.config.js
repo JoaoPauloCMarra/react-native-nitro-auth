@@ -15,6 +15,10 @@ const appConfig = {
     },
     android: {
       package: "com.auth.example",
+      adaptiveIcon: {
+        foregroundImage: "./assets/adaptive-icon.png",
+        backgroundColor: "#100B2F",
+      },
     },
     plugins: [
       "expo-router",
