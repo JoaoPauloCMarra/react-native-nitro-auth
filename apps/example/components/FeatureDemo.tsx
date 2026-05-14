@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import {
@@ -18,6 +19,7 @@ import {
   type AuthProvider,
   type AuthTokens,
   type AuthUser,
+  type ProviderLoginOptions,
 } from "react-native-nitro-auth";
 import {
   createStorageItem,
@@ -27,7 +29,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { SmokeTestCard } from "./SmokeTestCard";
 
-const PACKAGE_VERSION = "0.5.11";
+const PACKAGE_VERSION = "0.6.0";
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
 const PROVIDERS: readonly {
@@ -177,12 +179,39 @@ function getErrorStatus(error: AuthError): string {
     : error.code;
 }
 
+function normalizeOptionText(value: string): string | undefined {
+  const trimmedValue = value.trim();
+  return trimmedValue.length > 0 ? trimmedValue : undefined;
+}
+
+function parseScopes(value: string): string[] | undefined {
+  const scopes = value
+    .split(/[\s,]+/)
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+
+  return scopes.length > 0 ? dedupeScopes(scopes) : undefined;
+}
+
 export function FeatureDemo() {
   const auth = useAuth();
   const [status, setStatus] = useState("Ready");
   const [statusTone, setStatusTone] = useState<StatusTone>("idle");
   const [useOneTap, setUseOneTap] = useState(false);
   const [useLegacyGoogleSignIn, setUseLegacyGoogleSignIn] = useState(false);
+  const [forceAccountPicker, setForceAccountPicker] = useState(false);
+  const [filterByAuthorizedAccounts, setFilterByAuthorizedAccounts] =
+    useState(false);
+  const [forceCodeForRefreshToken, setForceCodeForRefreshToken] =
+    useState(false);
+  const [requestVerifiedPhoneNumber, setRequestVerifiedPhoneNumber] =
+    useState(false);
+  const [loginHint, setLoginHint] = useState("");
+  const [nonce, setNonce] = useState("");
+  const [extraScopes, setExtraScopes] = useState("");
+  const [hostedDomain, setHostedDomain] = useState("");
+  const [openIDRealm, setOpenIDRealm] = useState("");
+  const [microsoftTenant, setMicrosoftTenant] = useState("");
   const [persistSnapshot, setPersistSnapshot] = useState(true);
   const [loggingEnabled, setLoggingEnabled] = useState(false);
   const [buttonVariant, setButtonVariant] = useState<
@@ -335,6 +364,68 @@ export function FeatureDemo() {
     return undefined;
   }
 
+  function getGoogleLoginOptions(): ProviderLoginOptions<"google"> {
+    const scopes = parseScopes(extraScopes);
+    const normalizedLoginHint = normalizeOptionText(loginHint);
+    const normalizedNonce = normalizeOptionText(nonce);
+    const normalizedHostedDomain = normalizeOptionText(hostedDomain);
+    const normalizedOpenIDRealm = normalizeOptionText(openIDRealm);
+
+    if (Platform.OS === "android") {
+      return {
+        scopes,
+        loginHint: normalizedLoginHint,
+        nonce: normalizedNonce,
+        useOneTap: !useLegacyGoogleSignIn ? useOneTap : undefined,
+        forceAccountPicker,
+        filterByAuthorizedAccounts,
+        useLegacyGoogleSignIn,
+        forceCodeForRefreshToken,
+        hostedDomain: normalizedHostedDomain,
+        requestVerifiedPhoneNumber,
+      };
+    }
+
+    return {
+      scopes,
+      loginHint: normalizedLoginHint,
+      nonce: normalizedNonce,
+      forceAccountPicker,
+      hostedDomain: normalizedHostedDomain,
+      openIDRealm: normalizedOpenIDRealm,
+    };
+  }
+
+  function getAppleLoginOptions(): ProviderLoginOptions<"apple"> {
+    return {
+      scopes: parseScopes(extraScopes),
+      nonce: normalizeOptionText(nonce),
+    };
+  }
+
+  function getMicrosoftLoginOptions(): ProviderLoginOptions<"microsoft"> {
+    return {
+      scopes: parseScopes(extraScopes),
+      loginHint: normalizeOptionText(loginHint),
+      tenant: normalizeOptionText(microsoftTenant),
+      prompt: microsoftPrompt,
+    };
+  }
+
+  async function runProviderLogin(provider: AuthProvider) {
+    if (provider === "google") {
+      await auth.login("google", getGoogleLoginOptions());
+      return;
+    }
+
+    if (provider === "apple") {
+      await auth.login("apple", getAppleLoginOptions());
+      return;
+    }
+
+    await auth.login("microsoft", getMicrosoftLoginOptions());
+  }
+
   async function loginWithProvider(provider: AuthProvider) {
     if (getProviderDisabled(provider)) {
       setNotice("Apple Sign-In is unavailable on Android", "error");
@@ -344,23 +435,7 @@ export function FeatureDemo() {
     await runAuthAction(
       `Signing in with ${formatProvider(provider)}`,
       async () => {
-        await auth.login(provider, {
-          prompt: provider === "microsoft" ? microsoftPrompt : undefined,
-          useOneTap:
-            provider === "google" &&
-            Platform.OS === "android" &&
-            !useLegacyGoogleSignIn
-              ? useOneTap
-              : undefined,
-          useSheet:
-            provider === "google" && Platform.OS === "ios"
-              ? useOneTap
-              : undefined,
-          useLegacyGoogleSignIn:
-            provider === "google" && Platform.OS === "android"
-              ? useLegacyGoogleSignIn
-              : undefined,
-        });
+        await runProviderLogin(provider);
         persistLatestAuthState();
       },
     );
@@ -432,7 +507,15 @@ export function FeatureDemo() {
     });
   }
 
-  async function forceAccountPicker() {
+  async function revokeAccess() {
+    await runAuthAction("Revoking provider access", async () => {
+      await auth.revokeAccess();
+      setLastTokens(undefined);
+      clearSnapshot();
+    });
+  }
+
+  async function openAccountPicker() {
     await runAuthAction("Opening account picker", async () => {
       await auth.login("google", {
         forceAccountPicker: true,
@@ -590,6 +673,22 @@ export function FeatureDemo() {
               value={maskSecret(displayUser?.serverAuthCode)}
             />
             <DetailRow
+              label="Authorization code"
+              value={maskSecret(displayUser?.authorizationCode)}
+            />
+            <DetailRow
+              label="User ID"
+              value={displayUser?.userId ?? "Not available"}
+            />
+            <DetailRow
+              label="Phone"
+              value={displayUser?.phoneNumber ?? "Not available"}
+            />
+            <DetailRow
+              label="Hosted domain"
+              value={displayUser?.hostedDomain ?? "Not available"}
+            />
+            <DetailRow
               label="Expires"
               value={formatTime(
                 displayUser?.expirationTime ?? lastTokens?.expirationTime,
@@ -633,7 +732,14 @@ export function FeatureDemo() {
             />
             <ActionButton
               label="Account picker"
-              onPress={() => void forceAccountPicker()}
+              onPress={() => void openAccountPicker()}
+            />
+            <ActionButton
+              label="Revoke access"
+              tone="danger"
+              disabled={!auth.user}
+              disabledReason="Sign in first"
+              onPress={() => void revokeAccess()}
             />
             <ActionButton
               label="Sign out"
@@ -647,6 +753,7 @@ export function FeatureDemo() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Options</Text>
+          <Text style={styles.optionGroupTitle}>Google</Text>
           {Platform.OS === "android" ? (
             <>
               <ToggleRow
@@ -655,28 +762,80 @@ export function FeatureDemo() {
                 onChange={setUseOneTap}
               />
               <ToggleRow
+                label="Filter authorized accounts"
+                value={filterByAuthorizedAccounts}
+                onChange={setFilterByAuthorizedAccounts}
+              />
+              <ToggleRow
+                label="Request verified phone number"
+                value={requestVerifiedPhoneNumber}
+                onChange={setRequestVerifiedPhoneNumber}
+              />
+              <ToggleRow
                 label="Legacy Google flow"
                 value={useLegacyGoogleSignIn}
                 onChange={setUseLegacyGoogleSignIn}
               />
+              <ToggleRow
+                label="Force refresh auth code"
+                value={forceCodeForRefreshToken}
+                onChange={setForceCodeForRefreshToken}
+              />
             </>
           ) : null}
-          {Platform.OS === "ios" ? (
-            <ToggleRow
-              label="Google sign-in sheet"
-              value={useOneTap}
-              onChange={setUseOneTap}
+          <ToggleRow
+            label="Force account picker"
+            value={forceAccountPicker}
+            onChange={setForceAccountPicker}
+          />
+          <TextInputRow
+            label="Hosted domain"
+            placeholder="company.com"
+            value={hostedDomain}
+            onChange={setHostedDomain}
+          />
+          {Platform.OS !== "android" ? (
+            <TextInputRow
+              label="OpenID realm"
+              placeholder="https://example.com"
+              value={openIDRealm}
+              onChange={setOpenIDRealm}
             />
           ) : null}
-          <ToggleRow
-            label="Persist app snapshot"
-            value={persistSnapshot}
-            onChange={setPersistSnapshot}
+          <Text style={styles.optionGroupTitle}>
+            {Platform.OS === "android" ? "Google" : "Apple and Google"}
+          </Text>
+          <TextInputRow
+            label="Nonce"
+            placeholder="Opaque nonce"
+            value={nonce}
+            onChange={setNonce}
           />
-          <ToggleRow
-            label="Native logging"
-            value={loggingEnabled}
-            onChange={toggleLogging}
+          <Text style={styles.optionGroupTitle}>Google and Microsoft</Text>
+          <TextInputRow
+            label="Login hint"
+            placeholder="user@example.com"
+            value={loginHint}
+            onChange={setLoginHint}
+            keyboardType="email-address"
+          />
+          <Text style={styles.optionGroupTitle}>
+            {Platform.OS === "android"
+              ? "Google and Microsoft"
+              : "All supported providers"}
+          </Text>
+          <TextInputRow
+            label="Extra scopes"
+            placeholder="email profile User.Read"
+            value={extraScopes}
+            onChange={setExtraScopes}
+          />
+          <Text style={styles.optionGroupTitle}>Microsoft</Text>
+          <TextInputRow
+            label="Tenant"
+            placeholder="common, organizations, consumers, or tenant ID"
+            value={microsoftTenant}
+            onChange={setMicrosoftTenant}
           />
           <View style={styles.promptRow}>
             <Text style={styles.promptLabel}>
@@ -689,6 +848,17 @@ export function FeatureDemo() {
               <Text style={styles.smallButtonText}>Cycle</Text>
             </Pressable>
           </View>
+          <Text style={styles.optionGroupTitle}>Demo</Text>
+          <ToggleRow
+            label="Persist app snapshot"
+            value={persistSnapshot}
+            onChange={setPersistSnapshot}
+          />
+          <ToggleRow
+            label="Native logging"
+            value={loggingEnabled}
+            onChange={toggleLogging}
+          />
         </View>
 
         <View style={styles.section}>
@@ -741,6 +911,36 @@ function ToggleRow({
         onValueChange={onChange}
         trackColor={switchTrackColors}
         thumbColor={value ? "#2563eb" : "#f8fafc"}
+      />
+    </View>
+  );
+}
+
+function TextInputRow({
+  label,
+  value,
+  placeholder,
+  onChange,
+  keyboardType = "default",
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+  keyboardType?: "default" | "email-address" | "url";
+}) {
+  return (
+    <View style={styles.inputRow}>
+      <Text style={styles.inputLabel}>{label}</Text>
+      <TextInput
+        style={styles.input}
+        value={value}
+        placeholder={placeholder}
+        placeholderTextColor="#94a3b8"
+        onChangeText={onChange}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType={keyboardType}
       />
     </View>
   );
@@ -1137,6 +1337,39 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     marginRight: 12,
+  },
+  optionGroupTitle: {
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: "800",
+    marginBottom: 8,
+    marginTop: 6,
+    textTransform: "uppercase",
+  },
+  inputRow: {
+    backgroundColor: "#ffffff",
+    borderColor: "#dbe3ef",
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 10,
+    padding: 12,
+  },
+  inputLabel: {
+    color: "#111827",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: "#f8fafc",
+    borderColor: "#e2e8f0",
+    borderRadius: 8,
+    borderWidth: 1,
+    color: "#111827",
+    fontSize: 14,
+    minHeight: 40,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   promptRow: {
     alignItems: "center",

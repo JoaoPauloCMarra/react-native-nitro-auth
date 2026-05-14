@@ -17,6 +17,7 @@ type MockHybridObject = {
   logout: jest.Mock;
   requestScopes: jest.Mock;
   revokeScopes: jest.Mock;
+  revokeAccess: jest.Mock;
   getAccessToken: jest.Mock;
   refreshToken: jest.Mock;
   onAuthStateChanged: jest.Mock;
@@ -44,6 +45,7 @@ jest.mock("react-native-nitro-modules", () => {
     logout: jest.fn(),
     requestScopes: jest.fn(),
     revokeScopes: jest.fn(),
+    revokeAccess: jest.fn(),
     getAccessToken: jest.fn(),
     refreshToken: jest.fn(),
     silentRestore: jest.fn(),
@@ -86,6 +88,7 @@ describe("AuthService", () => {
       hybridObject.logout.mockReset();
       hybridObject.requestScopes.mockReset();
       hybridObject.revokeScopes.mockReset();
+      hybridObject.revokeAccess.mockReset();
       hybridObject.getAccessToken.mockReset();
       hybridObject.refreshToken.mockReset();
       hybridObject.silentRestore.mockReset();
@@ -119,6 +122,7 @@ describe("AuthService", () => {
     expect(AuthService.logout).toBeDefined();
     expect(AuthService.requestScopes).toBeDefined();
     expect(AuthService.revokeScopes).toBeDefined();
+    expect(AuthService.revokeAccess).toBeDefined();
     expect(AuthService.getAccessToken).toBeDefined();
     expect(AuthService.refreshToken).toBeDefined();
   });
@@ -174,6 +178,13 @@ describe("AuthService", () => {
       const error = await AuthService.getAccessToken().catch((e: unknown) => e);
       expect(error).toBeInstanceOf(AuthError);
       expect((error as AuthError).code).toBe("no_id_token");
+    });
+
+    it("revokeAccess wraps native error in AuthError", async () => {
+      native().revokeAccess.mockRejectedValueOnce(new Error("network_error"));
+      const error = await AuthService.revokeAccess().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(AuthError);
+      expect((error as AuthError).code).toBe("network_error");
     });
 
     it("refreshToken wraps native error in AuthError", async () => {
@@ -296,6 +307,7 @@ describe("AuthService", () => {
     auth.grantedScopes = ["email"];
     auth.hasPlayServices = false;
     auth.logout.mockClear();
+    auth.revokeAccess.mockClear();
     auth.setLoggingEnabled.mockClear();
     auth.dispose.mockClear();
     auth.equals.mockClear();
@@ -317,11 +329,13 @@ describe("AuthService", () => {
     expect(service.onAuthStateChanged(authCallback)).toBe(unsubscribeAuth);
     expect(service.onTokensRefreshed(tokenCallback)).toBe(unsubscribeTokens);
     service.logout();
+    void service.revokeAccess();
     service.setLoggingEnabled(true);
     service.dispose();
     expect(service.equals(auth)).toBe(true);
 
     expect(auth.logout).toHaveBeenCalledTimes(1);
+    expect(auth.revokeAccess).toHaveBeenCalledTimes(1);
     expect(auth.setLoggingEnabled).toHaveBeenCalledWith(true);
     expect(auth.dispose).toHaveBeenCalledTimes(1);
     expect(auth.equals).toHaveBeenCalledWith(auth);

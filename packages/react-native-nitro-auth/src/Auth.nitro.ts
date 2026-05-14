@@ -24,13 +24,19 @@ export type MicrosoftPrompt = "login" | "consent" | "select_account" | "none";
 export interface LoginOptions {
   scopes?: string[];
   loginHint?: string;
+  nonce?: string;
   useOneTap?: boolean;
   /** (iOS only) Use native sign-in sheet */
   useSheet?: boolean;
   /** Force account picker to show, ignoring any cached session or loginHint. On Android Google, this uses the legacy chooser path. */
   forceAccountPicker?: boolean;
+  filterByAuthorizedAccounts?: boolean;
   /** (Android only) Use legacy Google Sign-In flow (e.g. for serverAuthCode) */
   useLegacyGoogleSignIn?: boolean;
+  forceCodeForRefreshToken?: boolean;
+  hostedDomain?: string;
+  openIDRealm?: string;
+  requestVerifiedPhoneNumber?: boolean;
   /** (Microsoft only) Azure AD tenant - "common", "organizations", "consumers", or tenant ID */
   tenant?: string;
   /** (Microsoft only) Prompt behavior for login */
@@ -53,6 +59,10 @@ export interface AuthUser {
   accessToken?: string;
   refreshToken?: string;
   serverAuthCode?: string;
+  authorizationCode?: string;
+  userId?: string;
+  phoneNumber?: string;
+  hostedDomain?: string;
   scopes?: string[];
   expirationTime?: number;
   /** Raw native error message */
@@ -67,6 +77,7 @@ export interface Auth extends HybridObject<{ ios: "c++"; android: "c++" }> {
   login(provider: AuthProvider, options?: LoginOptions): Promise<void>;
   requestScopes(scopes: string[]): Promise<void>;
   revokeScopes(scopes: string[]): Promise<void>;
+  revokeAccess(): Promise<void>;
   getAccessToken(): Promise<string | undefined>;
   refreshToken(): Promise<AuthTokens>;
 

@@ -12,14 +12,42 @@ public class AuthAdapter: NSObject {
   private static var inMemoryGoogleServerAuthCode: String?
   private static var activeMicrosoftWebAuthSession: ASWebAuthenticationSession?
   private static let tokenStoreLock = NSLock()
+  private static let interactiveAuthLock = NSLock()
+  private static var interactiveAuthInProgress = false
+
+  private static func beginInteractiveAuth() -> Bool {
+    interactiveAuthLock.lock()
+    defer { interactiveAuthLock.unlock() }
+    if interactiveAuthInProgress {
+      return false
+    }
+    interactiveAuthInProgress = true
+    return true
+  }
+
+  private static func finishInteractiveAuth() {
+    interactiveAuthLock.lock()
+    interactiveAuthInProgress = false
+    interactiveAuthLock.unlock()
+  }
+
+  private static func completeInteractiveAuth(_ completion: @escaping (NSDictionary?, String?) -> Void) -> (NSDictionary?, String?) -> Void {
+    return { data, error in
+      finishInteractiveAuth()
+      completion(data, error)
+    }
+  }
 
   @objc
-  public static func login(provider: String, scopes: [String], loginHint: String?, useSheet: Bool, forceAccountPicker: Bool = false, tenant: String? = nil, prompt: String? = nil, completion: @escaping (NSDictionary?, String?) -> Void) {
-    // useSheet is accepted for API compatibility with Android but has no effect on iOS.
-    // Google Sign-In SDK controls its own presentation style.
+  public static func login(provider: String, scopes: [String], loginHint: String?, nonce: String?, useSheet: Bool, forceAccountPicker: Bool = false, tenant: String? = nil, prompt: String? = nil, hostedDomain: String? = nil, openIDRealm: String? = nil, completion: @escaping (NSDictionary?, String?) -> Void) {
     if provider == "google" {
+      guard beginInteractiveAuth() else {
+        completion(nil, "operation_in_progress")
+        return
+      }
+      let complete = completeInteractiveAuth(completion)
       guard let clientId = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String, !clientId.isEmpty else {
-        completion(nil, "configuration_error")
+        complete(nil, "configuration_error")
         return
       }
       
@@ -27,23 +55,24 @@ public class AuthAdapter: NSObject {
       
       DispatchQueue.main.async {
         guard let rootVC = presentingViewController() else {
-          completion(nil, "configuration_error")
+          complete(nil, "configuration_error")
           return
         }
 
-        let config = GIDConfiguration(clientID: clientId, serverClientID: serverClientId)
+        let config = GIDConfiguration(clientID: clientId, serverClientID: serverClientId, hostedDomain: hostedDomain, openIDRealm: openIDRealm)
         GIDSignIn.sharedInstance.configuration = config
         
         let additionalScopes = scopes.isEmpty ? nil : scopes
-        let effectiveHint = forceAccountPicker ? nil : loginHint
+        let shouldForceAccountPicker = forceAccountPicker || useSheet
+        let effectiveHint = shouldForceAccountPicker ? nil : loginHint
         
         let performSignIn = {
-          GIDSignIn.sharedInstance.signIn(withPresenting: rootVC, hint: effectiveHint, additionalScopes: additionalScopes) { result, error in
-            self.handleGoogleResult(result, error: error, completion: completion)
+          GIDSignIn.sharedInstance.signIn(withPresenting: rootVC, hint: effectiveHint, additionalScopes: additionalScopes, nonce: nonce) { result, error in
+            self.handleGoogleResult(result, error: error, completion: complete)
           }
         }
         
-        if forceAccountPicker {
+        if shouldForceAccountPicker {
           GIDSignIn.sharedInstance.disconnect { _ in
             performSignIn()
           }
@@ -52,18 +81,34 @@ public class AuthAdapter: NSObject {
         }
       }
     } else if provider == "apple" {
+      guard beginInteractiveAuth() else {
+        completion(nil, "operation_in_progress")
+        return
+      }
+      let complete = completeInteractiveAuth(completion)
       let appleIDProvider = ASAuthorizationAppleIDProvider()
       let request = appleIDProvider.createRequest()
-      request.requestedScopes = [.fullName, .email]
+      request.requestedScopes = scopes.isEmpty
+        ? [.fullName, .email]
+        : scopes.compactMap { scope in
+          switch scope {
+          case "fullName", "name": return .fullName
+          case "email": return .email
+          default: return nil
+          }
+        }
+      if let nonce = nonce {
+        request.nonce = nonce
+      }
       
       let controller = ASAuthorizationController(authorizationRequests: [request])
-      let delegate = AppleSignInDelegate(completion: completion)
+      let delegate = AppleSignInDelegate(completion: complete)
       controller.delegate = delegate
       objc_setAssociatedObject(controller, &delegateHandle, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
       DispatchQueue.main.async {
         guard let window = activeWindow() else {
-          completion(nil, "configuration_error")
+          complete(nil, "configuration_error")
           return
         }
         let contextProvider = AppleSignInContextProvider(anchor: window)
@@ -83,6 +128,11 @@ public class AuthAdapter: NSObject {
       completion(nil, "configuration_error")
       return
     }
+    guard beginInteractiveAuth() else {
+      completion(nil, "operation_in_progress")
+      return
+    }
+    let complete = completeInteractiveAuth(completion)
     
     let effectiveTenant = tenant ?? Bundle.main.object(forInfoDictionaryKey: "MSALTenant") as? String ?? "common"
     let bundleId = Bundle.main.bundleIdentifier ?? ""
@@ -91,11 +141,11 @@ public class AuthAdapter: NSObject {
     let effectivePrompt = prompt ?? "select_account"
     
     guard let codeVerifier = generateCodeVerifier() else {
-      completion(nil, "configuration_error")
+      complete(nil, "configuration_error")
       return
     }
     guard let codeChallenge = generateCodeChallenge(codeVerifier) else {
-      completion(nil, "configuration_error")
+      complete(nil, "configuration_error")
       return
     }
     let state = UUID().uuidString
@@ -103,12 +153,12 @@ public class AuthAdapter: NSObject {
     
     let b2cDomain = Bundle.main.object(forInfoDictionaryKey: "MSALB2cDomain") as? String
     guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: effectiveTenant, b2cDomain: b2cDomain) else {
-      completion(nil, "configuration_error")
+      complete(nil, "configuration_error")
       return
     }
 
     guard var urlComponents = URLComponents(string: "\(authBaseUrl)oauth2/v2.0/authorize") else {
-      completion(nil, "configuration_error")
+      complete(nil, "configuration_error")
       return
     }
     urlComponents.queryItems = [
@@ -129,7 +179,7 @@ public class AuthAdapter: NSObject {
     }
     
     guard let authUrl = urlComponents.url else {
-      completion(nil, "configuration_error")
+      complete(nil, "configuration_error")
       return
     }
     
@@ -137,13 +187,13 @@ public class AuthAdapter: NSObject {
     
     DispatchQueue.main.async {
       guard self.activeMicrosoftWebAuthSession == nil else {
-        completion(nil, "operation_in_progress")
+        complete(nil, "operation_in_progress")
         return
       }
 
       let completeAndClearSession = { (data: NSDictionary?, error: String?) in
         self.activeMicrosoftWebAuthSession = nil
-        completion(data, error)
+        complete(data, error)
       }
 
       let session = ASWebAuthenticationSession(url: authUrl, callbackURLScheme: callbackScheme) { callbackURL, error in
@@ -198,7 +248,7 @@ public class AuthAdapter: NSObject {
           b2cDomain: b2cDomain,
           expectedNonce: nonce,
           scopes: effectiveScopes,
-          completion: completion
+          completion: complete
         )
       }
 
@@ -391,6 +441,8 @@ public class AuthAdapter: NSObject {
       "idToken": user.idToken?.tokenString ?? "",
       "accessToken": user.accessToken.tokenString,
       "serverAuthCode": serverAuthCode,
+      "userId": user.userID ?? "",
+      "hostedDomain": user.configuration.hostedDomain ?? "",
       "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000,
       "underlyingError": ""
     ]
@@ -502,9 +554,11 @@ public class AuthAdapter: NSObject {
             "name": user.profile?.name ?? "",
             "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
             "idToken": user.idToken?.tokenString ?? "",
-            "accessToken": user.accessToken.tokenString,
-            "serverAuthCode": cachedServerAuthCode ?? "",
-            "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000
+          "accessToken": user.accessToken.tokenString,
+          "serverAuthCode": cachedServerAuthCode ?? "",
+          "userId": user.userID ?? "",
+          "hostedDomain": user.configuration.hostedDomain ?? "",
+          "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000
           ]
           completion(data as NSDictionary)
           return
@@ -704,11 +758,29 @@ public class AuthAdapter: NSObject {
       self.activeMicrosoftWebAuthSession?.cancel()
       self.activeMicrosoftWebAuthSession = nil
     }
+    finishInteractiveAuth()
     tokenStoreLock.lock()
     inMemoryMicrosoftRefreshToken = nil
     inMemoryMicrosoftScopes = defaultMicrosoftScopes
     inMemoryGoogleServerAuthCode = nil
     tokenStoreLock.unlock()
+  }
+
+  @objc
+  public static func revokeAccess(completion: @escaping (String?) -> Void) {
+    GIDSignIn.sharedInstance.disconnect { error in
+      tokenStoreLock.lock()
+      inMemoryMicrosoftRefreshToken = nil
+      inMemoryMicrosoftScopes = defaultMicrosoftScopes
+      inMemoryGoogleServerAuthCode = nil
+      tokenStoreLock.unlock()
+
+      if let error = error {
+        completion(mapError(error))
+        return
+      }
+      completion(nil)
+    }
   }
 
   private static func activeWindow() -> UIWindow? {
@@ -769,6 +841,8 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
         "email": email ?? "",
         "name": name,
         "idToken": idToken ?? "",
+        "authorizationCode": appleIDCredential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) } ?? "",
+        "userId": appleIDCredential.user,
         "underlyingError": ""
       ]
       completion(data as NSDictionary, nil)

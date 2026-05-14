@@ -28,7 +28,7 @@
     "react-dom": "19.2.0",
     "react-native": "0.83.6",
     "react-native-nitro-auth": "workspace:*",
-    "react-native-nitro-modules": "^0.35.5",
+    "react-native-nitro-modules": "^0.35.6",
     "react-native-nitro-storage": "^0.5.0",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",

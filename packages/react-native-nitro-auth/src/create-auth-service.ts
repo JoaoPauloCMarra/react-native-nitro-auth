@@ -1,10 +1,5 @@
-import type {
-  Auth,
-  AuthProvider,
-  AuthTokens,
-  LoginOptions,
-  AuthUser,
-} from "./Auth.nitro";
+import type { Auth, AuthProvider, AuthTokens, AuthUser } from "./Auth.nitro";
+import type { ProviderLoginOptions, TypedAuth } from "./provider-options";
 import { AuthError } from "./utils/auth-error";
 
 type AuthSource = () => Auth;
@@ -13,6 +8,7 @@ type AuthWithOptionalNativeMembers = Auth & {
     callback: (user: AuthUser | undefined) => void,
   ) => () => void;
   onTokensRefreshed?: (callback: (tokens: AuthTokens) => void) => () => void;
+  revokeAccess?: () => Promise<void>;
   setLoggingEnabled?: (enabled: boolean) => void;
 };
 
@@ -32,7 +28,7 @@ function wrapSyncAuthOperation<T>(operation: () => T): T {
   }
 }
 
-export function createAuthService(getAuth: AuthSource): Auth {
+export function createAuthService(getAuth: AuthSource): TypedAuth {
   return {
     get name() {
       return wrapSyncAuthOperation(() => getAuth().name);
@@ -53,7 +49,10 @@ export function createAuthService(getAuth: AuthSource): Auth {
       return wrapSyncAuthOperation(() => getAuth().hasPlayServices);
     },
 
-    login(provider: AuthProvider, options?: LoginOptions) {
+    login<Provider extends AuthProvider>(
+      provider: Provider,
+      options?: ProviderLoginOptions<Provider>,
+    ) {
       return wrapAuthOperation(() => getAuth().login(provider, options));
     },
 
@@ -63,6 +62,17 @@ export function createAuthService(getAuth: AuthSource): Auth {
 
     revokeScopes(scopes: string[]) {
       return wrapAuthOperation(() => getAuth().revokeScopes(scopes));
+    },
+
+    revokeAccess() {
+      return wrapAuthOperation(async () => {
+        const auth = getAuth() as AuthWithOptionalNativeMembers;
+        if (auth.revokeAccess) {
+          await auth.revokeAccess();
+          return;
+        }
+        auth.logout();
+      });
     },
 
     getAccessToken() {

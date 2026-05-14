@@ -21,14 +21,18 @@ class GoogleSignInActivity : ComponentActivity() {
         private const val EXTRA_SCOPES = "scopes"
         private const val EXTRA_LOGIN_HINT = "login_hint"
         private const val EXTRA_FORCE_PICKER = "force_picker"
+        private const val EXTRA_FORCE_CODE_FOR_REFRESH_TOKEN = "force_code_for_refresh_token"
+        private const val EXTRA_HOSTED_DOMAIN = "hosted_domain"
         private const val EXTRA_ORIGIN = "origin"
 
-        fun createIntent(context: Context, clientId: String, scopes: Array<String>, loginHint: String?, forcePicker: Boolean = false, origin: String = "login"): Intent {
+        fun createIntent(context: Context, clientId: String, scopes: Array<String>, loginHint: String?, forcePicker: Boolean = false, forceCodeForRefreshToken: Boolean = false, hostedDomain: String? = null, origin: String = "login"): Intent {
             return Intent(context, GoogleSignInActivity::class.java).apply {
                 putExtra(EXTRA_CLIENT_ID, clientId)
                 putExtra(EXTRA_SCOPES, scopes)
                 putExtra(EXTRA_LOGIN_HINT, loginHint)
                 putExtra(EXTRA_FORCE_PICKER, forcePicker)
+                putExtra(EXTRA_FORCE_CODE_FOR_REFRESH_TOKEN, forceCodeForRefreshToken)
+                putExtra(EXTRA_HOSTED_DOMAIN, hostedDomain)
                 putExtra(EXTRA_ORIGIN, origin)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
@@ -56,6 +60,8 @@ class GoogleSignInActivity : ComponentActivity() {
         val scopes = intent.getStringArrayExtra(EXTRA_SCOPES) ?: arrayOf("email", "profile")
         val loginHint = intent.getStringExtra(EXTRA_LOGIN_HINT)
         val forcePicker = intent.getBooleanExtra(EXTRA_FORCE_PICKER, false)
+        val forceCodeForRefreshToken = intent.getBooleanExtra(EXTRA_FORCE_CODE_FOR_REFRESH_TOKEN, false)
+        val hostedDomain = intent.getStringExtra(EXTRA_HOSTED_DOMAIN)
         
         val origin = intent.getStringExtra(EXTRA_ORIGIN) ?: "login"
         if (clientId == null) {
@@ -66,8 +72,12 @@ class GoogleSignInActivity : ComponentActivity() {
         
         val gsoBuilder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestIdToken(clientId)
-            .requestServerAuthCode(clientId)
+            .requestServerAuthCode(clientId, forceCodeForRefreshToken)
             .requestEmail()
+
+        if (hostedDomain != null) {
+            gsoBuilder.setHostedDomain(hostedDomain)
+        }
         
         scopes.forEach { scopeStr ->
             if (scopeStr != "email" && scopeStr != "profile" && scopeStr != "openid") {

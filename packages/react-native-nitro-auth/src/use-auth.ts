@@ -1,10 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import type {
-  AuthUser,
-  AuthProvider,
-  LoginOptions,
-  AuthTokens,
-} from "./Auth.nitro";
+import type { AuthUser, AuthProvider, AuthTokens } from "./Auth.nitro";
+import type { AuthLogin, ProviderLoginOptions } from "./provider-options";
 import { AuthService } from "./service";
 import { AuthError } from "./utils/auth-error";
 
@@ -45,10 +41,11 @@ const areScopesEqual = (left: string[], right: string[]): boolean => {
 
 export type UseAuthReturn = AuthState & {
   hasPlayServices: boolean;
-  login: (provider: AuthProvider, options?: LoginOptions) => Promise<void>;
+  login: AuthLogin;
   logout: () => void;
   requestScopes: (scopes: string[]) => Promise<void>;
   revokeScopes: (scopes: string[]) => Promise<void>;
+  revokeAccess: () => Promise<void>;
   getAccessToken: () => Promise<string | undefined>;
   refreshToken: () => Promise<AuthTokens>;
   silentRestore: () => Promise<void>;
@@ -87,7 +84,10 @@ export function useAuth(): UseAuthReturn {
   );
 
   const login = useCallback(
-    async (provider: AuthProvider, options?: LoginOptions) => {
+    async <Provider extends AuthProvider>(
+      provider: Provider,
+      options?: ProviderLoginOptions<Provider>,
+    ) => {
       setState((prev) => ({ ...prev, loading: true, error: undefined }));
       try {
         await AuthService.login(provider, options);
@@ -150,6 +150,18 @@ export function useAuth(): UseAuthReturn {
     },
     [syncStateFromService],
   );
+
+  const revokeAccess = useCallback(async () => {
+    setState((prev) => ({ ...prev, loading: true, error: undefined }));
+    try {
+      await AuthService.revokeAccess();
+      syncStateFromService(false, undefined);
+    } catch (e) {
+      const error = AuthError.from(e);
+      setState((prev) => ({ ...prev, loading: false, error }));
+      throw error;
+    }
+  }, [syncStateFromService]);
 
   const getAccessToken = useCallback(() => AuthService.getAccessToken(), []);
 
@@ -214,6 +226,7 @@ export function useAuth(): UseAuthReturn {
       logout,
       requestScopes,
       revokeScopes,
+      revokeAccess,
       getAccessToken,
       refreshToken,
       silentRestore,
@@ -224,6 +237,7 @@ export function useAuth(): UseAuthReturn {
       logout,
       requestScopes,
       revokeScopes,
+      revokeAccess,
       getAccessToken,
       refreshToken,
       silentRestore,

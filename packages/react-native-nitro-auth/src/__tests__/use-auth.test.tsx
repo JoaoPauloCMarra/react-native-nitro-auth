@@ -21,6 +21,7 @@ type LoginFn = (
 ) => Promise<void>;
 type RequestScopesFn = (scopes: string[]) => Promise<void>;
 type RevokeScopesFn = (scopes: string[]) => Promise<void>;
+type RevokeAccessFn = () => Promise<void>;
 type GetAccessTokenFn = () => Promise<string | undefined>;
 type RefreshTokenFn = () => Promise<AuthTokens>;
 type OnAuthStateChangedFn = (
@@ -39,6 +40,10 @@ const mockRequestScopes = jest.fn<
 const mockRevokeScopes = jest.fn<
   ReturnType<RevokeScopesFn>,
   Parameters<RevokeScopesFn>
+>();
+const mockRevokeAccess = jest.fn<
+  ReturnType<RevokeAccessFn>,
+  Parameters<RevokeAccessFn>
 >();
 const mockGetAccessToken = jest.fn<
   ReturnType<GetAccessTokenFn>,
@@ -76,6 +81,8 @@ jest.mock("../service", () => ({
       mockRequestScopes(...args),
     revokeScopes: (...args: Parameters<RevokeScopesFn>) =>
       mockRevokeScopes(...args),
+    revokeAccess: (...args: Parameters<RevokeAccessFn>) =>
+      mockRevokeAccess(...args),
     getAccessToken: (...args: Parameters<GetAccessTokenFn>) =>
       mockGetAccessToken(...args),
     refreshToken: (...args: Parameters<RefreshTokenFn>) =>
@@ -96,6 +103,7 @@ describe("useAuth", () => {
     mockLogout.mockReset();
     mockRequestScopes.mockReset();
     mockRevokeScopes.mockReset();
+    mockRevokeAccess.mockReset();
     mockGetAccessToken.mockReset();
     mockRefreshToken.mockReset();
     mockOnAuthStateChanged.mockReset();
@@ -352,6 +360,36 @@ describe("useAuth", () => {
 
       expect(result.current.error).toBeInstanceOf(AuthError);
       expect((result.current.error as AuthError).code).toBe("unknown");
+    });
+  });
+
+  describe("revokeAccess", () => {
+    it("should revoke access successfully", async () => {
+      mockRevokeAccess.mockResolvedValue(undefined);
+
+      const { result } = renderHook(() => useAuth());
+
+      await act(async () => {
+        await result.current.revokeAccess();
+      });
+
+      expect(mockRevokeAccess).toHaveBeenCalledTimes(1);
+      expect(result.current.loading).toBe(false);
+    });
+
+    it("should handle revokeAccess error", async () => {
+      mockRevokeAccess.mockRejectedValue(new Error("network_error"));
+
+      const { result } = renderHook(() => useAuth());
+
+      await act(async () => {
+        try {
+          await result.current.revokeAccess();
+        } catch {}
+      });
+
+      expect(result.current.error).toBeInstanceOf(AuthError);
+      expect((result.current.error as AuthError).code).toBe("network_error");
     });
   });
 

@@ -20,6 +20,7 @@ namespace margelo::nitro::NitroAuth {
       prototype.registerHybridMethod("login", &HybridAuthSpec::login);
       prototype.registerHybridMethod("requestScopes", &HybridAuthSpec::requestScopes);
       prototype.registerHybridMethod("revokeScopes", &HybridAuthSpec::revokeScopes);
+      prototype.registerHybridMethod("revokeAccess", &HybridAuthSpec::revokeAccess);
       prototype.registerHybridMethod("getAccessToken", &HybridAuthSpec::getAccessToken);
       prototype.registerHybridMethod("refreshToken", &HybridAuthSpec::refreshToken);
       prototype.registerHybridMethod("logout", &HybridAuthSpec::logout);

@@ -25,6 +25,7 @@ static jmethodID gRefreshMethod = nullptr;
 static jmethodID gRestoreMethod = nullptr;
 static jmethodID gHasPlayMethod = nullptr;
 static jmethodID gLogoutMethod = nullptr;
+static jmethodID gRevokeAccessMethod = nullptr;
 
 // Call from JNI_OnUnload or dispose to prevent stale refs after a module reload.
 static void clearCachedJniRefs(JNIEnv* env) {
@@ -38,13 +39,14 @@ static void clearCachedJniRefs(JNIEnv* env) {
     gRestoreMethod = nullptr;
     gHasPlayMethod = nullptr;
     gLogoutMethod = nullptr;
+    gRevokeAccessMethod = nullptr;
 }
 
 static void ensureAuthAdapterMethods(JNIEnv* env) {
     if (gAuthAdapterClass != nullptr && gLoginMethod != nullptr
         && gRequestScopesMethod != nullptr && gRefreshMethod != nullptr
         && gRestoreMethod != nullptr && gHasPlayMethod != nullptr
-        && gLogoutMethod != nullptr) {
+        && gLogoutMethod != nullptr && gRevokeAccessMethod != nullptr) {
         return;
     }
 
@@ -61,7 +63,7 @@ static void ensureAuthAdapterMethods(JNIEnv* env) {
         gLoginMethod = env->GetStaticMethodID(
             gAuthAdapterClass,
             "loginSync",
-            "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;ZZZLjava/lang/String;Ljava/lang/String;)V"
+            "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZZZZZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V"
         );
     }
     if (gRequestScopesMethod == nullptr) {
@@ -99,6 +101,13 @@ static void ensureAuthAdapterMethods(JNIEnv* env) {
             "(Landroid/content/Context;)V"
         );
     }
+    if (gRevokeAccessMethod == nullptr) {
+        gRevokeAccessMethod = env->GetStaticMethodID(
+            gAuthAdapterClass,
+            "revokeAccessSync",
+            "(Landroid/content/Context;)V"
+        );
+    }
 }
 
 std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, const std::optional<LoginOptions>& options) {
@@ -127,16 +136,25 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     
     std::vector<std::string> scopes = {"email", "profile"};
     std::optional<std::string> loginHint;
+    std::optional<std::string> nonce;
     std::optional<std::string> tenant;
     std::optional<std::string> prompt;
+    std::optional<std::string> hostedDomain;
+    std::optional<std::string> openIDRealm;
     bool useOneTap = false;
     bool forceAccountPicker = false;
     bool useLegacyGoogleSignIn = false;
+    bool filterByAuthorizedAccounts = false;
+    bool forceCodeForRefreshToken = false;
+    bool requestVerifiedPhoneNumber = false;
 
     if (options) {
         if (options->scopes) scopes = *options->scopes;
         loginHint = options->loginHint;
+        nonce = options->nonce;
         tenant = options->tenant;
+        hostedDomain = options->hostedDomain;
+        openIDRealm = options->openIDRealm;
         if (options->prompt.has_value()) {
             switch (options->prompt.value()) {
                 case MicrosoftPrompt::LOGIN: prompt = "login"; break;
@@ -148,6 +166,9 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         useOneTap = options->useOneTap.value_or(false);
         forceAccountPicker = options->forceAccountPicker.value_or(false);
         useLegacyGoogleSignIn = options->useLegacyGoogleSignIn.value_or(false);
+        filterByAuthorizedAccounts = options->filterByAuthorizedAccounts.value_or(false);
+        forceCodeForRefreshToken = options->forceCodeForRefreshToken.value_or(false);
+        requestVerifiedPhoneNumber = options->requestVerifiedPhoneNumber.value_or(false);
     }
 
     JNIEnv* env = Environment::current();
@@ -170,17 +191,29 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
 
     local_ref<JString> providerRef = make_jstring(providerStr);
     local_ref<JString> loginHintRef;
+    local_ref<JString> nonceRef;
     local_ref<JString> tenantRef;
     local_ref<JString> promptRef;
+    local_ref<JString> hostedDomainRef;
+    local_ref<JString> openIDRealmRef;
 
     if (loginHint.has_value()) {
         loginHintRef = make_jstring(loginHint.value());
+    }
+    if (nonce.has_value()) {
+        nonceRef = make_jstring(nonce.value());
     }
     if (tenant.has_value()) {
         tenantRef = make_jstring(tenant.value());
     }
     if (prompt.has_value()) {
         promptRef = make_jstring(prompt.value());
+    }
+    if (hostedDomain.has_value()) {
+        hostedDomainRef = make_jstring(hostedDomain.value());
+    }
+    if (openIDRealm.has_value()) {
+        openIDRealmRef = make_jstring(openIDRealm.value());
     }
 
     env->CallStaticVoidMethod(gAuthAdapterClass, gLoginMethod,
@@ -189,11 +222,17 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         nullptr,
         jScopes,
         loginHintRef.get(),
+        nonceRef.get(),
         (jboolean)useOneTap,
         (jboolean)forceAccountPicker,
         (jboolean)useLegacyGoogleSignIn,
+        (jboolean)filterByAuthorizedAccounts,
+        (jboolean)forceCodeForRefreshToken,
+        (jboolean)requestVerifiedPhoneNumber,
         tenantRef.get(),
-        promptRef.get());
+        promptRef.get(),
+        hostedDomainRef.get(),
+        openIDRealmRef.get());
 
     env->DeleteLocalRef(jScopes);
     env->DeleteLocalRef(stringClass);
@@ -396,13 +435,42 @@ void PlatformAuth::logout() {
     }
 }
 
+std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess() {
+    auto promise = Promise<void>::create();
+    auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
+    if (!contextPtr) {
+        promise->resolve();
+        return promise;
+    }
+
+    JNIEnv* env = Environment::current();
+    try {
+        ensureAuthAdapterMethods(env);
+    } catch (...) {
+        promise->reject(std::current_exception());
+        return promise;
+    }
+
+    env->CallStaticVoidMethod(gAuthAdapterClass, gRevokeAccessMethod, contextPtr);
+
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        promise->reject(std::make_exception_ptr(std::runtime_error("JNI call failed")));
+        return promise;
+    }
+
+    promise->resolve();
+    return promise;
+}
+
 extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeInitialize(JNIEnv*, jclass, jobject context) {
     AuthCache::setAndroidContext(context);
 }
 
 extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess(
     JNIEnv* env, jclass,
-    jstring origin, jstring provider, jstring email, jstring name, jstring photo, jstring idToken, jstring accessToken, jstring serverAuthCode, jobjectArray scopes, jobject expirationTime) {
+    jstring origin, jstring provider, jstring email, jstring name, jstring photo, jstring idToken, jstring accessToken, jstring serverAuthCode, jstring userId, jstring phoneNumber, jstring hostedDomain, jobjectArray scopes, jobject expirationTime) {
 
     const char* originCStr = env->GetStringUTFChars(origin, nullptr);
     std::string originStr(originCStr);
@@ -466,6 +534,21 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess
         const char* s = env->GetStringUTFChars(serverAuthCode, nullptr);
         user.serverAuthCode = std::string(s);
         env->ReleaseStringUTFChars(serverAuthCode, s);
+    }
+    if (userId) {
+        const char* s = env->GetStringUTFChars(userId, nullptr);
+        user.userId = std::string(s);
+        env->ReleaseStringUTFChars(userId, s);
+    }
+    if (phoneNumber) {
+        const char* s = env->GetStringUTFChars(phoneNumber, nullptr);
+        user.phoneNumber = std::string(s);
+        env->ReleaseStringUTFChars(phoneNumber, s);
+    }
+    if (hostedDomain) {
+        const char* s = env->GetStringUTFChars(hostedDomain, nullptr);
+        user.hostedDomain = std::string(s);
+        env->ReleaseStringUTFChars(hostedDomain, s);
     }
     if (scopes) {
         int len = env->GetArrayLength(scopes);

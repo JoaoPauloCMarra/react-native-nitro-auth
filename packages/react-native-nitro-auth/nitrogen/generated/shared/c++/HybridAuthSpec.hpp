@@ -68,6 +68,7 @@ namespace margelo::nitro::NitroAuth {
       virtual std::shared_ptr<Promise<void>> login(AuthProvider provider, const std::optional<LoginOptions>& options) = 0;
       virtual std::shared_ptr<Promise<void>> requestScopes(const std::vector<std::string>& scopes) = 0;
       virtual std::shared_ptr<Promise<void>> revokeScopes(const std::vector<std::string>& scopes) = 0;
+      virtual std::shared_ptr<Promise<void>> revokeAccess() = 0;
       virtual std::shared_ptr<Promise<std::optional<std::string>>> getAccessToken() = 0;
       virtual std::shared_ptr<Promise<AuthTokens>> refreshToken() = 0;
       virtual void logout() = 0;

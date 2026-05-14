@@ -1,6 +1,7 @@
 import { NitroModules } from "react-native-nitro-modules";
 import type { Auth } from "./Auth.nitro";
 import { createAuthService } from "./create-auth-service";
+import type { TypedAuth } from "./provider-options";
 
 let nitroAuth: Auth | undefined;
 
@@ -9,4 +10,4 @@ function getNitroAuth(): Auth {
   return nitroAuth;
 }
 
-export const AuthService: Auth = createAuthService(getNitroAuth);
+export const AuthService: TypedAuth = createAuthService(getNitroAuth);

@@ -45,16 +45,22 @@ namespace margelo::nitro::NitroAuth {
   public:
     std::optional<std::vector<std::string>> scopes     SWIFT_PRIVATE;
     std::optional<std::string> loginHint     SWIFT_PRIVATE;
+    std::optional<std::string> nonce     SWIFT_PRIVATE;
     std::optional<bool> useOneTap     SWIFT_PRIVATE;
     std::optional<bool> useSheet     SWIFT_PRIVATE;
     std::optional<bool> forceAccountPicker     SWIFT_PRIVATE;
+    std::optional<bool> filterByAuthorizedAccounts     SWIFT_PRIVATE;
     std::optional<bool> useLegacyGoogleSignIn     SWIFT_PRIVATE;
+    std::optional<bool> forceCodeForRefreshToken     SWIFT_PRIVATE;
+    std::optional<std::string> hostedDomain     SWIFT_PRIVATE;
+    std::optional<std::string> openIDRealm     SWIFT_PRIVATE;
+    std::optional<bool> requestVerifiedPhoneNumber     SWIFT_PRIVATE;
     std::optional<std::string> tenant     SWIFT_PRIVATE;
     std::optional<MicrosoftPrompt> prompt     SWIFT_PRIVATE;
 
   public:
     LoginOptions() = default;
-    explicit LoginOptions(std::optional<std::vector<std::string>> scopes, std::optional<std::string> loginHint, std::optional<bool> useOneTap, std::optional<bool> useSheet, std::optional<bool> forceAccountPicker, std::optional<bool> useLegacyGoogleSignIn, std::optional<std::string> tenant, std::optional<MicrosoftPrompt> prompt): scopes(scopes), loginHint(loginHint), useOneTap(useOneTap), useSheet(useSheet), forceAccountPicker(forceAccountPicker), useLegacyGoogleSignIn(useLegacyGoogleSignIn), tenant(tenant), prompt(prompt) {}
+    explicit LoginOptions(std::optional<std::vector<std::string>> scopes, std::optional<std::string> loginHint, std::optional<std::string> nonce, std::optional<bool> useOneTap, std::optional<bool> useSheet, std::optional<bool> forceAccountPicker, std::optional<bool> filterByAuthorizedAccounts, std::optional<bool> useLegacyGoogleSignIn, std::optional<bool> forceCodeForRefreshToken, std::optional<std::string> hostedDomain, std::optional<std::string> openIDRealm, std::optional<bool> requestVerifiedPhoneNumber, std::optional<std::string> tenant, std::optional<MicrosoftPrompt> prompt): scopes(scopes), loginHint(loginHint), nonce(nonce), useOneTap(useOneTap), useSheet(useSheet), forceAccountPicker(forceAccountPicker), filterByAuthorizedAccounts(filterByAuthorizedAccounts), useLegacyGoogleSignIn(useLegacyGoogleSignIn), forceCodeForRefreshToken(forceCodeForRefreshToken), hostedDomain(hostedDomain), openIDRealm(openIDRealm), requestVerifiedPhoneNumber(requestVerifiedPhoneNumber), tenant(tenant), prompt(prompt) {}
 
   public:
     friend bool operator==(const LoginOptions& lhs, const LoginOptions& rhs) = default;
@@ -72,10 +78,16 @@ namespace margelo::nitro {
       return margelo::nitro::NitroAuth::LoginOptions(
         JSIConverter<std::optional<std::vector<std::string>>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "scopes"))),
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "loginHint"))),
+        JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "nonce"))),
         JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useOneTap"))),
         JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useSheet"))),
         JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "forceAccountPicker"))),
+        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "filterByAuthorizedAccounts"))),
         JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useLegacyGoogleSignIn"))),
+        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "forceCodeForRefreshToken"))),
+        JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "hostedDomain"))),
+        JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "openIDRealm"))),
+        JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "requestVerifiedPhoneNumber"))),
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "tenant"))),
         JSIConverter<std::optional<margelo::nitro::NitroAuth::MicrosoftPrompt>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "prompt")))
       );
@@ -84,10 +96,16 @@ namespace margelo::nitro {
       jsi::Object obj(runtime);
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "scopes"), JSIConverter<std::optional<std::vector<std::string>>>::toJSI(runtime, arg.scopes));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "loginHint"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.loginHint));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "nonce"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.nonce));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "useOneTap"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.useOneTap));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "useSheet"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.useSheet));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "forceAccountPicker"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.forceAccountPicker));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "filterByAuthorizedAccounts"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.filterByAuthorizedAccounts));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "useLegacyGoogleSignIn"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.useLegacyGoogleSignIn));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "forceCodeForRefreshToken"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.forceCodeForRefreshToken));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "hostedDomain"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.hostedDomain));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "openIDRealm"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.openIDRealm));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "requestVerifiedPhoneNumber"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.requestVerifiedPhoneNumber));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "tenant"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.tenant));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "prompt"), JSIConverter<std::optional<margelo::nitro::NitroAuth::MicrosoftPrompt>>::toJSI(runtime, arg.prompt));
       return obj;
@@ -102,10 +120,16 @@ namespace margelo::nitro {
       }
       if (!JSIConverter<std::optional<std::vector<std::string>>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "scopes")))) return false;
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "loginHint")))) return false;
+      if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "nonce")))) return false;
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useOneTap")))) return false;
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useSheet")))) return false;
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "forceAccountPicker")))) return false;
+      if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "filterByAuthorizedAccounts")))) return false;
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "useLegacyGoogleSignIn")))) return false;
+      if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "forceCodeForRefreshToken")))) return false;
+      if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "hostedDomain")))) return false;
+      if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "openIDRealm")))) return false;
+      if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "requestVerifiedPhoneNumber")))) return false;
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "tenant")))) return false;
       if (!JSIConverter<std::optional<margelo::nitro::NitroAuth::MicrosoftPrompt>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "prompt")))) return false;
       return true;
