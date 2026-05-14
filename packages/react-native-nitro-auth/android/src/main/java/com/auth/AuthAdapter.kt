@@ -1,10 +1,4 @@
 @file:Suppress("DEPRECATION")
-// The legacy com.google.android.gms.auth.api.signin.* API is used intentionally for:
-//   • getLastSignedInAccount  – persists session across app restarts via GMS store; no drop-in replacement
-//   • silentSignIn            – AuthorizationClient.authorize() still requires an Activity for interactive fallback
-//   • revokeAccess            – no equivalent in Credential Manager or Identity.getAuthorizationClient()
-// All modern entry-points use Credential Manager (One-Tap) unless the caller explicitly needs
-// Android's account chooser semantics, which still require the legacy Google Sign-In flow.
 
 package com.auth
 
@@ -33,6 +27,7 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -71,6 +66,8 @@ object AuthAdapter {
     private var pendingMicrosoftB2cDomain: String? = null
     @Volatile
     private var microsoftAuthInProgress = false
+    @Volatile
+    private var hasLegacyGoogleSession = false
 
     @Volatile
     private var inMemoryMicrosoftRefreshToken: String? = null
@@ -78,7 +75,6 @@ object AuthAdapter {
     private var inMemoryMicrosoftScopes: List<String> =
         defaultMicrosoftScopes
 
-    // Module-scoped coroutine scope — cancelled on module invalidation via dispose().
     private var moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @JvmStatic
@@ -96,6 +92,9 @@ object AuthAdapter {
         idToken: String?,
         accessToken: String?,
         serverAuthCode: String?,
+        userId: String?,
+        phoneNumber: String?,
+        hostedDomain: String?,
         scopes: Array<String>?,
         expirationTime: Long?
     )
@@ -131,9 +130,6 @@ object AuthAdapter {
         }
 
         try {
-            // The native library is already loaded by NitroAuthOnLoad.initializeNative()
-            // before this method is called from NitroAuthModule. We only need to wire
-            // the Android context so that native methods can call back into the JVM.
             nativeInitialize(applicationContext)
             isInitialized = true
         } catch (e: Exception) {
@@ -159,10 +155,11 @@ object AuthAdapter {
 
     fun onSignInSuccess(account: GoogleSignInAccount, scopes: List<String>, origin: String = "login") {
         appContext ?: return
+        hasLegacyGoogleSession = true
         val expirationTime = getJwtExpirationTimeMs(account.idToken)
         nativeOnLoginSuccess(origin, "google", account.email, account.displayName,
             account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
-            scopes.toTypedArray(), expirationTime)
+            account.id, null, null, scopes.toTypedArray(), expirationTime)
     }
 
     fun onSignInError(errorCode: Int, message: String?, origin: String = "login") {
@@ -182,11 +179,17 @@ object AuthAdapter {
         googleClientId: String?,
         scopes: Array<String>?,
         loginHint: String?,
+        nonce: String?,
         useOneTap: Boolean,
         forceAccountPicker: Boolean = false,
         useLegacyGoogleSignIn: Boolean = false,
+        filterByAuthorizedAccounts: Boolean = false,
+        forceCodeForRefreshToken: Boolean = false,
+        requestVerifiedPhoneNumber: Boolean = false,
         tenant: String? = null,
-        prompt: String? = null
+        prompt: String? = null,
+        hostedDomain: String? = null,
+        openIDRealm: String? = null
     ) {
         if (provider == "apple") {
             nativeOnLoginError("login", "unsupported_provider", "Apple Sign-In is not supported on Android.")
@@ -212,10 +215,10 @@ object AuthAdapter {
         pendingScopes = requestedScopes
 
         if (useLegacyGoogleSignIn || forceAccountPicker) {
-            loginLegacy(context, clientId, requestedScopes, loginHint, forceAccountPicker, "login")
+            loginLegacy(context, clientId, requestedScopes, loginHint, forceAccountPicker, forceCodeForRefreshToken, hostedDomain, "login")
             return
         }
-        loginOneTap(context, clientId, requestedScopes, loginHint, forceAccountPicker, useOneTap, "login")
+        loginOneTap(context, clientId, requestedScopes, loginHint, nonce, forceAccountPicker, useOneTap, filterByAuthorizedAccounts, requestVerifiedPhoneNumber, hostedDomain, "login")
     }
 
     private fun loginMicrosoft(context: Context, scopes: Array<String>?, loginHint: String?, tenant: String?, prompt: String?, origin: String = "login") {
@@ -377,6 +380,8 @@ object AuthAdapter {
                 } finally {
                     connection.disconnect()
                 }
+            } catch (e: CancellationException) {
+                clearPkceState()
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     clearPkceState()
@@ -432,12 +437,36 @@ object AuthAdapter {
             clearPkceState()
             nativeOnLoginSuccess(
                 origin, "microsoft", email, name, null, idToken, accessToken, null,
-                grantedScopes.toTypedArray(), expirationTime
+                null, null, null, grantedScopes.toTypedArray(), expirationTime
             )
         } catch (e: Exception) {
             clearPkceState()
             nativeOnLoginError(origin, "parse_error", e.message)
         }
+    }
+
+    private fun clearCredentialManagerState(context: Context) {
+        moduleScope.launch {
+            try {
+                CredentialManager.create(context).clearCredentialState(ClearCredentialStateRequest())
+            } catch (e: Exception) {
+                Log.w(TAG, "clearCredentialState failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun getLegacyGoogleClient(context: Context): GoogleSignInClient? {
+        val clientId = getClientIdFromResources(context) ?: return null
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(clientId)
+            .requestServerAuthCode(clientId)
+            .requestEmail()
+            .build()
+        return GoogleSignIn.getClient(context, gso)
+    }
+
+    private fun hasLegacyGoogleAccount(context: Context): Boolean {
+        return hasLegacyGoogleSession || GoogleSignIn.getLastSignedInAccount(context) != null
     }
 
     @Synchronized
@@ -487,6 +516,11 @@ object AuthAdapter {
         return expSeconds * 1000
     }
 
+    private fun hostedDomainFromEmail(email: String?): String? {
+        val parts = email?.split("@", limit = 2) ?: return null
+        return parts.getOrNull(1)
+    }
+
     private fun getMicrosoftClientIdFromResources(context: Context): String? {
         val resId = context.resources.getIdentifier("nitro_auth_microsoft_client_id", "string", context.packageName)
         return if (resId != 0) context.getString(resId) else null
@@ -518,21 +552,30 @@ object AuthAdapter {
         clientId: String,
         scopes: List<String>,
         loginHint: String?,
+        nonce: String?,
         forceAccountPicker: Boolean,
         useOneTap: Boolean,
+        filterByAuthorizedAccounts: Boolean,
+        requestVerifiedPhoneNumber: Boolean,
+        hostedDomain: String?,
         origin: String = "login"
     ) {
         val activity = currentActivity ?: context as? Activity
         if (activity == null) {
             Log.w(TAG, "No Activity context available for One-Tap, falling back to legacy")
-            return loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, origin)
+            return loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, false, hostedDomain, origin)
         }
 
         val credentialManager = CredentialManager.create(activity)
         val googleIdOption = GetGoogleIdOption.Builder()
-            .setFilterByAuthorizedAccounts(false)
+            .setFilterByAuthorizedAccounts(filterByAuthorizedAccounts)
             .setServerClientId(clientId)
             .setAutoSelectEnabled(useOneTap && !forceAccountPicker)
+            .setRequestVerifiedPhoneNumber(requestVerifiedPhoneNumber)
+            .apply {
+                if (nonce != null) setNonce(nonce)
+                if (hostedDomain != null) setHostedDomainFilter(hostedDomain)
+            }
             .build()
 
         val request = GetCredentialRequest.Builder()
@@ -543,9 +586,11 @@ object AuthAdapter {
             try {
                 val result = credentialManager.getCredential(context = activity, request = request)
                 handleCredentialResponse(result, scopes, origin)
+            } catch (e: CancellationException) {
+                return@launch
             } catch (e: Exception) {
                 Log.w(TAG, "One-Tap failed, falling back to legacy: ${e.message}")
-                loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, origin)
+                loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, false, hostedDomain, origin)
             }
         }
     }
@@ -556,11 +601,13 @@ object AuthAdapter {
         scopes: List<String>,
         loginHint: String?,
         forceAccountPicker: Boolean,
+        forceCodeForRefreshToken: Boolean,
+        hostedDomain: String?,
         origin: String = "login"
     ) {
         val ctx = appContext ?: context.applicationContext
         val intent = GoogleSignInActivity.createIntent(
-            ctx, clientId, scopes.toTypedArray(), loginHint, forceAccountPicker, origin
+            ctx, clientId, scopes.toTypedArray(), loginHint, forceAccountPicker, forceCodeForRefreshToken, hostedDomain, origin
         )
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         ctx.startActivity(intent)
@@ -585,11 +632,14 @@ object AuthAdapter {
             val expirationTime = getJwtExpirationTimeMs(googleIdTokenCredential.idToken)
             nativeOnLoginSuccess(
                 origin, "google",
-                googleIdTokenCredential.id,
+                googleIdTokenCredential.email,
                 googleIdTokenCredential.displayName,
                 googleIdTokenCredential.profilePictureUri?.toString(),
                 googleIdTokenCredential.idToken,
                 null, null,
+                googleIdTokenCredential.id,
+                googleIdTokenCredential.phoneNumber,
+                hostedDomainFromEmail(googleIdTokenCredential.email),
                 scopes.toTypedArray(),
                 expirationTime
             )
@@ -599,8 +649,6 @@ object AuthAdapter {
         }
     }
 
-    // requestScopesSync uses the legacy GoogleSignIn API to check the last signed-in account
-    // because Credential Manager has no equivalent for querying existing account state.
     @JvmStatic
     fun requestScopesSync(context: Context, scopes: Array<String>) {
         val ctx = appContext ?: context.applicationContext
@@ -631,8 +679,6 @@ object AuthAdapter {
         nativeOnLoginError("scopes", "not_signed_in", "No user logged in")
     }
 
-    // refreshTokenSync uses the legacy silentSignIn because AuthorizationClient (the recommended
-    // replacement) requires an Activity context which is not always available at refresh time.
     @JvmStatic
     fun refreshTokenSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
@@ -676,27 +722,14 @@ object AuthAdapter {
             .isGooglePlayServicesAvailable(ctx) == ConnectionResult.SUCCESS
     }
 
-    // revokeAccessSync uses the legacy GoogleSignIn client because Credential Manager has no
-    // equivalent revoke API for the Google ID token flow.
     @JvmStatic
     fun logoutSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
         clearPkceState()
-        // Clear Credential Manager state (covers One-Tap / passkey credentials).
-        moduleScope.launch {
-            try {
-                CredentialManager.create(ctx).clearCredentialState(ClearCredentialStateRequest())
-            } catch (e: Exception) {
-                Log.w(TAG, "clearCredentialState failed: ${e.message}")
-            }
+        if (hasLegacyGoogleAccount(ctx)) {
+            getLegacyGoogleClient(ctx)?.signOut()
         }
-        // Also clear legacy GMS sign-in state so getLastSignedInAccount returns null.
-        val clientId = getClientIdFromResources(ctx)
-        if (clientId != null) {
-            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestIdToken(clientId).requestEmail().build()
-            GoogleSignIn.getClient(ctx, gso).signOut()
-        }
+        hasLegacyGoogleSession = false
         inMemoryMicrosoftRefreshToken = null
         inMemoryMicrosoftScopes = defaultMicrosoftScopes
     }
@@ -705,12 +738,11 @@ object AuthAdapter {
     fun revokeAccessSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
         clearPkceState()
-        val clientId = getClientIdFromResources(ctx)
-        if (clientId != null) {
-            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestIdToken(clientId).requestServerAuthCode(clientId).requestEmail().build()
-            GoogleSignIn.getClient(ctx, gso).revokeAccess()
+        clearCredentialManagerState(ctx)
+        if (hasLegacyGoogleAccount(ctx)) {
+            getLegacyGoogleClient(ctx)?.revokeAccess()
         }
+        hasLegacyGoogleSession = false
         inMemoryMicrosoftRefreshToken = null
         inMemoryMicrosoftScopes = defaultMicrosoftScopes
     }
@@ -726,10 +758,11 @@ object AuthAdapter {
         @Suppress("DEPRECATION")
         val account = GoogleSignIn.getLastSignedInAccount(ctx)
         if (account != null) {
+            hasLegacyGoogleSession = true
             val expirationTime = getJwtExpirationTimeMs(account.idToken)
             nativeOnLoginSuccess("silent", "google", account.email, account.displayName,
                 account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
-                account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), expirationTime)
+                account.id, null, null, account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), expirationTime)
         } else {
             val refreshToken = inMemoryMicrosoftRefreshToken
             if (refreshToken != null) {
@@ -795,10 +828,10 @@ object AuthAdapter {
                             nativeOnLoginSuccess("silent", "microsoft",
                                 claims["preferred_username"] ?: claims["email"],
                                 claims["name"], null,
-                                newIdToken, newAccessToken, null, effectiveScopes.toTypedArray(), expirationTime)
+                                newIdToken, newAccessToken, null, null, null, null, effectiveScopes.toTypedArray(), expirationTime)
                         } else {
                             if (responseCode in 400..499) {
-                                inMemoryMicrosoftRefreshToken = null  // Token is invalid, clear it
+                                inMemoryMicrosoftRefreshToken = null
                             }
                             val mappedError = try {
                                 val json = org.json.JSONObject(responseBody)
@@ -814,6 +847,8 @@ object AuthAdapter {
                 } finally {
                     connection.disconnect()
                 }
+            } catch (e: CancellationException) {
+                nativeOnLoginError("silent", "cancelled", e.message)
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     nativeOnLoginError("silent", "network_error", e.message)
@@ -897,6 +932,8 @@ object AuthAdapter {
                 } finally {
                     connection.disconnect()
                 }
+            } catch (e: CancellationException) {
+                nativeOnRefreshError("cancelled", e.message)
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     nativeOnRefreshError("network_error", e.message)

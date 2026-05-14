@@ -1,4 +1,5 @@
 export * from "./Auth.nitro";
+export * from "./provider-options";
 export * from "./ui/social-button";
 export { useAuth, type UseAuthReturn } from "./use-auth";
 export { AuthService } from "./service";

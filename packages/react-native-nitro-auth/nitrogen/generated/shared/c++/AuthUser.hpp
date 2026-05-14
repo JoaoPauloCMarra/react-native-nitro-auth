@@ -51,13 +51,17 @@ namespace margelo::nitro::NitroAuth {
     std::optional<std::string> accessToken     SWIFT_PRIVATE;
     std::optional<std::string> refreshToken     SWIFT_PRIVATE;
     std::optional<std::string> serverAuthCode     SWIFT_PRIVATE;
+    std::optional<std::string> authorizationCode     SWIFT_PRIVATE;
+    std::optional<std::string> userId     SWIFT_PRIVATE;
+    std::optional<std::string> phoneNumber     SWIFT_PRIVATE;
+    std::optional<std::string> hostedDomain     SWIFT_PRIVATE;
     std::optional<std::vector<std::string>> scopes     SWIFT_PRIVATE;
     std::optional<double> expirationTime     SWIFT_PRIVATE;
     std::optional<std::string> underlyingError     SWIFT_PRIVATE;
 
   public:
     AuthUser() = default;
-    explicit AuthUser(AuthProvider provider, std::optional<std::string> email, std::optional<std::string> name, std::optional<std::string> photo, std::optional<std::string> idToken, std::optional<std::string> accessToken, std::optional<std::string> refreshToken, std::optional<std::string> serverAuthCode, std::optional<std::vector<std::string>> scopes, std::optional<double> expirationTime, std::optional<std::string> underlyingError): provider(provider), email(email), name(name), photo(photo), idToken(idToken), accessToken(accessToken), refreshToken(refreshToken), serverAuthCode(serverAuthCode), scopes(scopes), expirationTime(expirationTime), underlyingError(underlyingError) {}
+    explicit AuthUser(AuthProvider provider, std::optional<std::string> email, std::optional<std::string> name, std::optional<std::string> photo, std::optional<std::string> idToken, std::optional<std::string> accessToken, std::optional<std::string> refreshToken, std::optional<std::string> serverAuthCode, std::optional<std::string> authorizationCode, std::optional<std::string> userId, std::optional<std::string> phoneNumber, std::optional<std::string> hostedDomain, std::optional<std::vector<std::string>> scopes, std::optional<double> expirationTime, std::optional<std::string> underlyingError): provider(provider), email(email), name(name), photo(photo), idToken(idToken), accessToken(accessToken), refreshToken(refreshToken), serverAuthCode(serverAuthCode), authorizationCode(authorizationCode), userId(userId), phoneNumber(phoneNumber), hostedDomain(hostedDomain), scopes(scopes), expirationTime(expirationTime), underlyingError(underlyingError) {}
 
   public:
     friend bool operator==(const AuthUser& lhs, const AuthUser& rhs) = default;
@@ -81,6 +85,10 @@ namespace margelo::nitro {
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "accessToken"))),
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "refreshToken"))),
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "serverAuthCode"))),
+        JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "authorizationCode"))),
+        JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "userId"))),
+        JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "phoneNumber"))),
+        JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "hostedDomain"))),
         JSIConverter<std::optional<std::vector<std::string>>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "scopes"))),
         JSIConverter<std::optional<double>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "expirationTime"))),
         JSIConverter<std::optional<std::string>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "underlyingError")))
@@ -96,6 +104,10 @@ namespace margelo::nitro {
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "accessToken"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.accessToken));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "refreshToken"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.refreshToken));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "serverAuthCode"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.serverAuthCode));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "authorizationCode"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.authorizationCode));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "userId"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.userId));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "phoneNumber"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.phoneNumber));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "hostedDomain"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.hostedDomain));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "scopes"), JSIConverter<std::optional<std::vector<std::string>>>::toJSI(runtime, arg.scopes));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "expirationTime"), JSIConverter<std::optional<double>>::toJSI(runtime, arg.expirationTime));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "underlyingError"), JSIConverter<std::optional<std::string>>::toJSI(runtime, arg.underlyingError));
@@ -117,6 +129,10 @@ namespace margelo::nitro {
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "accessToken")))) return false;
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "refreshToken")))) return false;
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "serverAuthCode")))) return false;
+      if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "authorizationCode")))) return false;
+      if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "userId")))) return false;
+      if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "phoneNumber")))) return false;
+      if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "hostedDomain")))) return false;
       if (!JSIConverter<std::optional<std::vector<std::string>>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "scopes")))) return false;
       if (!JSIConverter<std::optional<double>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "expirationTime")))) return false;
       if (!JSIConverter<std::optional<std::string>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "underlyingError")))) return false;

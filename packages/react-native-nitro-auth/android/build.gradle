@@ -96,13 +96,13 @@ dependencies {
   implementation "com.google.android.gms:play-services-auth:21.5.1"
   
   // Activity result APIs
-  implementation "androidx.activity:activity-ktx:1.9.3"
+  implementation "androidx.activity:activity-ktx:1.13.0"
   
   // Custom Tabs (Microsoft OAuth in-app browser)
-  implementation "androidx.browser:browser:1.8.0"
+  implementation "androidx.browser:browser:1.10.0"
   
   // Google Credential Manager (One-Tap / Passkeys)
-  implementation "androidx.credentials:credentials:1.5.0"
-  implementation "androidx.credentials:credentials-play-services-auth:1.5.0"
+  implementation "androidx.credentials:credentials:1.6.0"
+  implementation "androidx.credentials:credentials-play-services-auth:1.6.0"
   implementation "com.google.android.libraries.identity.googleid:googleid:1.2.0"
 }

@@ -21,6 +21,7 @@ std::shared_ptr<Promise<AuthUser>> lastRequestScopesPromise;
 std::shared_ptr<Promise<AuthTokens>> lastRefreshPromise;
 std::shared_ptr<Promise<std::optional<AuthUser>>> lastSilentRestorePromise;
 bool didLogout = false;
+bool didRevokeAccess = false;
 
 AuthUser makeUser(
   const std::optional<std::vector<std::string>>& scopes = std::nullopt,
@@ -66,6 +67,7 @@ void resetPlatformMocks() {
   lastRefreshPromise = nullptr;
   lastSilentRestorePromise = nullptr;
   didLogout = false;
+  didRevokeAccess = false;
 }
 
 } // namespace
@@ -96,6 +98,13 @@ bool PlatformAuth::hasPlayServices() {
 
 void PlatformAuth::logout() {
   didLogout = true;
+}
+
+std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess() {
+  didRevokeAccess = true;
+  auto promise = Promise<void>::create();
+  promise->resolve();
+  return promise;
 }
 
 } // namespace margelo::nitro::NitroAuth
@@ -176,13 +185,44 @@ void testLoginStartInvalidatesSilentRestore() {
   auto restorePromise = auth->silentRestore();
   auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
 
+  assert(restorePromise->isRejected());
   lastSilentRestorePromise->resolve(makeUser(std::vector<std::string>{"profile"}, "restored"));
-  assert(restorePromise->isResolved());
   assert(!auth->getCurrentUser().has_value());
 
   lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "interactive"));
   assert(loginPromise->isResolved());
   assert(auth->getCurrentUser()->accessToken == "interactive");
+}
+
+void testPendingLoginCancelledWhenSessionChanges() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+
+  auto firstLogin = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  auto secondLogin = auth->login(AuthProvider::GOOGLE, std::nullopt);
+
+  assert(firstLogin->isRejected());
+
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "second"));
+  assert(secondLogin->isResolved());
+  assert(auth->getCurrentUser()->accessToken == "second");
+}
+
+void testRevokeAccessCancelsPendingOperationsAndClearsSession() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+
+  auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  auto revokePromise = auth->revokeAccess();
+
+  assert(loginPromise->isRejected());
+  assert(revokePromise->isResolved());
+  assert(didRevokeAccess);
+  assert(!auth->getCurrentUser().has_value());
+  assert(auth->getGrantedScopes().empty());
+
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "stale"));
+  assert(!auth->getCurrentUser().has_value());
 }
 
 void testLogoutCancelsRefreshAndClearsSession() {
@@ -375,6 +415,8 @@ int main() {
   testListenerExceptionsDoNotBlockStateUpdates();
   testRefreshCancelledWhenSessionChanges();
   testLoginStartInvalidatesSilentRestore();
+  testPendingLoginCancelledWhenSessionChanges();
+  testRevokeAccessCancelsPendingOperationsAndClearsSession();
   testLogoutCancelsRefreshAndClearsSession();
   testSynchronousAccessorsAndListenerUnsubscribe();
   testSilentRestoreResolvedEmptyAndRejectedPaths();

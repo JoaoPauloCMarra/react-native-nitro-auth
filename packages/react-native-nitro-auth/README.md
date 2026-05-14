@@ -1,6 +1,6 @@
 # react-native-nitro-auth
 
-![npm](https://img.shields.io/badge/npm-v0.5.12-f97316?style=flat-square)
+![npm](https://img.shields.io/badge/npm-v0.6.0-f97316?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-007ec6?style=flat-square)
 ![react-native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb?style=flat-square)
 ![nitro-modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.35.0-black?style=flat-square)
@@ -232,29 +232,45 @@ tokensUnsubscribe();
 await login("google", {
   scopes: ["email", "profile"],
   loginHint: "user@example.com",
+  nonce: "opaque-nonce",
   useOneTap: true,
-  useSheet: true,
   forceAccountPicker: true,
+  filterByAuthorizedAccounts: true,
   useLegacyGoogleSignIn: true,
+  forceCodeForRefreshToken: true,
+  hostedDomain: "company.com",
+  requestVerifiedPhoneNumber: true,
+});
+
+await login("apple", {
+  scopes: ["email", "name"],
+  nonce: "opaque-nonce",
 });
 
 await login("microsoft", {
   scopes: ["openid", "profile", "email", "offline_access", "User.Read"],
+  loginHint: "user@example.com",
   tenant: "organizations",
   prompt: "select_account",
 });
 ```
 
-| Option                  | Applies to        | Notes                                                |
-| ----------------------- | ----------------- | ---------------------------------------------------- |
-| `scopes`                | Google, Microsoft | Requested OAuth scopes                               |
-| `loginHint`             | Google, Microsoft | Prefills account selection when supported            |
-| `useOneTap`             | Android Google    | Enables Credential Manager auto-select               |
-| `useSheet`              | iOS Google        | Uses native sign-in sheet behavior                   |
-| `forceAccountPicker`    | Google            | Forces account picker                                |
-| `useLegacyGoogleSignIn` | Android Google    | Uses legacy Google Sign-In path for server auth code |
-| `tenant`                | Microsoft         | Overrides configured tenant                          |
-| `prompt`                | Microsoft         | `login`, `consent`, `select_account`, or `none`      |
+| Option                       | Provider     | Platform         | Notes                                                       |
+| ---------------------------- | ------------ | ---------------- | ----------------------------------------------------------- |
+| `scopes`                     | All          | iOS, Android, web | Requested OAuth scopes. Apple is unavailable on Android.    |
+| `loginHint`                  | Google, Microsoft | iOS, Android, web | Prefills account selection when supported by the provider.  |
+| `nonce`                      | Google, Apple | iOS, Android, web | Passed to provider ID-token flows when the SDK supports it. |
+| `useOneTap`                  | Google       | Android          | Enables Credential Manager auto-select.                     |
+| `useSheet`                   | Google       | iOS              | Compatibility alias; prefer `forceAccountPicker`.           |
+| `forceAccountPicker`         | Google       | iOS, Android, web | Forces an account picker. Android uses the legacy chooser.  |
+| `filterByAuthorizedAccounts` | Google       | Android          | Limits Credential Manager to authorized accounts.           |
+| `useLegacyGoogleSignIn`      | Google       | Android          | Uses legacy Google Sign-In for server auth code flows.      |
+| `forceCodeForRefreshToken`   | Google       | Android          | Forces a new server auth code on the legacy Google path.    |
+| `hostedDomain`               | Google       | iOS, Android, web | Hints or filters Google Workspace hosted-domain accounts.   |
+| `openIDRealm`                | Google       | iOS, web         | Adds OpenID realm support where the SDK exposes it.         |
+| `requestVerifiedPhoneNumber` | Google       | Android          | Requests verified phone number through Credential Manager.  |
+| `tenant`                     | Microsoft    | iOS, Android, web | Overrides configured tenant.                                |
+| `prompt`                     | Microsoft    | iOS, Android, web | `login`, `consent`, `select_account`, or `none`.            |
 
 ## Incremental Scopes
 
@@ -357,6 +373,18 @@ Main exports:
 - `AuthUser`
 - `AuthTokens`
 - `LoginOptions`
+- `ProviderLoginOptions`
+- `LoginOptionsByProvider`
+- `GoogleLoginOptions`
+- `GoogleIOSLoginOptions`
+- `GoogleAndroidLoginOptions`
+- `GoogleWebLoginOptions`
+- `AppleLoginOptions`
+- `AppleIOSLoginOptions`
+- `AppleWebLoginOptions`
+- `MicrosoftLoginOptions`
+- `AuthLogin`
+- `TypedAuth`
 
 ### useAuth()
 
@@ -371,10 +399,52 @@ type UseAuthReturn = {
   logout(): void;
   requestScopes(scopes: string[]): Promise<void>;
   revokeScopes(scopes: string[]): Promise<void>;
+  revokeAccess(): Promise<void>;
   getAccessToken(): Promise<string | undefined>;
   refreshToken(): Promise<AuthTokens>;
   silentRestore(): Promise<void>;
 };
+```
+
+### Strong Login Types
+
+`AuthService.login()` and `useAuth().login()` infer the allowed option object from the provider argument.
+
+```ts
+await AuthService.login("apple", {
+  nonce: "opaque-nonce",
+});
+
+await AuthService.login("microsoft", {
+  tenant: "organizations",
+  prompt: "select_account",
+});
+```
+
+Provider/platform option helpers are exported for config builders and AI-generated integrations:
+
+```ts
+import type {
+  GoogleAndroidLoginOptions,
+  GoogleIOSLoginOptions,
+  MicrosoftLoginOptions,
+} from "react-native-nitro-auth";
+
+const androidGoogleOptions = {
+  useOneTap: true,
+  filterByAuthorizedAccounts: true,
+  requestVerifiedPhoneNumber: true,
+} satisfies GoogleAndroidLoginOptions;
+
+const iosGoogleOptions = {
+  hostedDomain: "company.com",
+  openIDRealm: "https://example.com",
+} satisfies GoogleIOSLoginOptions;
+
+const microsoftOptions = {
+  tenant: "organizations",
+  prompt: "select_account",
+} satisfies MicrosoftLoginOptions;
 ```
 
 ### AuthUser
@@ -389,6 +459,10 @@ type AuthUser = {
   accessToken?: string;
   refreshToken?: string;
   serverAuthCode?: string;
+  authorizationCode?: string;
+  userId?: string;
+  phoneNumber?: string;
+  hostedDomain?: string;
   scopes?: string[];
   expirationTime?: number;
   underlyingError?: string;
@@ -411,7 +485,8 @@ The demo includes:
 
 - Provider cards for Google, Apple, and Microsoft.
 - Token and scope operations.
-- Silent restore and account picker actions.
+- Silent restore, account picker, revoke access, and native logging actions.
+- Platform-gated controls for each supported Google, Apple, and Microsoft option.
 - App-owned disk snapshot example with `react-native-nitro-storage`.
 - Runtime smoke tests for the public API.
 

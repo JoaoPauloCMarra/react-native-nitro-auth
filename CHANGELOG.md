@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.0 - 2026-05-14
+
+### Added
+
+- Added provider option support for Google nonce, hosted domain, OpenID realm, authorized-account filtering, verified phone number requests, refresh-code forcing, and Android legacy Google sign-in.
+- Added Apple nonce and authorization-code/user-id result support.
+- Added Microsoft tenant and prompt option coverage across native and web flows.
+- Added `revokeAccess()` to the native/web auth API and `useAuth()` hook.
+- Added native logging hooks and platform-gated example controls for supported provider options only.
+- Added provider-specific TypeScript option types for `AuthService.login()` and `useAuth().login()`.
+
+### Changed
+
+- Updated Nitro Modules and native SDK dependencies, including Android Credential Manager, Activity, Browser, and API 36 targets.
+- Hardened native and web promise handling so stale sign-in, scope, restore, revoke, and token operations settle consistently.
+- Updated Android Google sign-out to avoid noisy Credential Manager cleanup during normal logout while preserving deep cleanup through revoke access.
+
+### Fixed
+
+- Fixed Android Metro watcher noise from transient Bun `node_modules/.old-*` directories in the example app.
+- Fixed Android Google cancellation handling so cancellations are not reported as unknown failures.
+- Fixed native session cleanup paths to reject pending work before clearing provider state.
+
 ## 0.5.12 - 2026-05-13
 
 ### Changed

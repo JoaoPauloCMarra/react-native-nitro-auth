@@ -48,8 +48,11 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     
     NSMutableArray* scopesArray = [NSMutableArray array];
     NSString* hintStr = nil;
+    NSString* nonceStr = nil;
     NSString* tenantStr = nil;
     NSString* promptStr = nil;
+    NSString* hostedDomainStr = nil;
+    NSString* openIDRealmStr = nil;
     
     if (options.has_value()) {
         if (options->scopes.has_value()) {
@@ -60,8 +63,17 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         if (options->loginHint.has_value()) {
             hintStr = [NSString stringWithUTF8String:options->loginHint->c_str()];
         }
+        if (options->nonce.has_value()) {
+            nonceStr = [NSString stringWithUTF8String:options->nonce->c_str()];
+        }
         if (options->tenant.has_value()) {
             tenantStr = [NSString stringWithUTF8String:options->tenant->c_str()];
+        }
+        if (options->hostedDomain.has_value()) {
+            hostedDomainStr = [NSString stringWithUTF8String:options->hostedDomain->c_str()];
+        }
+        if (options->openIDRealm.has_value()) {
+            openIDRealmStr = [NSString stringWithUTF8String:options->openIDRealm->c_str()];
         }
         if (options->prompt.has_value()) {
             switch (options->prompt.value()) {
@@ -83,7 +95,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         forceAccountPicker = options->forceAccountPicker.value();
     }
     
-    [AuthAdapter loginWithProvider:providerStr scopes:scopesArray loginHint:hintStr useSheet:useSheet forceAccountPicker:forceAccountPicker tenant:tenantStr prompt:promptStr completion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
+    [AuthAdapter loginWithProvider:providerStr scopes:scopesArray loginHint:hintStr nonce:nonceStr useSheet:useSheet forceAccountPicker:forceAccountPicker tenant:tenantStr prompt:promptStr hostedDomain:hostedDomainStr openIDRealm:openIDRealmStr completion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
         if (error != nil) {
             promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
             return;
@@ -101,6 +113,10 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         user.idToken = nsToStd([data objectForKey:@"idToken"]);
         if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
         if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
+        if ([data objectForKey:@"authorizationCode"]) user.authorizationCode = nsToStd([data objectForKey:@"authorizationCode"]);
+        if ([data objectForKey:@"userId"]) user.userId = nsToStd([data objectForKey:@"userId"]);
+        if ([data objectForKey:@"phoneNumber"]) user.phoneNumber = nsToStd([data objectForKey:@"phoneNumber"]);
+        if ([data objectForKey:@"hostedDomain"]) user.hostedDomain = nsToStd([data objectForKey:@"hostedDomain"]);
         if ([data objectForKey:@"scopes"]) user.scopes = nsArrayToStd([data objectForKey:@"scopes"]);
         if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
         if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
@@ -140,6 +156,10 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector
         user.idToken = nsToStd([data objectForKey:@"idToken"]);
         if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
         if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
+        if ([data objectForKey:@"authorizationCode"]) user.authorizationCode = nsToStd([data objectForKey:@"authorizationCode"]);
+        if ([data objectForKey:@"userId"]) user.userId = nsToStd([data objectForKey:@"userId"]);
+        if ([data objectForKey:@"phoneNumber"]) user.phoneNumber = nsToStd([data objectForKey:@"phoneNumber"]);
+        if ([data objectForKey:@"hostedDomain"]) user.hostedDomain = nsToStd([data objectForKey:@"hostedDomain"]);
         if ([data objectForKey:@"scopes"]) user.scopes = nsArrayToStd([data objectForKey:@"scopes"]);
         if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
         if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
@@ -186,6 +206,10 @@ std::shared_ptr<Promise<std::optional<AuthUser>>> PlatformAuth::silentRestore() 
         user.idToken = nsToStd([data objectForKey:@"idToken"]);
         if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
         if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
+        if ([data objectForKey:@"authorizationCode"]) user.authorizationCode = nsToStd([data objectForKey:@"authorizationCode"]);
+        if ([data objectForKey:@"userId"]) user.userId = nsToStd([data objectForKey:@"userId"]);
+        if ([data objectForKey:@"phoneNumber"]) user.phoneNumber = nsToStd([data objectForKey:@"phoneNumber"]);
+        if ([data objectForKey:@"hostedDomain"]) user.hostedDomain = nsToStd([data objectForKey:@"hostedDomain"]);
         if ([data objectForKey:@"scopes"]) user.scopes = nsArrayToStd([data objectForKey:@"scopes"]);
         if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
         if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
@@ -200,6 +224,18 @@ bool PlatformAuth::hasPlayServices() {
 
 void PlatformAuth::logout() {
     [AuthAdapter logout];
+}
+
+std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess() {
+    auto promise = Promise<void>::create();
+    [AuthAdapter revokeAccessWithCompletion:^(NSString* _Nullable error) {
+        if (error != nil) {
+            promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
+            return;
+        }
+        promise->resolve();
+    }];
+    return promise;
 }
 
 } // namespace margelo::nitro::NitroAuth

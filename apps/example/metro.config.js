@@ -24,4 +24,6 @@ config.resolver.extraNodeModules = {
   ),
 };
 
+config.resolver.blockList = /\/node_modules\/\.old-[^/]+(?:\/.*)?$/;
+
 module.exports = config;

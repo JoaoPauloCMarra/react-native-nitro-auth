@@ -54,6 +54,7 @@ type WebStorageDriver = {
 type AppleAuthResponse = {
   authorization: {
     id_token: string;
+    code?: string;
   };
   user?: {
     email?: string;
@@ -222,6 +223,8 @@ class AuthWeb implements Auth {
   private _refreshPromise: Promise<AuthTokens> | undefined;
   private _pendingGoogleNonce: string | undefined;
   private _loginInFlight: boolean = false;
+  private _sessionGeneration = 0;
+  private _disposed = false;
 
   constructor() {
     this._config = getConfig();
@@ -379,6 +382,7 @@ class AuthWeb implements Auth {
     delete safeUser.accessToken;
     delete safeUser.idToken;
     delete safeUser.serverAuthCode;
+    delete safeUser.authorizationCode;
     return safeUser;
   }
 
@@ -415,6 +419,7 @@ class AuthWeb implements Auth {
           delete safeUser.accessToken;
           delete safeUser.idToken;
           delete safeUser.serverAuthCode;
+          delete safeUser.authorizationCode;
           this._currentUser = safeUser;
         }
       } catch (error) {
@@ -495,6 +500,9 @@ class AuthWeb implements Auth {
   private async runLoginOperation(
     operation: () => Promise<void>,
   ): Promise<void> {
+    if (this._disposed) {
+      throw new AuthWebError("cancelled", "Auth module disposed");
+    }
     if (this._loginInFlight) {
       throw new AuthWebError(
         "operation_in_progress",
@@ -510,14 +518,21 @@ class AuthWeb implements Auth {
     }
   }
 
+  private assertActiveGeneration(generation: number): void {
+    if (this._disposed || this._sessionGeneration !== generation) {
+      throw new AuthWebError("cancelled", "Auth operation was cancelled");
+    }
+  }
+
   async login(provider: AuthProvider, options?: LoginOptions): Promise<void> {
     const loginHint = options?.loginHint;
+    const generation = this._sessionGeneration;
     logger.log(`Starting login with ${provider}`, { scopes: options?.scopes });
     try {
       await this.runLoginOperation(async () => {
         if (provider === "google") {
           const scopes = options?.scopes ?? DEFAULT_SCOPES;
-          await this.loginGoogle(scopes, loginHint);
+          await this.loginGoogle(scopes, loginHint, options, generation);
           return;
         }
 
@@ -528,12 +543,13 @@ class AuthWeb implements Auth {
             loginHint,
             options?.tenant,
             options?.prompt,
+            generation,
           );
           return;
         }
 
         if (provider === "apple") {
-          await this.loginApple();
+          await this.loginApple(options, generation);
           return;
         }
 
@@ -563,13 +579,20 @@ class AuthWeb implements Auth {
     logger.log("Requesting additional scopes:", scopes);
     const newScopes = [...new Set([...this._grantedScopes, ...scopes])];
     try {
+      const generation = this._sessionGeneration;
       await this.runLoginOperation(async () => {
         if (provider === "google") {
-          await this.loginGoogle(newScopes);
+          await this.loginGoogle(newScopes, undefined, undefined, generation);
           return;
         }
 
-        await this.loginMicrosoft(newScopes);
+        await this.loginMicrosoft(
+          newScopes,
+          undefined,
+          undefined,
+          undefined,
+          generation,
+        );
       });
     } catch (e) {
       const error = this.mapError(e);
@@ -590,6 +613,10 @@ class AuthWeb implements Auth {
     }
   }
 
+  async revokeAccess(): Promise<void> {
+    this.logout();
+  }
+
   async getAccessToken(): Promise<string | undefined> {
     if (this._currentUser?.expirationTime) {
       const now = Date.now();
@@ -606,7 +633,7 @@ class AuthWeb implements Auth {
       return this._refreshPromise;
     }
 
-    const refreshPromise = this.performRefreshToken();
+    const refreshPromise = this.performRefreshToken(this._sessionGeneration);
     this._refreshPromise = refreshPromise;
     try {
       return await refreshPromise;
@@ -617,7 +644,7 @@ class AuthWeb implements Auth {
     }
   }
 
-  private async performRefreshToken(): Promise<AuthTokens> {
+  private async performRefreshToken(generation: number): Promise<AuthTokens> {
     if (!this._currentUser) {
       throw new Error("No user logged in");
     }
@@ -656,6 +683,7 @@ class AuthWeb implements Auth {
       });
 
       const json = await this.parseResponseObject(response);
+      this.assertActiveGeneration(generation);
       if (!response.ok) {
         throw new AuthWebError(
           "refresh_failed",
@@ -675,15 +703,19 @@ class AuthWeb implements Auth {
 
       const expirationTime = this.getExpirationTime(json["expires_in"]);
 
-      const effectiveIdToken = idToken ?? this._currentUser.idToken;
+      const currentUser = this._currentUser;
+      if (!currentUser) {
+        throw new AuthWebError("cancelled", "Auth operation was cancelled");
+      }
+      const effectiveIdToken = idToken ?? currentUser.idToken;
       const claims = effectiveIdToken
         ? this.decodeMicrosoftJwt(effectiveIdToken)
         : {};
       const user: AuthUser = {
-        ...this._currentUser,
+        ...currentUser,
         idToken: effectiveIdToken,
         accessToken: accessToken ?? undefined,
-        refreshToken: newRefreshToken ?? this._currentUser.refreshToken,
+        refreshToken: newRefreshToken ?? currentUser.refreshToken,
         expirationTime,
         ...claims,
       };
@@ -706,9 +738,15 @@ class AuthWeb implements Auth {
     }
 
     logger.log("Refreshing tokens...");
-    await this.loginGoogle(
-      this._grantedScopes.length > 0 ? this._grantedScopes : DEFAULT_SCOPES,
+    await this.runLoginOperation(() =>
+      this.loginGoogle(
+        this._grantedScopes.length > 0 ? this._grantedScopes : DEFAULT_SCOPES,
+        undefined,
+        undefined,
+        generation,
+      ),
     );
+    this.assertActiveGeneration(generation);
     const tokens: AuthTokens = {
       accessToken: this._currentUser.accessToken,
       idToken: this._currentUser.idToken,
@@ -942,6 +980,8 @@ class AuthWeb implements Auth {
   private async loginGoogle(
     scopes: string[],
     loginHint?: string,
+    options?: LoginOptions,
+    generation?: number,
   ): Promise<void> {
     const clientId = this._config.googleWebClientId;
 
@@ -951,7 +991,7 @@ class AuthWeb implements Auth {
       );
     }
 
-    const nonce = crypto.randomUUID();
+    const nonce = options?.nonce ?? crypto.randomUUID();
     this._pendingGoogleNonce = nonce;
     return new Promise((resolve, reject) => {
       const redirectUri = window.location.origin;
@@ -962,10 +1002,19 @@ class AuthWeb implements Auth {
       authUrl.searchParams.set("scope", scopes.join(" "));
       authUrl.searchParams.set("nonce", nonce);
       authUrl.searchParams.set("access_type", "offline");
-      authUrl.searchParams.set("prompt", "consent");
+      authUrl.searchParams.set(
+        "prompt",
+        options?.forceAccountPicker ? "select_account consent" : "consent",
+      );
 
       if (loginHint) {
         authUrl.searchParams.set("login_hint", loginHint);
+      }
+      if (options?.hostedDomain) {
+        authUrl.searchParams.set("hd", options.hostedDomain);
+      }
+      if (options?.openIDRealm) {
+        authUrl.searchParams.set("openid.realm", options.openIDRealm);
       }
 
       const width = 500;
@@ -1015,6 +1064,10 @@ class AuthWeb implements Auth {
         }
         this._pendingGoogleNonce = undefined;
 
+        if (generation !== undefined) {
+          this.assertActiveGeneration(generation);
+        }
+
         this._grantedScopes = scopes;
         this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
 
@@ -1023,6 +1076,8 @@ class AuthWeb implements Auth {
           idToken,
           accessToken: accessToken ?? undefined,
           serverAuthCode: code ?? undefined,
+          userId: getOptionalString(decoded, "sub"),
+          hostedDomain: getOptionalString(decoded, "hd"),
           scopes,
           expirationTime: this.getExpirationTime(expiresIn),
           ...this.decodeGoogleJwt(idToken),
@@ -1045,6 +1100,8 @@ class AuthWeb implements Auth {
         email: getOptionalString(decoded, "email"),
         name: getOptionalString(decoded, "name"),
         photo: getOptionalString(decoded, "picture"),
+        userId: getOptionalString(decoded, "sub"),
+        hostedDomain: getOptionalString(decoded, "hd"),
       };
     } catch (error) {
       logger.warn("Failed to decode Google ID token", { error: String(error) });
@@ -1057,6 +1114,7 @@ class AuthWeb implements Auth {
     loginHint?: string,
     tenant?: string,
     prompt?: string,
+    generation?: number,
   ): Promise<void> {
     const clientId = this._config.microsoftClientId;
 
@@ -1156,6 +1214,7 @@ class AuthWeb implements Auth {
             effectiveTenant,
             nonce,
             effectiveScopes,
+            generation,
           );
         },
       )
@@ -1194,6 +1253,7 @@ class AuthWeb implements Auth {
     tenant: string,
     expectedNonce: string,
     scopes: string[],
+    generation?: number,
   ): Promise<void> {
     const authBaseUrl = this.getMicrosoftAuthBaseUrl(
       tenant,
@@ -1218,6 +1278,9 @@ class AuthWeb implements Auth {
     });
 
     const json = await this.parseResponseObject(response);
+    if (generation !== undefined) {
+      this.assertActiveGeneration(generation);
+    }
 
     if (!response.ok) {
       throw new AuthWebError(
@@ -1352,7 +1415,10 @@ class AuthWeb implements Auth {
     return _appleSdkLoadPromise;
   }
 
-  private async loginApple(): Promise<void> {
+  private async loginApple(
+    options?: LoginOptions,
+    generation?: number,
+  ): Promise<void> {
     const clientId = this._config.appleWebClientId;
 
     if (!clientId) {
@@ -1368,16 +1434,24 @@ class AuthWeb implements Auth {
 
     window.AppleID.auth.init({
       clientId,
-      scope: "name email",
+      scope: (options?.scopes?.length
+        ? options.scopes
+        : ["name", "email"]
+      ).join(" "),
       redirectURI: window.location.origin,
+      nonce: options?.nonce,
       usePopup: true,
     });
 
     try {
       const response: AppleAuthResponse = await window.AppleID.auth.signIn();
+      if (generation !== undefined) {
+        this.assertActiveGeneration(generation);
+      }
       const user: AuthUser = {
         provider: "apple",
         idToken: response.authorization.id_token,
+        authorizationCode: response.authorization.code,
         email: response.user?.email,
         name: response.user?.name
           ? `${response.user.name.firstName} ${response.user.name.lastName}`.trim()
@@ -1404,8 +1478,12 @@ class AuthWeb implements Auth {
   }
 
   logout(): void {
+    this._sessionGeneration++;
     this._currentUser = undefined;
     this._grantedScopes = [];
+    this._refreshPromise = undefined;
+    this._pendingGoogleNonce = undefined;
+    this._loginInFlight = false;
     this.removeFromCache(CACHE_KEY);
     this.removeFromCache(SCOPES_KEY);
     this.removeFromCache(MS_REFRESH_TOKEN_KEY);
@@ -1433,7 +1511,12 @@ class AuthWeb implements Auth {
   }
 
   name = "Auth";
-  dispose() {}
+  dispose() {
+    this._disposed = true;
+    this.logout();
+    this._listeners = [];
+    this._tokenListeners = [];
+  }
   equals(other: unknown) {
     return other === this;
   }
