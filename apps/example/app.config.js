@@ -30,9 +30,10 @@ const appConfig = {
             targetSdkVersion: 36,
             minSdkVersion: 24,
             buildToolsVersion: "36.0.0",
+            usePrecompiledHeaders: true,
           },
           ios: {
-            deploymentTarget: "15.1",
+            deploymentTarget: "16.4",
           },
         },
       ],
@@ -60,14 +61,11 @@ const appConfig = {
       "expo-asset",
     ],
     extra: {
-      // Web config - accessible via expo-constants
       googleWebClientId: process.env.GOOGLE_WEB_CLIENT_ID,
       appleWebClientId: process.env.APPLE_WEB_CLIENT_ID,
       microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
       microsoftTenant: process.env.MICROSOFT_TENANT,
       microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,
-      // Keep nitro-auth stateless on web (same behavior as native).
-      // Demo persistence should come from react-native-nitro-storage Disk.
       nitroAuthWebStorage: "memory",
       nitroAuthPersistTokensOnWeb: false,
     },

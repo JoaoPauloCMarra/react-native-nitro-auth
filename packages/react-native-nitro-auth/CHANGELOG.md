@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.1 - 2026-05-21
+
+### Changed
+
+- Updated the package and Expo example baseline to Expo SDK 56, React Native 0.85.3, React 19.2.3, TypeScript 6.0.3, Nitro Modules 0.35.7, and nitrogen 0.35.7.
+- Raised the iOS deployment target to 16.4 for SDK 56 compatibility.
+- Added release preflight checks for Expo dependency validation, Expo Doctor, config introspection, package build, tests, C++ tests, and publish dry run.
+- Simplified the example app by keeping provider-specific advanced options collapsed by default.
+- Updated README badges, setup commands, release checks, and typed API examples to match the 0.6.1 package state.
+- Added compile-time coverage for provider-specific login option types.
+- Added CI setup and versioned tool detection for LLVM C++ coverage tools.
+- Added a CI-safe release preflight mode that skips unauthenticated npm publish dry runs while keeping local publish dry runs intact.
+
+### Fixed
+
+- Retained the active iOS Apple Sign-In controller until completion to avoid premature native lifecycle cleanup.
+- Removed the example app's import-time native logging side effect.
+- Removed Turbo cache-output warnings from lint and typecheck tasks.
+
 ## 0.6.0 - 2026-05-14
 
 ### Added

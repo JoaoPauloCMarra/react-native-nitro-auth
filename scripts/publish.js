@@ -25,6 +25,10 @@ const dryRun = hasFlag("--dry-run");
 const skipChecks = hasFlag("--skip-checks");
 const skipGitCheck = hasFlag("--skip-git-check");
 const skipExpoDoctor = hasFlag("--skip-expo-doctor");
+const skipPublishDryRun =
+  dryRun &&
+  (hasFlag("--skip-publish-dry-run") ||
+    process.env.NITRO_AUTH_SKIP_PUBLISH_DRY_RUN === "1");
 const quick = hasFlag("--quick");
 const tag = getArgValue("--tag") || "latest";
 const otp = getArgValue("--otp");
@@ -103,10 +107,14 @@ function requireCleanGitStatus() {
     return;
   }
 
-  if (dryRun || skipGitCheck) {
-    log(
-      "  ! Git working directory has changes; continuing for validation only",
-      "yellow",
+  if (skipGitCheck) {
+    console.log("  ✓ Git working directory check skipped");
+    return;
+  }
+
+  if (dryRun) {
+    console.log(
+      "  • Git working directory has changes; continuing for validation only",
     );
     return;
   }
@@ -256,6 +264,14 @@ async function main() {
 
   log("Checking package contents...", "cyan");
   must("bun pm pack --dry-run", { cwd: packageDir, label: "Pack dry run" });
+
+  if (skipPublishDryRun) {
+    log("Publish dry run skipped by environment", "yellow");
+    console.log(
+      colors.dim(`Finished in ${formatDuration(Date.now() - startedAt)}`),
+    );
+    return;
+  }
 
   if (!dryRun) {
     const answer = await ask(

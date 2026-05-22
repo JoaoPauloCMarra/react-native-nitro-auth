@@ -28,9 +28,13 @@ const tests = [
 ];
 
 function resolveTool(name) {
-  const pathResult = spawnSync("bash", ["-lc", `command -v ${name}`], {
-    encoding: "utf8",
-  });
+  const pathResult = spawnSync(
+    "bash",
+    ["-lc", `command -v ${name} || compgen -c ${name}- | sort -V | tail -n 1`],
+    {
+      encoding: "utf8",
+    },
+  );
   const resolvedPath = pathResult.stdout.trim();
   if (pathResult.status === 0 && resolvedPath) {
     return resolvedPath;

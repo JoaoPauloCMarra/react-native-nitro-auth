@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -29,7 +29,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { SmokeTestCard } from "./SmokeTestCard";
 
-const PACKAGE_VERSION = "0.6.0";
+const PACKAGE_VERSION = "0.6.1";
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
 const PROVIDERS: readonly {
@@ -193,10 +193,24 @@ function parseScopes(value: string): string[] | undefined {
   return scopes.length > 0 ? dedupeScopes(scopes) : undefined;
 }
 
+function getScopeActionDisabledReason(auth: ReturnType<typeof useAuth>) {
+  if (auth.loading) {
+    return "Working";
+  }
+
+  if (auth.user?.provider === "apple") {
+    return "Not supported for Apple";
+  }
+
+  return "Sign in first";
+}
+
 export function FeatureDemo() {
   const auth = useAuth();
+  const actionInFlightRef = useRef(false);
   const [status, setStatus] = useState("Ready");
   const [statusTone, setStatusTone] = useState<StatusTone>("idle");
+  const [advancedOptionsVisible, setAdvancedOptionsVisible] = useState(false);
   const [useOneTap, setUseOneTap] = useState(false);
   const [useLegacyGoogleSignIn, setUseLegacyGoogleSignIn] = useState(false);
   const [forceAccountPicker, setForceAccountPicker] = useState(false);
@@ -290,6 +304,11 @@ export function FeatureDemo() {
     label: string,
     action: () => Promise<void> | void,
   ) {
+    if (actionInFlightRef.current || auth.loading) {
+      return;
+    }
+
+    actionInFlightRef.current = true;
     try {
       setNotice(label, "working");
       await action();
@@ -297,6 +316,8 @@ export function FeatureDemo() {
     } catch (e) {
       const error = AuthError.from(e);
       setNotice(getErrorStatus(error), "error");
+    } finally {
+      actionInFlightRef.current = false;
     }
   }
 
@@ -612,7 +633,7 @@ export function FeatureDemo() {
                 <SocialButton
                   provider={provider.id}
                   variant={provider.id === "apple" ? "black" : buttonVariant}
-                  disabled={Boolean(unavailableText)}
+                  disabled={Boolean(unavailableText) || auth.loading}
                   onPress={() => {
                     void loginWithProvider(provider.id);
                   }}
@@ -708,157 +729,174 @@ export function FeatureDemo() {
           <View style={styles.actionGrid}>
             <ActionButton
               label="Silent restore"
+              disabled={auth.loading}
               onPress={() => void silentRestore()}
             />
             <ActionButton
               label="Get token"
+              disabled={auth.loading}
               onPress={() => void getAccessToken()}
             />
             <ActionButton
               label="Refresh"
-              disabled={!auth.user}
-              disabledReason="Sign in first"
+              disabled={auth.loading || !auth.user}
+              disabledReason={auth.loading ? "Working" : "Sign in first"}
               onPress={() => void refreshToken()}
             />
             <ActionButton
               label={hasCalendarScope ? "Revoke scope" : "Request scope"}
-              disabled={!auth.user || auth.user.provider === "apple"}
-              disabledReason={
-                auth.user?.provider === "apple"
-                  ? "Not supported for Apple"
-                  : "Sign in first"
+              disabled={
+                auth.loading || !auth.user || auth.user.provider === "apple"
               }
+              disabledReason={getScopeActionDisabledReason(auth)}
               onPress={() => void requestOrRevokeCalendarScope()}
             />
             <ActionButton
               label="Account picker"
+              disabled={auth.loading}
               onPress={() => void openAccountPicker()}
             />
             <ActionButton
               label="Revoke access"
               tone="danger"
-              disabled={!auth.user}
-              disabledReason="Sign in first"
+              disabled={auth.loading || !auth.user}
+              disabledReason={auth.loading ? "Working" : "Sign in first"}
               onPress={() => void revokeAccess()}
             />
             <ActionButton
               label="Sign out"
               tone="danger"
-              disabled={!auth.user && !snapshot.user}
-              disabledReason="No session"
+              disabled={auth.loading || (!auth.user && !snapshot.user)}
+              disabledReason={auth.loading ? "Working" : "No session"}
               onPress={logout}
             />
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Options</Text>
-          <Text style={styles.optionGroupTitle}>Google</Text>
-          {Platform.OS === "android" ? (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Advanced Options</Text>
+            <Pressable
+              style={styles.smallButton}
+              onPress={() => {
+                setAdvancedOptionsVisible((visible) => !visible);
+              }}
+            >
+              <Text style={styles.smallButtonText}>
+                {advancedOptionsVisible ? "Hide" : "Show"}
+              </Text>
+            </Pressable>
+          </View>
+          {advancedOptionsVisible ? (
             <>
+              <Text style={styles.optionGroupTitle}>Google</Text>
+              {Platform.OS === "android" ? (
+                <>
+                  <ToggleRow
+                    label="Credential Manager auto-select"
+                    value={useOneTap}
+                    onChange={setUseOneTap}
+                  />
+                  <ToggleRow
+                    label="Filter authorized accounts"
+                    value={filterByAuthorizedAccounts}
+                    onChange={setFilterByAuthorizedAccounts}
+                  />
+                  <ToggleRow
+                    label="Request verified phone number"
+                    value={requestVerifiedPhoneNumber}
+                    onChange={setRequestVerifiedPhoneNumber}
+                  />
+                  <ToggleRow
+                    label="Legacy Google flow"
+                    value={useLegacyGoogleSignIn}
+                    onChange={setUseLegacyGoogleSignIn}
+                  />
+                  <ToggleRow
+                    label="Force refresh auth code"
+                    value={forceCodeForRefreshToken}
+                    onChange={setForceCodeForRefreshToken}
+                  />
+                </>
+              ) : null}
               <ToggleRow
-                label="Credential Manager auto-select"
-                value={useOneTap}
-                onChange={setUseOneTap}
+                label="Force account picker"
+                value={forceAccountPicker}
+                onChange={setForceAccountPicker}
+              />
+              <TextInputRow
+                label="Hosted domain"
+                placeholder="company.com"
+                value={hostedDomain}
+                onChange={setHostedDomain}
+              />
+              {Platform.OS !== "android" ? (
+                <TextInputRow
+                  label="OpenID realm"
+                  placeholder="https://example.com"
+                  value={openIDRealm}
+                  onChange={setOpenIDRealm}
+                />
+              ) : null}
+              <Text style={styles.optionGroupTitle}>
+                {Platform.OS === "android" ? "Google" : "Apple and Google"}
+              </Text>
+              <TextInputRow
+                label="Nonce"
+                placeholder="Opaque nonce"
+                value={nonce}
+                onChange={setNonce}
+              />
+              <Text style={styles.optionGroupTitle}>Google and Microsoft</Text>
+              <TextInputRow
+                label="Login hint"
+                placeholder="user@example.com"
+                value={loginHint}
+                onChange={setLoginHint}
+                keyboardType="email-address"
+              />
+              <Text style={styles.optionGroupTitle}>
+                {Platform.OS === "android"
+                  ? "Google and Microsoft"
+                  : "All supported providers"}
+              </Text>
+              <TextInputRow
+                label="Extra scopes"
+                placeholder="email profile User.Read"
+                value={extraScopes}
+                onChange={setExtraScopes}
+              />
+              <Text style={styles.optionGroupTitle}>Microsoft</Text>
+              <TextInputRow
+                label="Tenant"
+                placeholder="common, organizations, consumers, or tenant ID"
+                value={microsoftTenant}
+                onChange={setMicrosoftTenant}
+              />
+              <View style={styles.promptRow}>
+                <Text style={styles.promptLabel}>
+                  Microsoft prompt: {microsoftPrompt ?? "default"}
+                </Text>
+                <Pressable
+                  style={styles.smallButton}
+                  onPress={cycleMicrosoftPrompt}
+                >
+                  <Text style={styles.smallButtonText}>Cycle</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.optionGroupTitle}>Demo</Text>
+              <ToggleRow
+                label="Persist app snapshot"
+                value={persistSnapshot}
+                onChange={setPersistSnapshot}
               />
               <ToggleRow
-                label="Filter authorized accounts"
-                value={filterByAuthorizedAccounts}
-                onChange={setFilterByAuthorizedAccounts}
-              />
-              <ToggleRow
-                label="Request verified phone number"
-                value={requestVerifiedPhoneNumber}
-                onChange={setRequestVerifiedPhoneNumber}
-              />
-              <ToggleRow
-                label="Legacy Google flow"
-                value={useLegacyGoogleSignIn}
-                onChange={setUseLegacyGoogleSignIn}
-              />
-              <ToggleRow
-                label="Force refresh auth code"
-                value={forceCodeForRefreshToken}
-                onChange={setForceCodeForRefreshToken}
+                label="Native logging"
+                value={loggingEnabled}
+                onChange={toggleLogging}
               />
             </>
           ) : null}
-          <ToggleRow
-            label="Force account picker"
-            value={forceAccountPicker}
-            onChange={setForceAccountPicker}
-          />
-          <TextInputRow
-            label="Hosted domain"
-            placeholder="company.com"
-            value={hostedDomain}
-            onChange={setHostedDomain}
-          />
-          {Platform.OS !== "android" ? (
-            <TextInputRow
-              label="OpenID realm"
-              placeholder="https://example.com"
-              value={openIDRealm}
-              onChange={setOpenIDRealm}
-            />
-          ) : null}
-          <Text style={styles.optionGroupTitle}>
-            {Platform.OS === "android" ? "Google" : "Apple and Google"}
-          </Text>
-          <TextInputRow
-            label="Nonce"
-            placeholder="Opaque nonce"
-            value={nonce}
-            onChange={setNonce}
-          />
-          <Text style={styles.optionGroupTitle}>Google and Microsoft</Text>
-          <TextInputRow
-            label="Login hint"
-            placeholder="user@example.com"
-            value={loginHint}
-            onChange={setLoginHint}
-            keyboardType="email-address"
-          />
-          <Text style={styles.optionGroupTitle}>
-            {Platform.OS === "android"
-              ? "Google and Microsoft"
-              : "All supported providers"}
-          </Text>
-          <TextInputRow
-            label="Extra scopes"
-            placeholder="email profile User.Read"
-            value={extraScopes}
-            onChange={setExtraScopes}
-          />
-          <Text style={styles.optionGroupTitle}>Microsoft</Text>
-          <TextInputRow
-            label="Tenant"
-            placeholder="common, organizations, consumers, or tenant ID"
-            value={microsoftTenant}
-            onChange={setMicrosoftTenant}
-          />
-          <View style={styles.promptRow}>
-            <Text style={styles.promptLabel}>
-              Microsoft prompt: {microsoftPrompt ?? "default"}
-            </Text>
-            <Pressable
-              style={styles.smallButton}
-              onPress={cycleMicrosoftPrompt}
-            >
-              <Text style={styles.smallButtonText}>Cycle</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.optionGroupTitle}>Demo</Text>
-          <ToggleRow
-            label="Persist app snapshot"
-            value={persistSnapshot}
-            onChange={setPersistSnapshot}
-          />
-          <ToggleRow
-            label="Native logging"
-            value={loggingEnabled}
-            onChange={toggleLogging}
-          />
         </View>
 
         <View style={styles.section}>
