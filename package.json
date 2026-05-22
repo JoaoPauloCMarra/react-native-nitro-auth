@@ -35,7 +35,7 @@
   "scripts": {
     "setup": "bun scripts/setup.js",
     "publish-package": "bun scripts/publish.js",
-    "publish-package:dry-run": "bun scripts/publish.js --dry-run",
+    "publish-package:dry-run": "bun scripts/publish.js --dry-run --skip-checks",
     "sync-package-docs": "bun scripts/sync-package-docs.ts",
     "verify:core-versions": "bun scripts/verify-core-versions.ts",
     "build": "turbo run build",
@@ -49,15 +49,22 @@
     "test:cpp": "turbo run test:cpp --filter=react-native-nitro-auth",
     "check": "turbo run lint typecheck test",
     "check:ci": "bun run verify:core-versions && bun run codegen && bun run build && bun run check && bun run test:cpp",
+    "audit:package": "bun scripts/sync-package-docs.ts && cd packages/react-native-nitro-auth && bun pm pack --dry-run",
+    "example:lint": "bun run --cwd apps/example lint",
+    "example:typecheck": "bun run --cwd apps/example typecheck",
+    "example:check": "bun run example:lint && bun run example:typecheck && bun run example:install-check && bun run example:doctor && bun run example:config",
     "example:start": "bun run --cwd apps/example start",
     "example:ios": "bun run --cwd apps/example ios",
     "example:android": "bun run --cwd apps/example android",
     "example:prebuild": "bun run --cwd apps/example prebuild",
     "example:prebuild:clean": "bun run --cwd apps/example prebuild:clean",
+    "example:android:assemble": "bun run --cwd apps/example android:assemble",
+    "example:ios:build": "bun run --cwd apps/example ios:build",
+    "example:smoke": "bunx maestro test maestro/smoke-tests.yaml",
     "example:install-check": "bun run --cwd apps/example install-check",
     "example:doctor": "bun run --cwd apps/example doctor",
     "example:config": "bun run --cwd apps/example config:introspect",
-    "release:preflight": "bun run check:ci && bun run format:check && bun run example:install-check && bun run example:doctor && bun run example:config && bun run publish-package:dry-run"
+    "release:preflight": "bun run check:ci && bun run format:check && bun run example:check && bun run audit:package && bun run publish-package:dry-run"
   },
   "workspaces": [
     "apps/*",

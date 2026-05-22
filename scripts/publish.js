@@ -130,6 +130,14 @@ function checkRegistryVersion(packageName, version) {
   });
 
   if (result.ok && result.stdout === version) {
+    if (dryRun) {
+      log(
+        `  ! ${packageName}@${version} already exists on npm; continuing dry-run validation`,
+        "yellow",
+      );
+      return;
+    }
+
     throw new Error(`${packageName}@${version} already exists on npm.`);
   }
 

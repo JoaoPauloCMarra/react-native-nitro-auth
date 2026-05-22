@@ -4,17 +4,19 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start -d",
-    "ios": "expo run:ios",
-    "android": "expo run:android",
-    "prebuild": "expo prebuild",
-    "prebuild:clean": "expo prebuild --clean",
+    "start": "env -u NO_COLOR expo start -d",
+    "ios": "env -u NO_COLOR expo run:ios",
+    "android": "env -u NO_COLOR expo run:android",
+    "prebuild": "env -u NO_COLOR expo prebuild",
+    "prebuild:clean": "env -u NO_COLOR expo prebuild --clean",
     "format:check": "eslint .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "install-check": "expo install --check",
+    "install-check": "env -u NO_COLOR expo install --check",
     "doctor": "bunx expo-doctor@latest",
-    "config:introspect": "expo config --type introspect --json > /tmp/nitro-auth-expo-config.json"
+    "config:introspect": "env -u NO_COLOR expo config --type introspect --json > /tmp/nitro-auth-expo-config.json",
+    "android:assemble": "cd android && NODE_ENV=development ./gradlew --no-daemon -PreactNativeArchitectures=arm64-v8a :app:assembleDebug",
+    "ios:build": "cd ios && pod install && xcodebuild -workspace NitroAuth.xcworkspace -scheme NitroAuth -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build"
   },
   "dependencies": {
     "@babel/runtime": "^7.29.2",
