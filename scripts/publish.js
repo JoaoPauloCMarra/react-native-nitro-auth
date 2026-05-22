@@ -32,7 +32,6 @@ const skipPublishDryRun =
 const quick = hasFlag("--quick");
 const tag = getArgValue("--tag") || "latest";
 const otp = getArgValue("--otp");
-const dryRunPublisher = process.env.NITRO_AUTH_DRY_RUN_PUBLISHER || "bun";
 
 function hasFlag(name) {
   return args.includes(name);
@@ -184,10 +183,11 @@ function buildPublishArgs() {
 }
 
 function buildPublishCommand(publishArgs) {
-  const publishBin =
-    dryRun && dryRunPublisher === "npm" ? "npm publish" : "bun publish";
+  if (dryRun) {
+    return "bun pm pack --dry-run --ignore-scripts";
+  }
 
-  return `${publishBin} ${publishArgs.join(" ")}`;
+  return `bun publish ${publishArgs.join(" ")}`;
 }
 
 function getReleaseSteps() {
