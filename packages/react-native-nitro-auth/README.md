@@ -1,9 +1,9 @@
 # react-native-nitro-auth
 
-![npm](https://img.shields.io/badge/npm-v0.6.0-f97316?style=flat-square)
-![license](https://img.shields.io/badge/license-MIT-007ec6?style=flat-square)
-![react-native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb?style=flat-square)
-![nitro-modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.35.0-black?style=flat-square)
+[![npm](https://img.shields.io/badge/npm-v0.6.1-f97316?style=flat-square)](https://www.npmjs.com/package/react-native-nitro-auth)
+[![license](https://img.shields.io/badge/license-MIT-007ec6?style=flat-square)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/LICENSE)
+[![react-native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb?style=flat-square)](https://reactnative.dev/)
+[![nitro-modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.35.0-black?style=flat-square)](https://nitro.margelo.com/)
 
 Fast React Native authentication for Google Sign-In, Apple Sign-In, and Microsoft Entra ID, built on Nitro Modules and JSI.
 
@@ -41,6 +41,8 @@ For Expo projects, prebuild after adding the config plugin:
 bunx expo prebuild --clean
 ```
 
+The example app uses Expo Continuous Native Generation. Its `apps/example/android` and `apps/example/ios` folders are generated local artifacts and intentionally ignored by git.
+
 For bare React Native projects, install pods after installing the package:
 
 ```sh
@@ -49,13 +51,15 @@ cd ios && pod install
 
 ## Requirements
 
-| Runtime               | Requirement                              |
-| --------------------- | ---------------------------------------- |
-| React Native          | `>=0.75`                                 |
-| Nitro Modules         | `>=0.35`                                 |
-| iOS                   | 15.1+ recommended                        |
-| Android               | min SDK 24+ recommended                  |
-| Expo example baseline | Expo SDK 55, React Native 0.83, React 19 |
+| Runtime            | Requirement                              |
+| ------------------ | ---------------------------------------- |
+| React Native       | `>=0.75` peer range                      |
+| Nitro Modules      | `>=0.35` peer range                      |
+| iOS                | 16.4+ for Expo SDK 56                    |
+| Android            | min SDK 24+ recommended                  |
+| Validated baseline | Expo SDK 56, React Native 0.85, React 19 |
+
+The package keeps a wide React Native peer range for existing consumers, but this release is validated against Expo SDK 56, React Native 0.85.3, React 19.2.3, and Nitro Modules 0.35.7.
 
 ## Expo Setup
 
@@ -154,16 +158,23 @@ Use `microsoftTenant` for `common`, `organizations`, `consumers`, a tenant ID, o
 
 ```tsx
 import { Button, Text, View } from "react-native";
-import { AuthError, useAuth } from "react-native-nitro-auth";
+import {
+  AuthError,
+  type GoogleLoginOptions,
+  useAuth,
+} from "react-native-nitro-auth";
+
+const googleOptions = {
+  scopes: ["email", "profile"],
+  forceAccountPicker: true,
+} satisfies GoogleLoginOptions;
 
 export function SignInScreen() {
   const { user, loading, login, logout, getAccessToken } = useAuth();
 
   async function signInWithGoogle() {
     try {
-      await login("google", {
-        scopes: ["email", "profile"],
-      });
+      await login("google", googleOptions);
     } catch (e) {
       const error = AuthError.from(e);
       console.warn(error.code, error.underlyingMessage);
@@ -408,7 +419,7 @@ type UseAuthReturn = {
 
 ### Strong Login Types
 
-`AuthService.login()` and `useAuth().login()` infer the allowed option object from the provider argument.
+`AuthService.login()` and `useAuth().login()` infer the allowed option object from the provider argument. Provider-specific option types intentionally reject unsupported keys, so TypeScript can catch mistakes before they become native configuration bugs.
 
 ```ts
 await AuthService.login("apple", {
@@ -447,6 +458,18 @@ const microsoftOptions = {
 } satisfies MicrosoftLoginOptions;
 ```
 
+Examples of mistakes that TypeScript rejects:
+
+```ts
+await AuthService.login("apple", {
+  tenant: "organizations",
+});
+
+await AuthService.login("microsoft", {
+  nonce: "opaque-nonce",
+});
+```
+
 ### AuthUser
 
 ```ts
@@ -476,9 +499,9 @@ The example app is the fastest way to verify setup and read a complete integrati
 ```sh
 cp apps/example/.env.example apps/example/.env.local
 bun install
-bun example:prebuild:clean
-bun example:ios
-bun example:android
+bun run example:prebuild:clean
+bun run example:ios
+bun run example:android
 ```
 
 The demo includes:
@@ -514,10 +537,12 @@ The demo includes:
 ## Release Checks
 
 ```sh
-bun run publish-package:dry-run
+bun run release:preflight
 ```
 
-The publish script runs frozen install, core-version verification, codegen, build, lint, typecheck, Jest, JS coverage, C++ tests, C++ coverage, Expo Doctor, package docs sync, pack dry run, and `bun publish --dry-run --ignore-scripts`.
+The release preflight runs core-version verification, codegen, build, lint, typecheck, Jest, C++ tests, Expo dependency validation, Expo Doctor, Expo config introspection, package docs sync, pack dry run, and `bun publish --dry-run --ignore-scripts`.
+
+CI runs the same preflight with registry publish dry-run disabled because GitHub pull-request jobs do not have npm publish credentials.
 
 For faster local iteration before the full release dry run:
 

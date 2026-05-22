@@ -20,6 +20,11 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Install LLVM coverage tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm
+
       - uses: actions/cache@v5.0.5
         with:
           path: |
@@ -32,14 +37,7 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Lint
-        run: bun run lint
-
-      - name: Format check
-        run: bun run format:check
-
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Unit tests
-        run: bun run test
+      - name: Release preflight
+        env:
+          NITRO_AUTH_SKIP_PUBLISH_DRY_RUN: '1'
+        run: bun run release:preflight

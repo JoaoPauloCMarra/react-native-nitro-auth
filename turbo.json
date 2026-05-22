@@ -13,7 +13,7 @@
     "lint": {
       "dependsOn": ["^lint"],
       "inputs": ["src/**/*.{ts,tsx}", "eslint.config.*"],
-      "outputs": [".cache/eslint/.eslintcache"]
+      "outputs": []
     },
     "format:check": {
       "dependsOn": ["^format:check"],
@@ -23,7 +23,7 @@
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "inputs": ["src/**/*.{ts,tsx}", "tsconfig.json"],
-      "outputs": [".cache/tsc/**"]
+      "outputs": []
     },
     "test": {
       "dependsOn": ["^test"],

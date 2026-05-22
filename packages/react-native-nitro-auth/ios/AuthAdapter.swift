@@ -11,6 +11,7 @@ public class AuthAdapter: NSObject {
   private static var inMemoryMicrosoftScopes: [String] = defaultMicrosoftScopes
   private static var inMemoryGoogleServerAuthCode: String?
   private static var activeMicrosoftWebAuthSession: ASWebAuthenticationSession?
+  private static var activeAppleSignInController: ASAuthorizationController?
   private static let tokenStoreLock = NSLock()
   private static let interactiveAuthLock = NSLock()
   private static var interactiveAuthInProgress = false
@@ -26,6 +27,7 @@ public class AuthAdapter: NSObject {
   }
 
   private static func finishInteractiveAuth() {
+    activeAppleSignInController = nil
     interactiveAuthLock.lock()
     interactiveAuthInProgress = false
     interactiveAuthLock.unlock()
@@ -104,6 +106,7 @@ public class AuthAdapter: NSObject {
       let controller = ASAuthorizationController(authorizationRequests: [request])
       let delegate = AppleSignInDelegate(completion: complete)
       controller.delegate = delegate
+      activeAppleSignInController = controller
       objc_setAssociatedObject(controller, &delegateHandle, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
       DispatchQueue.main.async {
