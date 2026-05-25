@@ -70,6 +70,7 @@ const appConfig = {
       nitroAuthPersistTokensOnWeb: false,
     },
     experiments: {
+      reactCompiler: true,
       typedRoutes: true,
     },
   },

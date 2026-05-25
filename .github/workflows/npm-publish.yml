@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUN_VERSION: "1.3.10"
+  BUN_VERSION: "1.3.14"
   NODE_VERSION: "22"
   PACKAGE_DIR: packages/react-native-nitro-auth
 
