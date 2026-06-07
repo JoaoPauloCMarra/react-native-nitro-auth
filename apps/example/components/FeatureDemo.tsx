@@ -28,8 +28,8 @@ import {
 } from "react-native-nitro-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { SmokeTestCard } from "./SmokeTestCard";
+import { version as packageVersion } from "../../../packages/react-native-nitro-auth/package.json";
 
-const PACKAGE_VERSION = "0.6.1";
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 
 const PROVIDERS: readonly {
@@ -569,7 +569,7 @@ export function FeatureDemo() {
             bridge.
           </Text>
           <View style={styles.headerMetaRow}>
-            <Text style={styles.headerMeta}>v{PACKAGE_VERSION}</Text>
+            <Text style={styles.headerMeta}>v{packageVersion}</Text>
             <Text style={styles.headerMeta}>{Platform.OS}</Text>
           </View>
         </View>

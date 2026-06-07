@@ -4,7 +4,7 @@
 [![license](https://img.shields.io/npm/l/react-native-nitro-auth?color=007ec6)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/LICENSE)
 [![React Native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb)](https://reactnative.dev/)
 [![Expo](https://img.shields.io/badge/expo-SDK%2056-000020)](https://expo.dev/)
-[![Nitro Modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.35.0-black)](https://nitro.margelo.com/)
+[![Nitro Modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.35.7-black)](https://nitro.margelo.com/)
 
 Google Sign-In, Apple Sign-In, and Microsoft Entra ID for React Native and
 Expo, powered by Nitro Modules.
@@ -94,14 +94,21 @@ Plugin options:
 | `ios.appleSignIn`            | iOS      | Apple Sign-In entitlement.       |
 | `ios.microsoftClientId`      | iOS      | Microsoft Entra ID native login. |
 | `ios.microsoftTenant`        | iOS      | Microsoft tenant override.       |
-| `ios.microsoftB2cDomain`     | iOS      | Microsoft B2C authority.         |
+| `ios.microsoftB2cDomain`     | iOS      | Microsoft B2C hostname.          |
 | `android.googleClientId`     | Android  | Google Sign-In on Android.       |
 | `android.microsoftClientId`  | Android  | Microsoft Entra ID native login. |
 | `android.microsoftTenant`    | Android  | Microsoft tenant override.       |
-| `android.microsoftB2cDomain` | Android  | Microsoft B2C authority.         |
+| `android.microsoftB2cDomain` | Android  | Microsoft B2C hostname.          |
 
 Web reads provider client IDs from `expo.extra`; native platforms read values
 written by the plugin during prebuild.
+
+Microsoft tenant values are validated before opening the authorization URL. Use
+`common`, `organizations`, `consumers`, a tenant ID, or a tenant domain for
+standard Entra ID. For B2C, set `microsoftB2cDomain` to a hostname such as
+`contoso.b2clogin.com` and set `microsoftTenant` to a policy such as
+`B2C_1_signin`. For custom B2C domains, set `microsoftTenant` to a tenant/policy
+path such as `contoso.onmicrosoft.com/B2C_1_signin`.
 
 ## Quick Start
 

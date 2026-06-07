@@ -742,16 +742,62 @@ public class AuthAdapter: NSObject {
   
   private static func getMicrosoftAuthBaseUrl(tenant: String, b2cDomain: String?) -> String? {
     let trimmedTenant = tenant.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmedTenant.isEmpty else { return nil }
 
-    if trimmedTenant.hasPrefix("https://") {
-      guard URL(string: trimmedTenant) != nil else { return nil }
-      return trimmedTenant.hasSuffix("/") ? trimmedTenant : "\(trimmedTenant)/"
-    }
     if let domain = b2cDomain?.trimmingCharacters(in: .whitespacesAndNewlines), !domain.isEmpty {
-      return "https://\(domain)/tfp/\(trimmedTenant)/"
+      let normalizedDomain = domain.lowercased()
+      guard isValidMicrosoftDomain(normalizedDomain) else { return nil }
+      guard let b2cTenantPath = getMicrosoftB2cTenantPath(trimmedTenant, domain: normalizedDomain) else { return nil }
+      return "https://\(normalizedDomain)/\(b2cTenantPath)/"
     }
+    guard isValidMicrosoftTenant(trimmedTenant) else { return nil }
     return "https://login.microsoftonline.com/\(trimmedTenant)/"
+  }
+
+  private static func isValidMicrosoftTenant(_ value: String) -> Bool {
+    return value.range(
+      of: #"^(common|organizations|consumers|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})$"#,
+      options: .regularExpression
+    ) != nil
+  }
+
+  private static func getMicrosoftB2cTenantPath(_ value: String, domain: String) -> String? {
+    if isValidMicrosoftB2cTenantPath(value) {
+      return value
+    }
+    guard isValidMicrosoftB2cPolicy(value),
+          let tenantName = getMicrosoftB2cTenantName(domain) else { return nil }
+    return "\(tenantName).onmicrosoft.com/\(value)"
+  }
+
+  private static func getMicrosoftB2cTenantName(_ domain: String) -> String? {
+    let suffix = ".b2clogin.com"
+    guard domain.hasSuffix(suffix) else { return nil }
+    let tenantName = String(domain.dropLast(suffix.count))
+    return tenantName.range(
+      of: #"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"#,
+      options: .regularExpression
+    ) != nil ? tenantName : nil
+  }
+
+  private static func isValidMicrosoftB2cTenantPath(_ value: String) -> Bool {
+    return value.range(
+      of: #"^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"#,
+      options: .regularExpression
+    ) != nil
+  }
+
+  private static func isValidMicrosoftB2cPolicy(_ value: String) -> Bool {
+    return value.range(
+      of: #"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"#,
+      options: .regularExpression
+    ) != nil
+  }
+
+  private static func isValidMicrosoftDomain(_ value: String) -> Bool {
+    return value.range(
+      of: #"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$"#,
+      options: .regularExpression
+    ) != nil
   }
 
   @objc

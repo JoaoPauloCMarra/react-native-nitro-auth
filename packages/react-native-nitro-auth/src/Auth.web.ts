@@ -24,6 +24,16 @@ const WEB_STORAGE_MODES = new Set([
   STORAGE_MODE_LOCAL,
   STORAGE_MODE_MEMORY,
 ] as const);
+const MICROSOFT_TENANT_PATTERN =
+  /^(common|organizations|consumers|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})$/;
+const MICROSOFT_B2C_TENANT_PATH_PATTERN =
+  /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const MICROSOFT_B2C_POLICY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const MICROSOFT_B2CLOGIN_DOMAIN_SUFFIX = ".b2clogin.com";
+const MICROSOFT_B2CLOGIN_TENANT_NAME_PATTERN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+const MICROSOFT_DOMAIN_PATTERN =
+  /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
 const WEB_AUTH_ERROR_CODES: ReadonlySet<string> = new Set<AuthErrorCode>([
   "cancelled",
   "timeout",
@@ -1328,15 +1338,68 @@ class AuthWeb implements Auth {
   }
 
   private getMicrosoftAuthBaseUrl(tenant: string, b2cDomain?: string): string {
-    if (tenant.startsWith("https://")) {
-      return tenant.endsWith("/") ? tenant : `${tenant}/`;
+    const trimmedTenant = tenant.trim();
+
+    const trimmedDomain = b2cDomain?.trim().toLowerCase();
+    if (trimmedDomain) {
+      if (!MICROSOFT_DOMAIN_PATTERN.test(trimmedDomain)) {
+        throw new AuthWebError(
+          "configuration_error",
+          "Microsoft B2C domain must be a hostname.",
+        );
+      }
+      const b2cTenantPath = this.getMicrosoftB2cTenantPath(
+        trimmedTenant,
+        trimmedDomain,
+      );
+      return `https://${trimmedDomain}/${b2cTenantPath}/`;
     }
 
-    if (b2cDomain) {
-      return `https://${b2cDomain}/tfp/${tenant}/`;
-    } else {
-      return `https://login.microsoftonline.com/${tenant}/`;
+    if (!MICROSOFT_TENANT_PATTERN.test(trimmedTenant)) {
+      throw new AuthWebError(
+        "configuration_error",
+        "Microsoft tenant must be common, organizations, consumers, a tenant ID, or tenant domain.",
+      );
     }
+
+    return `https://login.microsoftonline.com/${trimmedTenant}/`;
+  }
+
+  private getMicrosoftB2cTenantPath(tenant: string, domain: string): string {
+    if (MICROSOFT_B2C_TENANT_PATH_PATTERN.test(tenant)) {
+      return tenant;
+    }
+
+    if (!MICROSOFT_B2C_POLICY_PATTERN.test(tenant)) {
+      throw new AuthWebError(
+        "configuration_error",
+        "Microsoft B2C tenant must be a policy or tenant/policy path.",
+      );
+    }
+
+    const tenantName = this.getMicrosoftB2cTenantName(domain);
+    if (tenantName === undefined) {
+      throw new AuthWebError(
+        "configuration_error",
+        "Microsoft B2C custom domains require microsoftTenant as a tenant/policy path.",
+      );
+    }
+
+    return `${tenantName}.onmicrosoft.com/${tenant}`;
+  }
+
+  private getMicrosoftB2cTenantName(domain: string): string | undefined {
+    if (!domain.endsWith(MICROSOFT_B2CLOGIN_DOMAIN_SUFFIX)) {
+      return undefined;
+    }
+
+    const tenantName = domain.slice(
+      0,
+      -MICROSOFT_B2CLOGIN_DOMAIN_SUFFIX.length,
+    );
+    return MICROSOFT_B2CLOGIN_TENANT_NAME_PATTERN.test(tenantName)
+      ? tenantName
+      : undefined;
   }
 
   private decodeMicrosoftJwt(token: string): Partial<AuthUser> {

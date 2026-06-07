@@ -18,7 +18,10 @@ type TestAuthModule = {
   currentUser: TestAuthUser | undefined;
   grantedScopes: string[];
   logout: () => void;
-  login: (provider: "google" | "apple" | "microsoft") => Promise<void>;
+  login: (
+    provider: "google" | "apple" | "microsoft",
+    options?: { tenant?: string },
+  ) => Promise<void>;
   onAuthStateChanged: (
     callback: (user: TestAuthUser | undefined) => void,
   ) => () => void;
@@ -594,6 +597,125 @@ describe("AuthModule (web)", () => {
       expect(loginPromise).rejects.toThrow("invalid_state"),
       jest.advanceTimersByTimeAsync(101),
     ]);
+  });
+
+  it("rejects absolute Microsoft tenant URLs", async () => {
+    const open = jest.fn();
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: open,
+    });
+
+    const auth = await loadAuthModule({
+      microsoftClientId: "test-client-id",
+      microsoftTenant: "https://login.evil.test/common",
+    });
+
+    await expect(auth.login("microsoft")).rejects.toThrow(
+      "configuration_error",
+    );
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid Microsoft B2C domains", async () => {
+    const open = jest.fn();
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: open,
+    });
+
+    const auth = await loadAuthModule({
+      microsoftClientId: "test-client-id",
+      microsoftTenant: "B2C_1_signin",
+      microsoftB2cDomain: "contoso.b2clogin.com/path",
+    });
+
+    await expect(auth.login("microsoft")).rejects.toThrow(
+      "configuration_error",
+    );
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("derives Microsoft B2C tenant paths from b2clogin policy values", async () => {
+    const open = jest.fn<
+      ReturnType<typeof window.open>,
+      Parameters<typeof window.open>
+    >(() => null);
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: open,
+    });
+
+    const auth = await loadAuthModule({
+      microsoftClientId: "test-client-id",
+      microsoftTenant: "B2C_1_signin",
+      microsoftB2cDomain: "contoso.b2clogin.com",
+    });
+
+    await expect(auth.login("microsoft")).rejects.toThrow("popup_blocked");
+    expect(open).toHaveBeenCalledTimes(1);
+    const [authUrl] = open.mock.calls[0] ?? [];
+    if (authUrl === undefined) {
+      throw new Error("Expected Microsoft auth URL");
+    }
+    const url = new URL(authUrl);
+    expect(url.origin).toBe("https://contoso.b2clogin.com");
+    expect(url.pathname).toBe(
+      "/contoso.onmicrosoft.com/B2C_1_signin/oauth2/v2.0/authorize",
+    );
+  });
+
+  it("allows Microsoft B2C tenant policy paths", async () => {
+    const open = jest.fn<
+      ReturnType<typeof window.open>,
+      Parameters<typeof window.open>
+    >(() => null);
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: open,
+    });
+
+    const auth = await loadAuthModule({
+      microsoftClientId: "test-client-id",
+      microsoftTenant: "contoso.onmicrosoft.com/B2C_1_signin",
+      microsoftB2cDomain: "contoso.b2clogin.com",
+    });
+
+    await expect(auth.login("microsoft")).rejects.toThrow("popup_blocked");
+    expect(open).toHaveBeenCalledTimes(1);
+    const [authUrl] = open.mock.calls[0] ?? [];
+    if (authUrl === undefined) {
+      throw new Error("Expected Microsoft auth URL");
+    }
+    const url = new URL(authUrl);
+    expect(url.origin).toBe("https://contoso.b2clogin.com");
+    expect(url.pathname).toBe(
+      "/contoso.onmicrosoft.com/B2C_1_signin/oauth2/v2.0/authorize",
+    );
+  });
+
+  it("rejects policy-only Microsoft B2C tenants on custom domains", async () => {
+    const open = jest.fn();
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: open,
+    });
+
+    const auth = await loadAuthModule({
+      microsoftClientId: "test-client-id",
+      microsoftTenant: "B2C_1_signin",
+      microsoftB2cDomain: "login.contoso.com",
+    });
+
+    await expect(auth.login("microsoft")).rejects.toThrow(
+      "configuration_error",
+    );
+    expect(open).not.toHaveBeenCalled();
   });
 
   it("normalizes Microsoft token responses without id tokens to no_id_token", async () => {
