@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.2 - 2026-06-07
+
+### Fixed
+
+- Hardened Microsoft authority URL construction to reject absolute tenant URLs and invalid B2C domains while building valid B2C tenant/policy authority paths.
+
+### Changed
+
+- Updated the Expo example SDK 56 patch dependencies so Expo Doctor passes cleanly.
+
 ## 0.6.1 - 2026-05-21
 
 ### Changed
