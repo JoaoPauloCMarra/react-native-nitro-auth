@@ -5,6 +5,7 @@
 [![React Native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb)](https://reactnative.dev/)
 [![Expo](https://img.shields.io/badge/expo-SDK%2056-000020)](https://expo.dev/)
 [![Nitro Modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.35.7-black)](https://nitro.margelo.com/)
+[![TypeScript](https://img.shields.io/badge/typescript-6.0-3178c6)](https://www.typescriptlang.org/)
 
 Google Sign-In, Apple Sign-In, and Microsoft Entra ID for React Native and
 Expo, powered by Nitro Modules.
@@ -113,15 +114,21 @@ path such as `contoso.onmicrosoft.com/B2C_1_signin`.
 ## Quick Start
 
 ```tsx
-import { AuthService, AuthProvider, useAuth } from "react-native-nitro-auth";
+import {
+  AuthService,
+  useAuth,
+  type ProviderLoginOptions,
+} from "react-native-nitro-auth";
 
 export function SignInButton() {
-  const { user, login, logout, loading, error } = useAuth();
+  const { user, login, logout } = useAuth();
 
   async function signInWithGoogle() {
-    await login(AuthProvider.Google, {
+    const options: ProviderLoginOptions<"google"> = {
       scopes: ["openid", "profile", "email"],
-    });
+    };
+
+    await login("google", options);
   }
 
   if (user) {
@@ -131,8 +138,9 @@ export function SignInButton() {
   return <Button title="Continue with Google" onPress={signInWithGoogle} />;
 }
 
-await AuthService.login(AuthProvider.Microsoft, {
+await AuthService.login("microsoft", {
   tenant: "organizations",
+  prompt: "select_account",
 });
 ```
 
@@ -155,12 +163,39 @@ Main exports:
 - `useAuth()` for React state, login, logout, refresh, and listeners.
 - `AuthService` for imperative login, refresh, logout, and user reads.
 - `SocialButton` for provider-aware UI.
-- `AuthProvider` for Google, Apple, and Microsoft provider names.
+- `AuthProvider` for the `"google"`, `"apple"`, and `"microsoft"` provider names.
 - `AuthError` and `AuthErrorCode` for deterministic failures.
 - Provider option types for strongly typed login calls.
 
-Login options include `scopes`, `loginHint`, `accountId`, `forceRefresh`,
-`nonce`, `state`, `tenant`, `prompt`, and provider-specific fields.
+Provider-aware login calls reject unsupported option fields at compile time:
+
+```ts
+import type {
+  ProviderLoginOptions,
+  MicrosoftLoginOptions,
+} from "react-native-nitro-auth";
+
+const googleOptions: ProviderLoginOptions<"google"> = {
+  scopes: ["openid", "email"],
+  hostedDomain: "company.com",
+  forceAccountPicker: true,
+};
+
+const microsoftOptions: MicrosoftLoginOptions = {
+  tenant: "organizations",
+  prompt: "select_account",
+};
+```
+
+Supported login options:
+
+| Provider  | Options                                                                                                                                                                                                 |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Google    | `scopes`, `loginHint`, `nonce`, `forceAccountPicker`, `hostedDomain`, `useSheet`, `openIDRealm`, `useOneTap`, `filterByAuthorizedAccounts`, `useLegacyGoogleSignIn`, `forceCodeForRefreshToken`, `requestVerifiedPhoneNumber` |
+| Apple     | `scopes`, `nonce`                                                                                                                                                                                       |
+| Microsoft | `scopes`, `loginHint`, `tenant`, `prompt`                                                                                                                                                               |
+
+`prompt` is typed as `"login"`, `"consent"`, `"select_account"`, or `"none"`.
 
 ## Storage Model
 
@@ -174,8 +209,10 @@ server.
 Async public APIs throw `AuthError` with a stable `code`, `provider`, `platform`,
 and `message`. Use `instanceof AuthError` when branching in UI code.
 
-Common codes include `cancelled`, `configuration_error`, `network_error`,
-`provider_unavailable`, `token_refresh_failed`, and `unknown`.
+Error codes are `cancelled`, `timeout`, `popup_blocked`, `network_error`,
+`configuration_error`, `not_signed_in`, `operation_in_progress`,
+`unsupported_provider`, `invalid_state`, `invalid_nonce`, `token_error`,
+`no_id_token`, `parse_error`, `refresh_failed`, and `unknown`.
 
 ## Platform Support
 

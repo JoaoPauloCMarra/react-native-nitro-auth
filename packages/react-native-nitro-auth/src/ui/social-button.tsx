@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import type { ViewStyle, TextStyle } from "react-native";
 import {
   Pressable,
@@ -34,7 +34,7 @@ const PROVIDER_LABELS: Record<AuthProvider, string> = {
 const PROVIDER_PRIMARY_BACKGROUND: Record<AuthProvider, string> = {
   google: "#4285F4",
   apple: "#000000",
-  microsoft: "#2F2F2F",
+  microsoft: "#1f2937",
 };
 
 const getBackgroundColor = ({
@@ -46,21 +46,29 @@ const getBackgroundColor = ({
   variant: SocialButtonVariant;
   provider: AuthProvider;
 }): string => {
-  if (disabled) return "#CCCCCC";
+  if (disabled) return "#E2E8F0";
   if (variant === "black") return "#000000";
   if (variant === "white") return "#FFFFFF";
   if (variant === "outline") return "transparent";
   return PROVIDER_PRIMARY_BACKGROUND[provider];
 };
 
-const getTextColor = (variant: SocialButtonVariant): string =>
-  variant === "white" || variant === "outline" ? "#000000" : "#FFFFFF";
+const getTextColor = ({
+  disabled,
+  variant,
+}: {
+  disabled: boolean;
+  variant: SocialButtonVariant;
+}): string => {
+  if (disabled) return "#64748B";
+  return variant === "white" || variant === "outline" ? "#111827" : "#FFFFFF";
+};
 
 async function performLogin(provider: AuthProvider): Promise<void> {
   await AuthService.login(provider);
 }
 
-export const SocialButton = ({
+export const SocialButton = React.memo(function SocialButton({
   provider,
   variant = "primary",
   borderRadius = 8,
@@ -70,10 +78,11 @@ export const SocialButton = ({
   onSuccess,
   onError,
   onPress,
-}: SocialButtonProps) => {
+}: SocialButtonProps) {
   const [loading, setLoading] = useState(false);
+  const isDisabled = loading || disabled === true;
 
-  const handleLogin = async () => {
+  const handleLogin = useCallback(async () => {
     if (loading || disabled) return;
     if (onPress) {
       onPress();
@@ -96,36 +105,41 @@ export const SocialButton = ({
     } finally {
       setLoading(false);
     }
-  };
-  const isDisabled = loading || disabled === true;
+  }, [disabled, loading, onError, onPress, onSuccess, provider]);
 
-  const getBorderColor = () => {
-    if (variant === "outline") return "#DDDDDD";
-    return "transparent";
-  };
+  const buttonStyle = useMemo(
+    () => ({
+      backgroundColor: getBackgroundColor({
+        disabled: isDisabled,
+        variant,
+        provider,
+      }),
+      borderRadius,
+      borderColor: variant === "outline" ? "#DDDDDD" : "transparent",
+      borderWidth: variant === "outline" ? 1 : 0,
+    }),
+    [borderRadius, isDisabled, provider, variant],
+  );
+
+  const textColor = getTextColor({ disabled: isDisabled, variant });
+  const labelStyle = useMemo(
+    () => [styles.text, { color: textColor }, textStyle],
+    [textColor, textStyle],
+  );
+  const appleIconStyle = useMemo(
+    () => [styles.iconText, { color: textColor }],
+    [textColor],
+  );
 
   return (
     <Pressable
-      style={[
-        styles.button,
-        {
-          backgroundColor: getBackgroundColor({
-            disabled: isDisabled,
-            variant,
-            provider,
-          }),
-          borderRadius,
-          borderColor: getBorderColor(),
-          borderWidth: variant === "outline" ? 1 : 0,
-        },
-        style,
-      ]}
+      style={[styles.button, buttonStyle, style]}
       onPress={handleLogin}
       disabled={isDisabled}
     >
       <View style={styles.content}>
         {loading ? (
-          <ActivityIndicator size="small" color={getTextColor(variant)} />
+          <ActivityIndicator size="small" color={textColor} />
         ) : (
           <>
             {provider === "google" && variant !== "primary" && (
@@ -135,11 +149,7 @@ export const SocialButton = ({
             )}
             {provider === "apple" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
-                <Text
-                  style={[styles.iconText, { color: getTextColor(variant) }]}
-                >
-                  
-                </Text>
+                <Text style={appleIconStyle}></Text>
               </View>
             )}
             {provider === "microsoft" && variant !== "primary" && (
@@ -147,9 +157,7 @@ export const SocialButton = ({
                 <Text style={styles.microsoftIconText}>⊞</Text>
               </View>
             )}
-            <Text
-              style={[styles.text, { color: getTextColor(variant) }, textStyle]}
-            >
+            <Text style={labelStyle}>
               Sign in with {PROVIDER_LABELS[provider]}
             </Text>
           </>
@@ -157,7 +165,7 @@ export const SocialButton = ({
       </View>
     </Pressable>
   );
-};
+});
 
 const styles = StyleSheet.create({
   button: {

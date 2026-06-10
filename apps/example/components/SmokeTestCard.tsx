@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -252,7 +252,7 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
   return tests;
 }
 
-export function SmokeTestCard() {
+export const SmokeTestCard = memo(function SmokeTestCard() {
   const auth = useAuth();
   const tests = useMemo(() => buildTests(auth), [auth]);
   const [results, setResults] = useState<TestResult[]>([]);
@@ -277,9 +277,18 @@ export function SmokeTestCard() {
     setRunning(false);
   }, [tests]);
 
-  const passCount = results.filter((result) => result.status === "pass").length;
-  const failCount = results.filter((result) => result.status === "fail").length;
-  const skipCount = results.filter((result) => result.status === "skip").length;
+  const counts = useMemo(
+    () =>
+      results.reduce(
+        (currentCounts, result) => ({
+          pass: currentCounts.pass + (result.status === "pass" ? 1 : 0),
+          fail: currentCounts.fail + (result.status === "fail" ? 1 : 0),
+          skip: currentCounts.skip + (result.status === "skip" ? 1 : 0),
+        }),
+        { pass: 0, fail: 0, skip: 0 },
+      ),
+    [results],
+  );
 
   return (
     <View style={styles.card}>
@@ -289,10 +298,10 @@ export function SmokeTestCard() {
           <Text style={styles.summary}>
             {results.length === 0
               ? "Run lightweight runtime checks"
-              : `${passCount}/${results.length} passed, ${skipCount} skipped`}
+              : `${counts.pass}/${results.length} passed, ${counts.skip} skipped`}
           </Text>
-          {failCount > 0 ? (
-            <Text style={styles.failSummary}>{failCount} failed</Text>
+          {counts.fail > 0 ? (
+            <Text style={styles.failSummary}>{counts.fail} failed</Text>
           ) : null}
         </View>
         <Pressable
@@ -330,7 +339,7 @@ export function SmokeTestCard() {
       ))}
     </View>
   );
-}
+});
 
 function statusTextStyle(status: TestStatus) {
   if (status === "pass") {
@@ -348,7 +357,7 @@ function statusTextStyle(status: TestStatus) {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: "#ffffff",
-    borderColor: "#dbe3ef",
+    borderColor: "#d7e0ec",
     borderRadius: 8,
     borderWidth: 1,
     padding: 14,
@@ -381,7 +390,7 @@ const styles = StyleSheet.create({
   },
   runButton: {
     alignItems: "center",
-    backgroundColor: "#2563eb",
+    backgroundColor: "#1d4ed8",
     borderRadius: 8,
     minHeight: 40,
     minWidth: 82,
@@ -389,7 +398,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   runButtonDisabled: {
-    opacity: 0.65,
+    backgroundColor: "#e2e8f0",
   },
   runButtonText: {
     color: "#ffffff",
@@ -403,7 +412,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   rowSkipped: {
-    opacity: 0.52,
+    backgroundColor: "#f8fafc",
   },
   status: {
     fontSize: 10,

@@ -1,14 +1,19 @@
 # Changelog
 
-## 0.6.2 - 2026-06-07
+## 0.6.2 - 2026-06-10
 
 ### Fixed
 
 - Hardened Microsoft authority URL construction to reject absolute tenant URLs and invalid B2C domains while building valid B2C tenant/policy authority paths.
+- Kept the Expo example iOS build on source-built Expo modules until precompiled module linking is supported by the current native dependency set.
 
 ### Changed
 
 - Updated the Expo example SDK 56 patch dependencies so Expo Doctor passes cleanly.
+- Polished the Expo example app UI for more consistent provider cards, controls, smoke-test status, and action states.
+- Reduced unnecessary example-app React work by memoizing repeated demo rows, smoke-test UI, social buttons, and stable action handlers.
+- Updated README setup, provider examples, option tables, badge links, error codes, and typed API documentation to match the current package surface.
+- Added stronger compile-time coverage for provider-specific login options used by `AuthService.login()` and `useAuth().login()`.
 
 ## 0.6.1 - 2026-05-21
 
