@@ -34,6 +34,7 @@ const appConfig = {
           },
           ios: {
             deploymentTarget: "16.4",
+            usePrecompiledModules: false,
           },
         },
       ],

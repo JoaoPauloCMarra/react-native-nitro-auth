@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -300,26 +300,26 @@ export function FeatureDemo() {
     [persistSnapshot, setSnapshot],
   );
 
-  async function runAuthAction(
-    label: string,
-    action: () => Promise<void> | void,
-  ) {
-    if (actionInFlightRef.current || auth.loading) {
-      return;
-    }
+  const runAuthAction = useCallback(
+    async (label: string, action: () => Promise<void> | void) => {
+      if (actionInFlightRef.current || auth.loading) {
+        return;
+      }
 
-    actionInFlightRef.current = true;
-    try {
-      setNotice(label, "working");
-      await action();
-      setNotice("Done", "success");
-    } catch (e) {
-      const error = AuthError.from(e);
-      setNotice(getErrorStatus(error), "error");
-    } finally {
-      actionInFlightRef.current = false;
-    }
-  }
+      actionInFlightRef.current = true;
+      try {
+        setNotice(label, "working");
+        await action();
+        setNotice("Done", "success");
+      } catch (e) {
+        const error = AuthError.from(e);
+        setNotice(getErrorStatus(error), "error");
+      } finally {
+        actionInFlightRef.current = false;
+      }
+    },
+    [auth.loading, setNotice],
+  );
 
   useEffect(() => {
     AuthService.silentRestore().catch((e: unknown) => {
@@ -385,103 +385,132 @@ export function FeatureDemo() {
     return undefined;
   }
 
-  function getGoogleLoginOptions(): ProviderLoginOptions<"google"> {
-    const scopes = parseScopes(extraScopes);
-    const normalizedLoginHint = normalizeOptionText(loginHint);
-    const normalizedNonce = normalizeOptionText(nonce);
-    const normalizedHostedDomain = normalizeOptionText(hostedDomain);
-    const normalizedOpenIDRealm = normalizeOptionText(openIDRealm);
+  const getGoogleLoginOptions =
+    useCallback((): ProviderLoginOptions<"google"> => {
+      const scopes = parseScopes(extraScopes);
+      const normalizedLoginHint = normalizeOptionText(loginHint);
+      const normalizedNonce = normalizeOptionText(nonce);
+      const normalizedHostedDomain = normalizeOptionText(hostedDomain);
+      const normalizedOpenIDRealm = normalizeOptionText(openIDRealm);
 
-    if (Platform.OS === "android") {
+      if (Platform.OS === "android") {
+        return {
+          scopes,
+          loginHint: normalizedLoginHint,
+          nonce: normalizedNonce,
+          useOneTap: !useLegacyGoogleSignIn ? useOneTap : undefined,
+          forceAccountPicker,
+          filterByAuthorizedAccounts,
+          useLegacyGoogleSignIn,
+          forceCodeForRefreshToken,
+          hostedDomain: normalizedHostedDomain,
+          requestVerifiedPhoneNumber,
+        };
+      }
+
       return {
         scopes,
         loginHint: normalizedLoginHint,
         nonce: normalizedNonce,
-        useOneTap: !useLegacyGoogleSignIn ? useOneTap : undefined,
         forceAccountPicker,
-        filterByAuthorizedAccounts,
-        useLegacyGoogleSignIn,
-        forceCodeForRefreshToken,
         hostedDomain: normalizedHostedDomain,
-        requestVerifiedPhoneNumber,
+        openIDRealm: normalizedOpenIDRealm,
       };
-    }
-
-    return {
-      scopes,
-      loginHint: normalizedLoginHint,
-      nonce: normalizedNonce,
+    }, [
+      extraScopes,
+      filterByAuthorizedAccounts,
       forceAccountPicker,
-      hostedDomain: normalizedHostedDomain,
-      openIDRealm: normalizedOpenIDRealm,
-    };
-  }
+      forceCodeForRefreshToken,
+      hostedDomain,
+      loginHint,
+      nonce,
+      openIDRealm,
+      requestVerifiedPhoneNumber,
+      useLegacyGoogleSignIn,
+      useOneTap,
+    ]);
 
-  function getAppleLoginOptions(): ProviderLoginOptions<"apple"> {
-    return {
-      scopes: parseScopes(extraScopes),
-      nonce: normalizeOptionText(nonce),
-    };
-  }
+  const getAppleLoginOptions =
+    useCallback((): ProviderLoginOptions<"apple"> => {
+      return {
+        scopes: parseScopes(extraScopes),
+        nonce: normalizeOptionText(nonce),
+      };
+    }, [extraScopes, nonce]);
 
-  function getMicrosoftLoginOptions(): ProviderLoginOptions<"microsoft"> {
-    return {
-      scopes: parseScopes(extraScopes),
-      loginHint: normalizeOptionText(loginHint),
-      tenant: normalizeOptionText(microsoftTenant),
-      prompt: microsoftPrompt,
-    };
-  }
+  const getMicrosoftLoginOptions =
+    useCallback((): ProviderLoginOptions<"microsoft"> => {
+      return {
+        scopes: parseScopes(extraScopes),
+        loginHint: normalizeOptionText(loginHint),
+        tenant: normalizeOptionText(microsoftTenant),
+        prompt: microsoftPrompt,
+      };
+    }, [extraScopes, loginHint, microsoftPrompt, microsoftTenant]);
 
-  async function runProviderLogin(provider: AuthProvider) {
-    if (provider === "google") {
-      await auth.login("google", getGoogleLoginOptions());
-      return;
-    }
+  const runProviderLogin = useCallback(
+    async (provider: AuthProvider) => {
+      if (provider === "google") {
+        await auth.login("google", getGoogleLoginOptions());
+        return;
+      }
 
-    if (provider === "apple") {
-      await auth.login("apple", getAppleLoginOptions());
-      return;
-    }
+      if (provider === "apple") {
+        await auth.login("apple", getAppleLoginOptions());
+        return;
+      }
 
-    await auth.login("microsoft", getMicrosoftLoginOptions());
-  }
+      await auth.login("microsoft", getMicrosoftLoginOptions());
+    },
+    [
+      auth,
+      getAppleLoginOptions,
+      getGoogleLoginOptions,
+      getMicrosoftLoginOptions,
+    ],
+  );
 
-  async function loginWithProvider(provider: AuthProvider) {
-    if (getProviderDisabled(provider)) {
-      setNotice("Apple Sign-In is unavailable on Android", "error");
-      return;
-    }
+  const loginWithProvider = useCallback(
+    async (provider: AuthProvider) => {
+      if (getProviderDisabled(provider)) {
+        setNotice("Apple Sign-In is unavailable on Android", "error");
+        return;
+      }
 
-    await runAuthAction(
-      `Signing in with ${formatProvider(provider)}`,
-      async () => {
-        await runProviderLogin(provider);
-        persistLatestAuthState();
-      },
-    );
-  }
+      await runAuthAction(
+        `Signing in with ${formatProvider(provider)}`,
+        async () => {
+          await runProviderLogin(provider);
+          persistLatestAuthState();
+        },
+      );
+    },
+    [persistLatestAuthState, runAuthAction, runProviderLogin, setNotice],
+  );
 
-  function cycleButtonVariant() {
+  const cycleButtonVariant = useCallback(() => {
     const variants = ["primary", "outline", "white", "black"] as const;
     const index = variants.indexOf(buttonVariant);
     setButtonVariant(variants[(index + 1) % variants.length]);
-  }
+  }, [buttonVariant]);
 
-  function cycleMicrosoftPrompt() {
+  const cycleMicrosoftPrompt = useCallback(() => {
     const index = MICROSOFT_PROMPTS.indexOf(microsoftPrompt);
     setMicrosoftPrompt(
       MICROSOFT_PROMPTS[(index + 1) % MICROSOFT_PROMPTS.length],
     );
-  }
+  }, [microsoftPrompt]);
 
-  function toggleLogging(enabled: boolean) {
-    AuthService.setLoggingEnabled(enabled);
-    setLoggingEnabled(enabled);
-    setNotice(`Logging ${enabled ? "enabled" : "disabled"}`);
-  }
+  const toggleLogging = useCallback(
+    (enabled: boolean) => {
+      AuthService.setLoggingEnabled(enabled);
+      setLoggingEnabled(enabled);
+      setNotice(`Logging ${enabled ? "enabled" : "disabled"}`);
+    },
+    [setNotice],
+  );
 
-  async function getAccessToken() {
+  const getAccessToken = useCallback(async () => {
     await runAuthAction("Reading access token", async () => {
       const accessToken = await auth.getAccessToken();
       setLastTokens((tokens) => ({ ...tokens, accessToken }));
@@ -493,17 +522,17 @@ export function FeatureDemo() {
         "success",
       );
     });
-  }
+  }, [auth, persistLatestAuthState, runAuthAction, setNotice]);
 
-  async function refreshToken() {
+  const refreshToken = useCallback(async () => {
     await runAuthAction("Refreshing tokens", async () => {
       const tokens = await auth.refreshToken();
       setLastTokens(tokens);
       persistLatestAuthState(tokens);
     });
-  }
+  }, [auth, persistLatestAuthState, runAuthAction]);
 
-  async function silentRestore() {
+  const silentRestore = useCallback(async () => {
     await runAuthAction("Restoring session", async () => {
       await auth.silentRestore();
       persistLatestAuthState();
@@ -511,9 +540,9 @@ export function FeatureDemo() {
         AuthService.currentUser ? "Session restored" : "No session found",
       );
     });
-  }
+  }, [auth, persistLatestAuthState, runAuthAction, setNotice]);
 
-  async function requestOrRevokeCalendarScope() {
+  const requestOrRevokeCalendarScope = useCallback(async () => {
     if (hasCalendarScope) {
       await runAuthAction("Revoking calendar scope", async () => {
         await auth.revokeScopes([CALENDAR_SCOPE]);
@@ -526,17 +555,17 @@ export function FeatureDemo() {
       await auth.requestScopes([CALENDAR_SCOPE]);
       persistLatestAuthState();
     });
-  }
+  }, [auth, hasCalendarScope, persistLatestAuthState, runAuthAction]);
 
-  async function revokeAccess() {
+  const revokeAccess = useCallback(async () => {
     await runAuthAction("Revoking provider access", async () => {
       await auth.revokeAccess();
       setLastTokens(undefined);
       clearSnapshot();
     });
-  }
+  }, [auth, clearSnapshot, runAuthAction]);
 
-  async function openAccountPicker() {
+  const openAccountPicker = useCallback(async () => {
     await runAuthAction("Opening account picker", async () => {
       await auth.login("google", {
         forceAccountPicker: true,
@@ -546,14 +575,14 @@ export function FeatureDemo() {
       });
       persistLatestAuthState();
     });
-  }
+  }, [auth, persistLatestAuthState, runAuthAction, useLegacyGoogleSignIn]);
 
-  function logout() {
+  const logout = useCallback(() => {
     auth.logout();
     setLastTokens(undefined);
     clearSnapshot();
     setNotice("Signed out");
-  }
+  }, [auth, clearSnapshot, setNotice]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -644,7 +673,9 @@ export function FeatureDemo() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Session</Text>
+          <Text style={[styles.sectionTitle, styles.sectionTitleStandalone]}>
+            Session
+          </Text>
           <View style={styles.sessionCard}>
             {displayUser?.photo ? (
               <Image
@@ -725,23 +756,25 @@ export function FeatureDemo() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Actions</Text>
+          <Text style={[styles.sectionTitle, styles.sectionTitleStandalone]}>
+            Actions
+          </Text>
           <View style={styles.actionGrid}>
             <ActionButton
               label="Silent restore"
               disabled={auth.loading}
-              onPress={() => void silentRestore()}
+              onPress={silentRestore}
             />
             <ActionButton
               label="Get token"
               disabled={auth.loading}
-              onPress={() => void getAccessToken()}
+              onPress={getAccessToken}
             />
             <ActionButton
               label="Refresh"
               disabled={auth.loading || !auth.user}
               disabledReason={auth.loading ? "Working" : "Sign in first"}
-              onPress={() => void refreshToken()}
+              onPress={refreshToken}
             />
             <ActionButton
               label={hasCalendarScope ? "Revoke scope" : "Request scope"}
@@ -749,19 +782,19 @@ export function FeatureDemo() {
                 auth.loading || !auth.user || auth.user.provider === "apple"
               }
               disabledReason={getScopeActionDisabledReason(auth)}
-              onPress={() => void requestOrRevokeCalendarScope()}
+              onPress={requestOrRevokeCalendarScope}
             />
             <ActionButton
               label="Account picker"
               disabled={auth.loading}
-              onPress={() => void openAccountPicker()}
+              onPress={openAccountPicker}
             />
             <ActionButton
               label="Revoke access"
               tone="danger"
               disabled={auth.loading || !auth.user}
               disabledReason={auth.loading ? "Working" : "Sign in first"}
-              onPress={() => void revokeAccess()}
+              onPress={revokeAccess}
             />
             <ActionButton
               label="Sign out"
@@ -912,16 +945,28 @@ export function FeatureDemo() {
   );
 }
 
-function MetricTile({ value, label }: { value: string; label: string }) {
+const MetricTile = memo(function MetricTile({
+  value,
+  label,
+}: {
+  value: string;
+  label: string;
+}) {
   return (
     <View style={styles.metricTile}>
       <Text style={styles.metricValue}>{value}</Text>
       <Text style={styles.metricLabel}>{label}</Text>
     </View>
   );
-}
+});
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+const DetailRow = memo(function DetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
   return (
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel}>{label}</Text>
@@ -930,9 +975,9 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       </Text>
     </View>
   );
-}
+});
 
-function ToggleRow({
+const ToggleRow = memo(function ToggleRow({
   label,
   value,
   onChange,
@@ -952,9 +997,9 @@ function ToggleRow({
       />
     </View>
   );
-}
+});
 
-function TextInputRow({
+const TextInputRow = memo(function TextInputRow({
   label,
   value,
   placeholder,
@@ -982,9 +1027,9 @@ function TextInputRow({
       />
     </View>
   );
-}
+});
 
-function ActionButton({
+const ActionButton = memo(function ActionButton({
   label,
   onPress,
   tone = "primary",
@@ -998,7 +1043,10 @@ function ActionButton({
   disabledReason?: string;
 }) {
   const buttonStyle = tone === "danger" ? styles.actionButtonDanger : null;
-  const textStyle = tone === "danger" ? styles.actionButtonTextDanger : null;
+  const textStyle = [
+    tone === "danger" ? styles.actionButtonTextDanger : null,
+    disabled ? styles.actionButtonTextDisabled : null,
+  ];
 
   return (
     <Pressable
@@ -1016,7 +1064,7 @@ function ActionButton({
       ) : null}
     </Pressable>
   );
-}
+});
 
 const switchTrackColors = {
   false: "#cbd5e1",
@@ -1052,7 +1100,7 @@ function getStatusBadgeTextStyle(tone: StatusTone) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#f3f6fb",
+    backgroundColor: "#eef3f8",
   },
   container: {
     flex: 1,
@@ -1061,10 +1109,10 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   header: {
-    backgroundColor: "#111827",
+    backgroundColor: "#0f172a",
     paddingHorizontal: 20,
     paddingTop: 24,
-    paddingBottom: 22,
+    paddingBottom: 20,
   },
   eyebrow: {
     color: "#93c5fd",
@@ -1090,8 +1138,8 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   headerMeta: {
-    backgroundColor: "#1f2937",
-    borderColor: "#374151",
+    backgroundColor: "#172033",
+    borderColor: "#334155",
     borderRadius: 8,
     borderWidth: 1,
     color: "#f9fafb",
@@ -1109,7 +1157,7 @@ const styles = StyleSheet.create({
   metricTile: {
     flex: 1,
     backgroundColor: "#ffffff",
-    borderColor: "#dbe3ef",
+    borderColor: "#d7e0ec",
     borderRadius: 8,
     borderWidth: 1,
     padding: 12,
@@ -1127,7 +1175,7 @@ const styles = StyleSheet.create({
   },
   statusPanel: {
     backgroundColor: "#ffffff",
-    borderColor: "#dbe3ef",
+    borderColor: "#d7e0ec",
     borderRadius: 8,
     borderWidth: 1,
     marginHorizontal: 16,
@@ -1191,7 +1239,7 @@ const styles = StyleSheet.create({
   },
   section: {
     marginHorizontal: 16,
-    marginTop: 18,
+    marginTop: 20,
   },
   sectionHeader: {
     alignItems: "center",
@@ -1204,11 +1252,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "800",
     letterSpacing: 0,
+  },
+  sectionTitleStandalone: {
     marginBottom: 10,
   },
   smallButton: {
-    backgroundColor: "#e0ecff",
-    borderColor: "#bfdbfe",
+    backgroundColor: "#eaf2ff",
+    borderColor: "#b8d3ff",
     borderRadius: 8,
     borderWidth: 1,
     paddingHorizontal: 12,
@@ -1221,15 +1271,15 @@ const styles = StyleSheet.create({
   },
   providerCard: {
     backgroundColor: "#ffffff",
-    borderColor: "#dbe3ef",
+    borderColor: "#d7e0ec",
     borderRadius: 8,
     borderWidth: 1,
     marginBottom: 10,
     padding: 12,
   },
   providerCardDisabled: {
-    backgroundColor: "#f1f5f9",
-    opacity: 0.58,
+    backgroundColor: "#f8fafc",
+    borderColor: "#e2e8f0",
   },
   providerCopy: {
     marginBottom: 12,
@@ -1254,7 +1304,7 @@ const styles = StyleSheet.create({
   sessionCard: {
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderColor: "#dbe3ef",
+    borderColor: "#d7e0ec",
     borderRadius: 8,
     borderWidth: 1,
     flexDirection: "row",
@@ -1297,7 +1347,7 @@ const styles = StyleSheet.create({
   },
   detailPanel: {
     backgroundColor: "#ffffff",
-    borderColor: "#dbe3ef",
+    borderColor: "#d7e0ec",
     borderRadius: 8,
     borderWidth: 1,
     marginTop: 10,
@@ -1329,7 +1379,7 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     alignItems: "center",
-    backgroundColor: "#2563eb",
+    backgroundColor: "#1d4ed8",
     borderRadius: 8,
     minHeight: 44,
     minWidth: "47%",
@@ -1337,11 +1387,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   actionButtonDanger: {
-    backgroundColor: "#dc2626",
+    backgroundColor: "#b91c1c",
   },
   actionButtonDisabled: {
-    backgroundColor: "#94a3b8",
-    opacity: 0.62,
+    backgroundColor: "#e2e8f0",
+    borderColor: "#cbd5e1",
+    borderWidth: 1,
   },
   actionButtonText: {
     color: "#ffffff",
@@ -1349,7 +1400,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   actionButtonHint: {
-    color: "#f8fafc",
+    color: "#64748b",
     fontSize: 10,
     fontWeight: "700",
     marginTop: 3,
@@ -1357,10 +1408,13 @@ const styles = StyleSheet.create({
   actionButtonTextDanger: {
     color: "#ffffff",
   },
+  actionButtonTextDisabled: {
+    color: "#64748b",
+  },
   toggleRow: {
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderColor: "#dbe3ef",
+    borderColor: "#d7e0ec",
     borderRadius: 8,
     borderWidth: 1,
     flexDirection: "row",
@@ -1386,7 +1440,7 @@ const styles = StyleSheet.create({
   },
   inputRow: {
     backgroundColor: "#ffffff",
-    borderColor: "#dbe3ef",
+    borderColor: "#d7e0ec",
     borderRadius: 8,
     borderWidth: 1,
     marginBottom: 10,
@@ -1412,7 +1466,7 @@ const styles = StyleSheet.create({
   promptRow: {
     alignItems: "center",
     backgroundColor: "#ffffff",
-    borderColor: "#dbe3ef",
+    borderColor: "#d7e0ec",
     borderRadius: 8,
     borderWidth: 1,
     flexDirection: "row",
