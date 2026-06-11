@@ -3,10 +3,29 @@
   "compilerOptions": {
     "outDir": "./lib/typescript",
     "rootDir": "./src",
-    "lib": ["ES2020", "dom"],
+    "lib": [
+      "ES2020",
+      "dom"
+    ],
     "jsx": "react-native",
-    "types": ["react-native", "jest", "node"]
+    "types": [
+      "react-native",
+      "jest",
+      "node"
+    ],
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "useUnknownInCatchVariables": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "lib", "nitrogen"]
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "lib",
+    "nitrogen"
+  ]
 }

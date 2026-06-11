@@ -292,6 +292,21 @@ public class AuthAdapter: NSObject {
       .replacingOccurrences(of: "/", with: "_")
       .replacingOccurrences(of: "=", with: "")
   }
+
+  private static let formUrlEncodedAllowedCharacters = CharacterSet(
+    charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+  )
+
+  private static func formUrlEncodedBody(_ params: [String: String]) -> Data? {
+    params
+      .map { key, value in
+        let encodedKey = key.addingPercentEncoding(withAllowedCharacters: formUrlEncodedAllowedCharacters) ?? key
+        let encodedValue = value.addingPercentEncoding(withAllowedCharacters: formUrlEncodedAllowedCharacters) ?? value
+        return "\(encodedKey)=\(encodedValue)"
+      }
+      .joined(separator: "&")
+      .data(using: .utf8)
+  }
   
   private static func exchangeCodeForTokens(
     code: String,
@@ -322,10 +337,7 @@ public class AuthAdapter: NSObject {
       "code_verifier": codeVerifier
     ]
     
-    request.httpBody = bodyParams
-      .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }
-      .joined(separator: "&")
-      .data(using: .utf8)
+    request.httpBody = formUrlEncodedBody(bodyParams)
     
     URLSession.shared.dataTask(with: request) { data, response, error in
       DispatchQueue.main.async {
@@ -606,10 +618,7 @@ public class AuthAdapter: NSObject {
       "refresh_token": refreshToken
     ]
     
-    request.httpBody = bodyParams
-      .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }
-      .joined(separator: "&")
-      .data(using: .utf8)
+    request.httpBody = formUrlEncodedBody(bodyParams)
     
     URLSession.shared.dataTask(with: request) { data, response, error in
       DispatchQueue.main.async {
@@ -692,10 +701,7 @@ public class AuthAdapter: NSObject {
       "grant_type": "refresh_token",
       "refresh_token": refreshToken
     ]
-    request.httpBody = bodyParams
-      .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }
-      .joined(separator: "&")
-      .data(using: .utf8)
+    request.httpBody = formUrlEncodedBody(bodyParams)
     URLSession.shared.dataTask(with: request) { data, response, error in
       DispatchQueue.main.async {
         if error != nil {

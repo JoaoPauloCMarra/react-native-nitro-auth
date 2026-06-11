@@ -86,9 +86,12 @@ type AuthWebExtraConfig = {
 };
 
 type JsonObject = Record<string, unknown>;
+type AppleAuthInitConfig = Parameters<
+  NonNullable<Window["AppleID"]>["auth"]["init"]
+>[0];
 
 class AuthWebError extends Error {
-  public readonly underlyingError?: string;
+  public readonly underlyingError: string | undefined;
 
   constructor(message: AuthErrorCode, underlyingError?: string) {
     super(message);
@@ -121,6 +124,29 @@ const getOptionalNumber = (
     : undefined;
 };
 
+function setIfDefined<T extends object, K extends keyof T>(
+  target: T,
+  key: K,
+  value: T[K] | undefined,
+): void {
+  if (value !== undefined) {
+    target[key] = value;
+  }
+}
+
+function setOrDelete<T extends object, K extends keyof T>(
+  target: T,
+  key: K,
+  value: T[K] | undefined,
+): void {
+  if (value === undefined) {
+    delete target[key];
+    return;
+  }
+
+  target[key] = value;
+}
+
 const parseExpiresInSeconds = (value: unknown): number | undefined => {
   const candidate =
     typeof value === "number"
@@ -152,19 +178,32 @@ const parseAuthUser = (value: unknown): AuthUser | undefined => {
       )
     : undefined;
 
-  return {
+  const user: AuthUser = {
     provider: value.provider,
-    email: getOptionalString(value, "email"),
-    name: getOptionalString(value, "name"),
-    photo: getOptionalString(value, "photo"),
-    idToken: getOptionalString(value, "idToken"),
-    accessToken: getOptionalString(value, "accessToken"),
-    refreshToken: getOptionalString(value, "refreshToken"),
-    serverAuthCode: getOptionalString(value, "serverAuthCode"),
-    scopes,
-    expirationTime: getOptionalNumber(value, "expirationTime"),
-    underlyingError: getOptionalString(value, "underlyingError"),
   };
+  setIfDefined(user, "email", getOptionalString(value, "email"));
+  setIfDefined(user, "name", getOptionalString(value, "name"));
+  setIfDefined(user, "photo", getOptionalString(value, "photo"));
+  setIfDefined(user, "idToken", getOptionalString(value, "idToken"));
+  setIfDefined(user, "accessToken", getOptionalString(value, "accessToken"));
+  setIfDefined(user, "refreshToken", getOptionalString(value, "refreshToken"));
+  setIfDefined(
+    user,
+    "serverAuthCode",
+    getOptionalString(value, "serverAuthCode"),
+  );
+  setIfDefined(user, "scopes", scopes);
+  setIfDefined(
+    user,
+    "expirationTime",
+    getOptionalNumber(value, "expirationTime"),
+  );
+  setIfDefined(
+    user,
+    "underlyingError",
+    getOptionalString(value, "underlyingError"),
+  );
+  return user;
 };
 
 const parseScopes = (value: unknown): string[] | undefined => {
@@ -191,18 +230,41 @@ const parseAuthWebExtraConfig = (value: unknown): AuthWebExtraConfig => {
       ? nitroAuthWebStorageCandidate
       : undefined;
 
-  return {
-    googleWebClientId: getOptionalString(value, "googleWebClientId"),
-    microsoftClientId: getOptionalString(value, "microsoftClientId"),
-    microsoftTenant: getOptionalString(value, "microsoftTenant"),
-    microsoftB2cDomain: getOptionalString(value, "microsoftB2cDomain"),
-    appleWebClientId: getOptionalString(value, "appleWebClientId"),
-    nitroAuthWebStorage,
-    nitroAuthPersistTokensOnWeb:
-      typeof value.nitroAuthPersistTokensOnWeb === "boolean"
-        ? value.nitroAuthPersistTokensOnWeb
-        : undefined,
-  };
+  const config: AuthWebExtraConfig = {};
+  setIfDefined(
+    config,
+    "googleWebClientId",
+    getOptionalString(value, "googleWebClientId"),
+  );
+  setIfDefined(
+    config,
+    "microsoftClientId",
+    getOptionalString(value, "microsoftClientId"),
+  );
+  setIfDefined(
+    config,
+    "microsoftTenant",
+    getOptionalString(value, "microsoftTenant"),
+  );
+  setIfDefined(
+    config,
+    "microsoftB2cDomain",
+    getOptionalString(value, "microsoftB2cDomain"),
+  );
+  setIfDefined(
+    config,
+    "appleWebClientId",
+    getOptionalString(value, "appleWebClientId"),
+  );
+  setIfDefined(config, "nitroAuthWebStorage", nitroAuthWebStorage);
+  setIfDefined(
+    config,
+    "nitroAuthPersistTokensOnWeb",
+    typeof value.nitroAuthPersistTokensOnWeb === "boolean"
+      ? value.nitroAuthPersistTokensOnWeb
+      : undefined,
+  );
+  return config;
 };
 
 const getConfig = (): AuthWebExtraConfig => {
@@ -723,20 +785,23 @@ class AuthWeb implements Auth {
         : {};
       const user: AuthUser = {
         ...currentUser,
-        idToken: effectiveIdToken,
-        accessToken: accessToken ?? undefined,
-        refreshToken: newRefreshToken ?? currentUser.refreshToken,
-        expirationTime,
         ...claims,
       };
+      setOrDelete(user, "idToken", effectiveIdToken);
+      setOrDelete(user, "accessToken", accessToken);
+      setOrDelete(
+        user,
+        "refreshToken",
+        newRefreshToken ?? currentUser.refreshToken,
+      );
+      setOrDelete(user, "expirationTime", expirationTime);
       this.updateUser(user);
 
-      const tokens: AuthTokens = {
-        accessToken: accessToken ?? undefined,
-        idToken: effectiveIdToken,
-        refreshToken: newRefreshToken ?? undefined,
-        expirationTime,
-      };
+      const tokens: AuthTokens = {};
+      setIfDefined(tokens, "accessToken", accessToken);
+      setIfDefined(tokens, "idToken", effectiveIdToken);
+      setIfDefined(tokens, "refreshToken", newRefreshToken);
+      setIfDefined(tokens, "expirationTime", expirationTime);
       this.notifyTokenListeners(tokens);
       return tokens;
     }
@@ -757,12 +822,11 @@ class AuthWeb implements Auth {
       ),
     );
     this.assertActiveGeneration(generation);
-    const tokens: AuthTokens = {
-      accessToken: this._currentUser.accessToken,
-      idToken: this._currentUser.idToken,
-      refreshToken: this._currentUser.refreshToken,
-      expirationTime: this._currentUser.expirationTime,
-    };
+    const tokens: AuthTokens = {};
+    setIfDefined(tokens, "accessToken", this._currentUser.accessToken);
+    setIfDefined(tokens, "idToken", this._currentUser.idToken);
+    setIfDefined(tokens, "refreshToken", this._currentUser.refreshToken);
+    setIfDefined(tokens, "expirationTime", this._currentUser.expirationTime);
     this.notifyTokenListeners(tokens);
     return tokens;
   }
@@ -1084,14 +1148,14 @@ class AuthWeb implements Auth {
         const user: AuthUser = {
           provider: "google",
           idToken,
-          accessToken: accessToken ?? undefined,
-          serverAuthCode: code ?? undefined,
-          userId: getOptionalString(decoded, "sub"),
-          hostedDomain: getOptionalString(decoded, "hd"),
           scopes,
-          expirationTime: this.getExpirationTime(expiresIn),
           ...this.decodeGoogleJwt(idToken),
         };
+        setIfDefined(user, "accessToken", accessToken ?? undefined);
+        setIfDefined(user, "serverAuthCode", code ?? undefined);
+        setIfDefined(user, "userId", getOptionalString(decoded, "sub"));
+        setIfDefined(user, "hostedDomain", getOptionalString(decoded, "hd"));
+        setIfDefined(user, "expirationTime", this.getExpirationTime(expiresIn));
         this.updateUser(user);
       })
         .then(() => {
@@ -1106,13 +1170,13 @@ class AuthWeb implements Auth {
   private decodeGoogleJwt(token: string): Partial<AuthUser> {
     try {
       const decoded = this.parseJwtPayload(token);
-      return {
-        email: getOptionalString(decoded, "email"),
-        name: getOptionalString(decoded, "name"),
-        photo: getOptionalString(decoded, "picture"),
-        userId: getOptionalString(decoded, "sub"),
-        hostedDomain: getOptionalString(decoded, "hd"),
-      };
+      const user: Partial<AuthUser> = {};
+      setIfDefined(user, "email", getOptionalString(decoded, "email"));
+      setIfDefined(user, "name", getOptionalString(decoded, "name"));
+      setIfDefined(user, "photo", getOptionalString(decoded, "picture"));
+      setIfDefined(user, "userId", getOptionalString(decoded, "sub"));
+      setIfDefined(user, "hostedDomain", getOptionalString(decoded, "hd"));
+      return user;
     } catch (error) {
       logger.warn("Failed to decode Google ID token", { error: String(error) });
       return {};
@@ -1328,12 +1392,16 @@ class AuthWeb implements Auth {
     const user: AuthUser = {
       provider: "microsoft",
       idToken,
-      accessToken: accessToken ?? undefined,
-      refreshToken: refreshToken ?? undefined,
       scopes,
-      expirationTime: this.getExpirationTime(json["expires_in"]),
       ...claims,
     };
+    setIfDefined(user, "accessToken", accessToken);
+    setIfDefined(user, "refreshToken", refreshToken);
+    setIfDefined(
+      user,
+      "expirationTime",
+      this.getExpirationTime(json["expires_in"]),
+    );
     this.updateUser(user);
   }
 
@@ -1405,12 +1473,15 @@ class AuthWeb implements Auth {
   private decodeMicrosoftJwt(token: string): Partial<AuthUser> {
     try {
       const decoded = this.parseJwtPayload(token);
-      return {
-        email:
-          getOptionalString(decoded, "preferred_username") ??
+      const user: Partial<AuthUser> = {};
+      setIfDefined(
+        user,
+        "email",
+        getOptionalString(decoded, "preferred_username") ??
           getOptionalString(decoded, "email"),
-        name: getOptionalString(decoded, "name"),
-      };
+      );
+      setIfDefined(user, "name", getOptionalString(decoded, "name"));
+      return user;
     } catch (error) {
       logger.warn("Failed to decode Microsoft ID token", {
         error: String(error),
@@ -1495,16 +1566,17 @@ class AuthWeb implements Auth {
       throw new Error("Apple SDK not loaded");
     }
 
-    window.AppleID.auth.init({
+    const appleAuthConfig: AppleAuthInitConfig = {
       clientId,
       scope: (options?.scopes?.length
         ? options.scopes
         : ["name", "email"]
       ).join(" "),
       redirectURI: window.location.origin,
-      nonce: options?.nonce,
       usePopup: true,
-    });
+    };
+    setIfDefined(appleAuthConfig, "nonce", options?.nonce);
+    window.AppleID.auth.init(appleAuthConfig);
 
     try {
       const response: AppleAuthResponse = await window.AppleID.auth.signIn();
@@ -1514,12 +1586,16 @@ class AuthWeb implements Auth {
       const user: AuthUser = {
         provider: "apple",
         idToken: response.authorization.id_token,
-        authorizationCode: response.authorization.code,
-        email: response.user?.email,
-        name: response.user?.name
+      };
+      setIfDefined(user, "authorizationCode", response.authorization.code);
+      setIfDefined(user, "email", response.user?.email);
+      setIfDefined(
+        user,
+        "name",
+        response.user?.name
           ? `${response.user.name.firstName} ${response.user.name.lastName}`.trim()
           : undefined,
-      };
+      );
       this.updateUser(user);
     } catch (error) {
       throw this.mapError(error);
