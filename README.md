@@ -106,6 +106,11 @@ Plugin options:
 Web reads provider client IDs from `expo.extra`; native platforms read values
 written by the plugin during prebuild.
 
+On iOS, the plugin also applies the CocoaPods modular-header settings required
+by the Google Sign-In dependency chain (`AppCheckCore`, `GoogleUtilities`, and
+`RecaptchaInterop`). Expo apps should not add those pods manually through
+`expo-build-properties`.
+
 Microsoft tenant values are validated before opening the authorization URL. Use
 `common`, `organizations`, `consumers`, a tenant ID, or a tenant domain for
 standard Entra ID. For B2C, set `microsoftB2cDomain` to a hostname such as

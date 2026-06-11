@@ -1,3 +1,4 @@
+const { withBuildProperties } = require("expo-build-properties");
 const {
   withInfoPlist,
   withEntitlementsPlist,
@@ -8,10 +9,34 @@ const {
 } = require("@expo/config-plugins");
 const pkg = require("./package.json");
 
+const googleSignInIosPods = [
+  { name: "AppCheckCore", modular_headers: true },
+  { name: "GoogleUtilities", modular_headers: true },
+  { name: "RecaptchaInterop", modular_headers: true },
+];
+
+function getNitroAuthIosExtraPods(extraPods = []) {
+  const pods = Array.isArray(extraPods) ? [...extraPods] : [];
+  const existingPodNames = new Set(pods.map((pod) => pod?.name));
+
+  for (const pod of googleSignInIosPods) {
+    if (!existingPodNames.has(pod.name)) {
+      pods.push(pod);
+    }
+  }
+
+  return pods;
+}
+
 const withNitroAuth = (config, props = {}) => {
   const { ios = {}, android = {} } = props;
 
-  // 1. iOS Info.plist
+  config = withBuildProperties(config, {
+    ios: {
+      extraPods: getNitroAuthIosExtraPods(config.ios?.extraPods),
+    },
+  });
+
   config = withInfoPlist(config, (config) => {
     if (ios.googleClientId) {
       config.modResults.GIDClientID = ios.googleClientId;
@@ -34,10 +59,8 @@ const withNitroAuth = (config, props = {}) => {
         ];
       }
     }
-    // Microsoft configuration
     if (ios.microsoftClientId) {
       config.modResults.MSALClientID = ios.microsoftClientId;
-      // Add MSAL redirect URL scheme
       const msalScheme = `msauth.${config.ios?.bundleIdentifier}`;
       const existingSchemes = config.modResults.CFBundleURLTypes || [];
       if (
@@ -62,7 +85,6 @@ const withNitroAuth = (config, props = {}) => {
     return config;
   });
 
-  // 2. iOS Entitlements
   if (ios.appleSignIn === true) {
     config = withEntitlementsPlist(config, (config) => {
       config.modResults["com.apple.developer.applesignin"] = ["Default"];
@@ -70,7 +92,6 @@ const withNitroAuth = (config, props = {}) => {
     });
   }
 
-  // 3. Android Strings (for Google and Microsoft Client IDs)
   config = withStringsXml(config, (config) => {
     if (android.googleClientId) {
       config.modResults = AndroidConfig.Strings.setStringItem(
@@ -119,7 +140,6 @@ const withNitroAuth = (config, props = {}) => {
     return config;
   });
 
-  // 4. Android Manifest for MSAL redirect
   if (android.microsoftClientId) {
     config = withAndroidManifest(config, (config) => {
       const manifest = config.modResults.manifest;
@@ -170,3 +190,8 @@ const withNitroAuth = (config, props = {}) => {
 };
 
 module.exports = createRunOncePlugin(withNitroAuth, pkg.name, pkg.version);
+module.exports.withNitroAuth = withNitroAuth;
+module.exports._internal = {
+  getNitroAuthIosExtraPods,
+  googleSignInIosPods,
+};
