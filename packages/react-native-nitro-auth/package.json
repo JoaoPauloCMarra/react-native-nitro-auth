@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-auth",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "High-performance authentication library for React Native with Google Sign-In, Apple Sign-In, and Microsoft Sign-In support, powered by Nitro Modules (JSI)",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -82,6 +82,9 @@
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
+  },
+  "dependencies": {
+    "expo-build-properties": "~56.0.18"
   },
   "devDependencies": {
     "@expo/config-plugins": "^56.0.8",

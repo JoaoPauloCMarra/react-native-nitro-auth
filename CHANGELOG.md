@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.5 - 2026-06-11
+
+### Fixed
+
+- Moved the Expo iOS Google Sign-In CocoaPods modular-header setup into the package config plugin so Expo/CNG consumers no longer need app-level `AppCheckCore`, `GoogleUtilities`, or `RecaptchaInterop` pod workarounds.
+- Added the package plugin dependency needed to apply the iOS build-properties setup from the package.
+
 ## 0.6.4 - 2026-06-11
 
 ### Added
