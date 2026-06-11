@@ -72,9 +72,16 @@ jest.mock("react-native-nitro-modules", () => {
 });
 
 describe("AuthService", () => {
-  const native = () =>
-    (NitroModules.createHybridObject as jest.Mock).mock.results[0]
-      .value as MockHybridObject;
+  function native() {
+    const [result] = (NitroModules.createHybridObject as jest.Mock).mock
+      .results;
+
+    if (!result) {
+      throw new Error("Auth hybrid object was not created");
+    }
+
+    return result.value as MockHybridObject;
+  }
 
   beforeEach(() => {
     void AuthService.currentUser;

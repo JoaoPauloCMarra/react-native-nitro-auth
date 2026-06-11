@@ -47,7 +47,6 @@ object AuthAdapter {
     private var currentActivity: Activity? = null
     private var googleSignInClient: GoogleSignInClient? = null
     private var lifecycleCallbacks: Application.ActivityLifecycleCallbacks? = null
-    private var pendingScopes: List<String> = emptyList()
     private var pendingMicrosoftScopes: List<String> = emptyList()
 
     @Volatile
@@ -212,7 +211,6 @@ object AuthAdapter {
         }
 
         val requestedScopes = scopes?.toList() ?: listOf("email", "profile")
-        pendingScopes = requestedScopes
 
         if (useLegacyGoogleSignIn || forceAccountPicker) {
             loginLegacy(context, clientId, requestedScopes, loginHint, forceAccountPicker, forceCodeForRefreshToken, hostedDomain, "login")
@@ -727,7 +725,7 @@ object AuthAdapter {
         val ctx = appContext ?: context.applicationContext
         val account = GoogleSignIn.getLastSignedInAccount(ctx)
         if (account != null) {
-            if (googleSignInClient == null) {
+            val client = googleSignInClient ?: run {
                 val clientId = getClientIdFromResources(ctx)
                 if (clientId == null) {
                     nativeOnRefreshError("configuration_error", "Google Client ID not configured")
@@ -738,9 +736,11 @@ object AuthAdapter {
                     .requestServerAuthCode(clientId)
                     .requestEmail()
                     .build()
-                googleSignInClient = GoogleSignIn.getClient(ctx, gso)
+                GoogleSignIn.getClient(ctx, gso).also {
+                    googleSignInClient = it
+                }
             }
-            googleSignInClient!!.silentSignIn().addOnCompleteListener { task ->
+            client.silentSignIn().addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     val acc = task.result
                     nativeOnRefreshSuccess(acc?.idToken, null, getJwtExpirationTimeMs(acc?.idToken))

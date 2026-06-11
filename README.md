@@ -1,9 +1,11 @@
 # react-native-nitro-auth
 
 [![npm version](https://img.shields.io/npm/v/react-native-nitro-auth?color=f97316&label=npm)](https://www.npmjs.com/package/react-native-nitro-auth)
+[![npm downloads](https://img.shields.io/npm/dm/react-native-nitro-auth?color=22c55e&label=downloads)](https://www.npmjs.com/package/react-native-nitro-auth)
+[![CI](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/react-native-nitro-auth?color=007ec6)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/LICENSE)
 [![React Native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb)](https://reactnative.dev/)
-[![Expo](https://img.shields.io/badge/expo-SDK%2056-000020)](https://expo.dev/)
+[![Expo](https://img.shields.io/badge/expo-SDK%2056-000020)](https://docs.expo.dev/)
 [![Nitro Modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.35.7-black)](https://nitro.margelo.com/)
 [![TypeScript](https://img.shields.io/badge/typescript-6.0-3178c6)](https://www.typescriptlang.org/)
 
