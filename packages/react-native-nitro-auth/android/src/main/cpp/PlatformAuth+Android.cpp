@@ -17,6 +17,7 @@ static std::shared_ptr<Promise<AuthUser>> gLoginPromise;
 static std::shared_ptr<Promise<AuthUser>> gScopesPromise;
 static std::shared_ptr<Promise<AuthTokens>> gRefreshPromise;
 static std::shared_ptr<Promise<std::optional<AuthUser>>> gSilentPromise;
+static std::shared_ptr<Promise<void>> gRevokeAccessPromise;
 static std::mutex gMutex;
 static jclass gAuthAdapterClass = nullptr;
 static jmethodID gLoginMethod = nullptr;
@@ -105,7 +106,7 @@ static void ensureAuthAdapterMethods(JNIEnv* env) {
         gRevokeAccessMethod = env->GetStaticMethodID(
             gAuthAdapterClass,
             "revokeAccessSync",
-            "(Landroid/content/Context;)V"
+            "(Landroid/content/Context;Ljava/lang/String;)V"
         );
     }
 }
@@ -114,7 +115,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     auto promise = Promise<AuthUser>::create();
     auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
     if (!contextPtr) {
-        promise->reject(std::make_exception_ptr(std::runtime_error("Android Context not initialized")));
+        promise->reject(std::make_exception_ptr(std::runtime_error("configuration_error")));
         return promise;
     }
 
@@ -255,7 +256,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector
     auto promise = Promise<AuthUser>::create();
     auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
     if (!contextPtr) {
-        promise->reject(std::make_exception_ptr(std::runtime_error("Android Context not initialized")));
+        promise->reject(std::make_exception_ptr(std::runtime_error("configuration_error")));
         return promise;
     }
     
@@ -308,7 +309,7 @@ std::shared_ptr<Promise<AuthTokens>> PlatformAuth::refreshToken() {
     auto promise = Promise<AuthTokens>::create();
     auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
     if (!contextPtr) {
-        promise->reject(std::make_exception_ptr(std::runtime_error("Android Context not initialized")));
+        promise->reject(std::make_exception_ptr(std::runtime_error("configuration_error")));
         return promise;
     }
     
@@ -353,7 +354,7 @@ std::shared_ptr<Promise<std::optional<AuthUser>>> PlatformAuth::silentRestore() 
     auto promise = Promise<std::optional<AuthUser>>::create();
     auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
     if (!contextPtr) {
-        promise->resolve(std::nullopt);
+        promise->reject(std::make_exception_ptr(std::runtime_error("configuration_error")));
         return promise;
     }
 
@@ -435,32 +436,53 @@ void PlatformAuth::logout() {
     }
 }
 
-std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess() {
+std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess(AuthProvider provider) {
     auto promise = Promise<void>::create();
     auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
     if (!contextPtr) {
-        promise->resolve();
+        promise->reject(std::make_exception_ptr(std::runtime_error("configuration_error")));
         return promise;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        if (gRevokeAccessPromise) {
+            promise->reject(std::make_exception_ptr(std::runtime_error("operation_in_progress")));
+            return promise;
+        }
+        gRevokeAccessPromise = promise;
     }
 
     JNIEnv* env = Environment::current();
     try {
         ensureAuthAdapterMethods(env);
     } catch (...) {
+        {
+            std::lock_guard<std::mutex> lock(gMutex);
+            gRevokeAccessPromise = nullptr;
+        }
         promise->reject(std::current_exception());
         return promise;
     }
 
-    env->CallStaticVoidMethod(gAuthAdapterClass, gRevokeAccessMethod, contextPtr);
+    const char* providerName = provider == AuthProvider::GOOGLE
+        ? "google"
+        : provider == AuthProvider::APPLE ? "apple" : "microsoft";
+    jstring providerString = env->NewStringUTF(providerName);
+    env->CallStaticVoidMethod(gAuthAdapterClass, gRevokeAccessMethod, contextPtr, providerString);
+    env->DeleteLocalRef(providerString);
 
     if (env->ExceptionCheck()) {
         env->ExceptionDescribe();
         env->ExceptionClear();
+        {
+            std::lock_guard<std::mutex> lock(gMutex);
+            gRevokeAccessPromise = nullptr;
+        }
         promise->reject(std::make_exception_ptr(std::runtime_error("JNI call failed")));
         return promise;
     }
 
-    promise->resolve();
     return promise;
 }
 
@@ -673,21 +695,52 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshError
     }
 }
 
+extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRevokeAccessResult(
+    JNIEnv* env, jclass, jstring error, jstring underlyingError) {
+    std::shared_ptr<Promise<void>> revokeAccessPromise;
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        revokeAccessPromise = std::move(gRevokeAccessPromise);
+        gRevokeAccessPromise = nullptr;
+    }
+    if (!revokeAccessPromise) {
+        return;
+    }
+    if (!error) {
+        revokeAccessPromise->resolve();
+        return;
+    }
+
+    const char* errorChars = env->GetStringUTFChars(error, nullptr);
+    std::string errorString(errorChars);
+    env->ReleaseStringUTFChars(error, errorChars);
+    if (underlyingError) {
+        const char* underlyingChars = env->GetStringUTFChars(underlyingError, nullptr);
+        env->ReleaseStringUTFChars(underlyingError, underlyingChars);
+    }
+    revokeAccessPromise->reject(
+        std::make_exception_ptr(std::runtime_error(errorString))
+    );
+}
+
 extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeDispose(JNIEnv* env, jclass) {
     std::shared_ptr<Promise<AuthUser>> loginPromise;
     std::shared_ptr<Promise<AuthUser>> scopesPromise;
     std::shared_ptr<Promise<AuthTokens>> refreshPromise;
     std::shared_ptr<Promise<std::optional<AuthUser>>> silentPromise;
+    std::shared_ptr<Promise<void>> revokeAccessPromise;
     {
         std::lock_guard<std::mutex> lock(gMutex);
         loginPromise = std::move(gLoginPromise);
         scopesPromise = std::move(gScopesPromise);
         refreshPromise = std::move(gRefreshPromise);
         silentPromise = std::move(gSilentPromise);
+        revokeAccessPromise = std::move(gRevokeAccessPromise);
         gLoginPromise = nullptr;
         gScopesPromise = nullptr;
         gRefreshPromise = nullptr;
         gSilentPromise = nullptr;
+        gRevokeAccessPromise = nullptr;
     }
 
     auto disposed = std::make_exception_ptr(std::runtime_error("disposed"));
@@ -695,6 +748,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeDispose(JNIEnv
     if (scopesPromise) scopesPromise->reject(disposed);
     if (refreshPromise) refreshPromise->reject(disposed);
     if (silentPromise) silentPromise->reject(disposed);
+    if (revokeAccessPromise) revokeAccessPromise->reject(disposed);
 
     clearCachedJniRefs(env);
 }

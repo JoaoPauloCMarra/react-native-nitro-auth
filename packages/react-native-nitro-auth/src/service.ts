@@ -10,4 +10,13 @@ function getNitroAuth(): Auth {
   return nitroAuth;
 }
 
-export const AuthService: TypedAuth = createAuthService(getNitroAuth);
+function clearNitroAuth(auth: Auth): void {
+  if (nitroAuth === auth) {
+    nitroAuth = undefined;
+  }
+}
+
+export const AuthService: TypedAuth = createAuthService(
+  getNitroAuth,
+  clearNitroAuth,
+);

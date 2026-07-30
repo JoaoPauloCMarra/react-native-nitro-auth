@@ -1,11 +1,19 @@
 # Changelog
 
-## 0.6.5 - 2026-06-11
+## 0.6.6 - 2026-07-30
+
+### Changed
+
+- **Breaking changes:** None.
+- Updated the validated compatibility baseline to Expo SDK 57, React Native 0.86.2, React 19.2.3, and Nitro Modules 0.36.4, with the Nitro Modules peer dependency bounded to `>=0.36.4 <0.37.0`.
 
 ### Fixed
 
 - Moved the Expo iOS Google Sign-In CocoaPods modular-header setup into the package config plugin so Expo/CNG consumers no longer need app-level `AppCheckCore`, `GoogleUtilities`, or `RecaptchaInterop` pod workarounds.
 - Added the package plugin dependency needed to apply the iOS build-properties setup from the package.
+- Made `revokeAccess()` perform provider revocation for supported Google sessions, preserve the active session when revocation fails, and reject unsupported providers instead of degrading to logout.
+- Propagated native and web silent-restore configuration and network failures while suppressing only a genuine missing session.
+- Propagated Android native initialization failures as `configuration_error` and reset disposed service singletons for safe recreation.
 
 ## 0.6.4 - 2026-06-11
 

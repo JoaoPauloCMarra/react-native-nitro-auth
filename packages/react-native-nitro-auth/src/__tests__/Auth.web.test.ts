@@ -34,12 +34,14 @@ type TestAuthModule = {
     }) => void,
   ) => () => void;
   getAccessToken: () => Promise<string | undefined>;
+  revokeAccess: () => Promise<void>;
   refreshToken: () => Promise<{
     accessToken?: string;
     idToken?: string;
     refreshToken?: string;
     expirationTime?: number;
   }>;
+  silentRestore: () => Promise<void>;
 };
 
 const createBase64UrlSegmentFromObject = (value: Record<string, unknown>) => {
@@ -96,7 +98,21 @@ const loadAuthModule = async (
     { virtual: true },
   );
   const module = await import("../Auth.web");
-  return module.AuthModule as unknown as TestAuthModule;
+  return module.AuthModule;
+};
+
+const loadAuthService = async (extra?: Record<string, unknown>) => {
+  jest.resetModules();
+  jest.doMock(
+    "expo-constants",
+    () => ({
+      __esModule: true,
+      default: { expoConfig: { extra: extra ?? {} } },
+    }),
+    { virtual: true },
+  );
+  const module = await import("../service.web");
+  return module.AuthService;
 };
 
 describe("AuthModule (web)", () => {
@@ -208,6 +224,140 @@ describe("AuthModule (web)", () => {
     auth.logout();
 
     expect(localStorage.getItem(MS_REFRESH_TOKEN_KEY)).toBeNull();
+  });
+
+  it("revokes Google access before clearing the local session", async () => {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "google",
+        accessToken: "google-access-token",
+      }),
+    );
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(async () => ({ ok: true }) as Response),
+    });
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: true,
+    });
+
+    await auth.revokeAccess();
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://oauth2.googleapis.com/revoke",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: "token=google-access-token",
+      },
+    );
+    expect(auth.currentUser).toBeUndefined();
+  });
+
+  it("keeps the session when Google access revocation fails", async () => {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "google",
+        accessToken: "google-access-token",
+      }),
+    );
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(async () => {
+        throw new Error("network unavailable");
+      }),
+    });
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: true,
+    });
+
+    await expect(auth.revokeAccess()).rejects.toThrow("network_error");
+    expect(auth.currentUser?.provider).toBe("google");
+  });
+
+  it("rejects providers without a client-side revocation API", async () => {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "microsoft",
+        accessToken: "microsoft-access-token",
+      }),
+    );
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: true,
+    });
+
+    await expect(auth.revokeAccess()).rejects.toThrow("unsupported_provider");
+    expect(auth.currentUser?.provider).toBe("microsoft");
+  });
+
+  it("suppresses only a missing session during silent restore", async () => {
+    const auth = await loadAuthModule();
+
+    await expect(auth.silentRestore()).resolves.toBeUndefined();
+  });
+
+  it("recreates the web auth singleton after disposal", async () => {
+    const auth = await loadAuthService();
+
+    auth.dispose();
+
+    await expect(auth.login("google")).rejects.toMatchObject({
+      code: "configuration_error",
+    });
+  });
+
+  it("propagates configuration failures during silent restore", async () => {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "microsoft",
+        expirationTime: Date.now() - 1,
+      }),
+    );
+    localStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: true,
+    });
+
+    await expect(auth.silentRestore()).rejects.toThrow("configuration_error");
+    expect(auth.currentUser?.provider).toBe("microsoft");
+  });
+
+  it("propagates network failures during silent restore", async () => {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "microsoft",
+        expirationTime: Date.now() - 1,
+      }),
+    );
+    localStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(async () => {
+        throw new Error("network unavailable");
+      }),
+    });
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: true,
+      microsoftClientId: "test-client-id",
+    });
+
+    await expect(auth.silentRestore()).rejects.toThrow("network_error");
+    expect(auth.currentUser?.provider).toBe("microsoft");
   });
 
   it("times out popup login instead of polling forever", async () => {

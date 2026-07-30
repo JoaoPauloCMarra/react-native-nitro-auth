@@ -14,8 +14,9 @@ class NitroAuthModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
             NitroAuthOnLoad.initializeNative()
             AuthAdapter.initialize(reactContext)
             Log.d("NitroAuthModule", "NitroAuth initialized")
-        } catch (e: Exception) {
-            Log.e("NitroAuthModule", "Failed to initialize NitroAuth", e)
+        } catch (error: Throwable) {
+            Log.e("NitroAuthModule", "Failed to initialize NitroAuth", error)
+            throw IllegalStateException("configuration_error", error)
         }
     }
 

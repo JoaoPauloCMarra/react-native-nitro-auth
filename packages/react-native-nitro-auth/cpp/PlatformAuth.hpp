@@ -21,7 +21,7 @@ public:
   static std::shared_ptr<Promise<std::optional<AuthUser>>> silentRestore();
   static bool hasPlayServices();
   static void logout();
-  static std::shared_ptr<Promise<void>> revokeAccess();
+  static std::shared_ptr<Promise<void>> revokeAccess(AuthProvider provider);
 };
 
 } // namespace margelo::nitro::NitroAuth

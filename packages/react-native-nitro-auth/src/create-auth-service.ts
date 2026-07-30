@@ -3,6 +3,7 @@ import type { ProviderLoginOptions, TypedAuth } from "./provider-options";
 import { AuthError } from "./utils/auth-error";
 
 type AuthSource = () => Auth;
+type AuthDisposeHandler = (auth: Auth) => void;
 type AuthWithOptionalNativeMembers = Auth & {
   onAuthStateChanged?: (
     callback: (user: AuthUser | undefined) => void,
@@ -28,7 +29,10 @@ function wrapSyncAuthOperation<T>(operation: () => T): T {
   }
 }
 
-export function createAuthService(getAuth: AuthSource): TypedAuth {
+export function createAuthService(
+  getAuth: AuthSource,
+  onDispose?: AuthDisposeHandler,
+): TypedAuth {
   return {
     get name() {
       return wrapSyncAuthOperation(() => getAuth().name);
@@ -71,7 +75,7 @@ export function createAuthService(getAuth: AuthSource): TypedAuth {
           await auth.revokeAccess();
           return;
         }
-        auth.logout();
+        throw new AuthError("configuration_error");
       });
     },
 
@@ -116,7 +120,9 @@ export function createAuthService(getAuth: AuthSource): TypedAuth {
 
     dispose() {
       wrapSyncAuthOperation(() => {
-        getAuth().dispose();
+        const auth = getAuth();
+        auth.dispose();
+        onDispose?.(auth);
       });
     },
 
