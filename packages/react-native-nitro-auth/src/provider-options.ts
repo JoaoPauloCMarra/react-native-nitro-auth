@@ -7,11 +7,7 @@ type StrictLoginOptions<AllowedKeys extends keyof LoginOptions> = Pick<
   Partial<Record<Exclude<keyof LoginOptions, AllowedKeys>, never>>;
 
 type GoogleCommonKeys =
-  | "scopes"
-  | "loginHint"
-  | "nonce"
-  | "forceAccountPicker"
-  | "hostedDomain";
+  "scopes" | "loginHint" | "nonce" | "forceAccountPicker" | "hostedDomain";
 
 export type GoogleIOSLoginOptions = StrictLoginOptions<
   GoogleCommonKeys | "useSheet" | "openIDRealm"
@@ -31,9 +27,7 @@ export type GoogleWebLoginOptions = StrictLoginOptions<
 >;
 
 export type GoogleLoginOptions =
-  | GoogleIOSLoginOptions
-  | GoogleAndroidLoginOptions
-  | GoogleWebLoginOptions;
+  GoogleIOSLoginOptions | GoogleAndroidLoginOptions | GoogleWebLoginOptions;
 
 export type AppleIOSLoginOptions = StrictLoginOptions<"scopes" | "nonce">;
 export type AppleWebLoginOptions = AppleIOSLoginOptions;

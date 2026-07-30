@@ -106,6 +106,8 @@ object AuthAdapter {
 
     @JvmStatic
     private external fun nativeOnRefreshError(error: String, underlyingError: String?)
+    @JvmStatic
+    private external fun nativeOnRevokeAccessResult(error: String?, underlyingError: String?)
 
     @Synchronized
     fun initialize(context: Context) {
@@ -131,8 +133,10 @@ object AuthAdapter {
         try {
             nativeInitialize(applicationContext)
             isInitialized = true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize NitroAuth native bridge", e)
+        } catch (error: Throwable) {
+            Log.e(TAG, "Failed to initialize NitroAuth native bridge", error)
+            dispose()
+            throw IllegalStateException("configuration_error", error)
         }
     }
 
@@ -778,16 +782,45 @@ object AuthAdapter {
     }
 
     @JvmStatic
-    fun revokeAccessSync(context: Context) {
+    fun revokeAccessSync(context: Context, provider: String) {
         val ctx = appContext ?: context.applicationContext
-        clearPkceState()
-        clearCredentialManagerState(ctx)
-        if (hasLegacyGoogleAccount(ctx)) {
-            getLegacyGoogleClient(ctx)?.revokeAccess()
+        if (provider != "google") {
+            nativeOnRevokeAccessResult(
+                "unsupported_provider",
+                "Client-side access revocation is unavailable for $provider",
+            )
+            return
         }
-        hasLegacyGoogleSession = false
-        inMemoryMicrosoftRefreshToken = null
-        inMemoryMicrosoftScopes = defaultMicrosoftScopes
+        if (!hasLegacyGoogleAccount(ctx)) {
+            nativeOnRevokeAccessResult(
+                "unsupported_provider",
+                "Google access revocation requires a legacy Google Sign-In session",
+            )
+            return
+        }
+        val client = getLegacyGoogleClient(ctx)
+        if (client == null) {
+            nativeOnRevokeAccessResult(
+                "configuration_error",
+                "Google Client ID not configured",
+            )
+            return
+        }
+
+        client.revokeAccess().addOnCompleteListener { task ->
+            if (!task.isSuccessful) {
+                nativeOnRevokeAccessResult(
+                    "network_error",
+                    task.exception?.message ?: "Google access revocation failed",
+                )
+                return@addOnCompleteListener
+            }
+
+            clearPkceState()
+            clearCredentialManagerState(ctx)
+            hasLegacyGoogleSession = false
+            nativeOnRevokeAccessResult(null, null)
+        }
     }
 
     private fun getClientIdFromResources(context: Context): String? {

@@ -686,6 +686,43 @@ class AuthWeb implements Auth {
   }
 
   async revokeAccess(): Promise<void> {
+    const user = this._currentUser;
+    if (!user) {
+      throw new AuthWebError("not_signed_in", "No user logged in");
+    }
+    if (user.provider !== "google") {
+      throw new AuthWebError(
+        "unsupported_provider",
+        `Client-side access revocation is unavailable for ${user.provider}`,
+      );
+    }
+    if (!user.accessToken) {
+      throw new AuthWebError(
+        "token_error",
+        "Google access token is required for revocation",
+      );
+    }
+
+    let response: Response;
+    try {
+      response = await fetch("https://oauth2.googleapis.com/revoke", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ token: user.accessToken }).toString(),
+      });
+    } catch (error) {
+      throw new AuthWebError("network_error", String(error));
+    }
+
+    if (!response.ok) {
+      throw new AuthWebError(
+        "token_error",
+        `Google access revocation failed with HTTP ${response.status}`,
+      );
+    }
+
     this.logout();
   }
 
@@ -746,13 +783,18 @@ class AuthWeb implements Auth {
         refresh_token: refreshToken,
       });
 
-      const response = await fetch(tokenUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: body.toString(),
-      });
+      let response: Response;
+      try {
+        response = await fetch(tokenUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: body.toString(),
+        });
+      } catch (error) {
+        throw new AuthWebError("network_error", String(error));
+      }
 
       const json = await this.parseResponseObject(response);
       this.assertActiveGeneration(generation);
@@ -1610,7 +1652,9 @@ class AuthWeb implements Auth {
         await this.getAccessToken();
         logger.log("Silent restore successful (token refreshed)");
       } catch (e) {
-        logger.warn("Silent restore failed to refresh token:", e);
+        const error = this.mapError(e);
+        logger.warn("Silent restore failed to refresh token:", error);
+        throw error;
       }
     }
     this.notify();
@@ -1661,4 +1705,10 @@ class AuthWeb implements Auth {
   }
 }
 
-export const AuthModule = new AuthWeb();
+export let AuthModule: Auth = new AuthWeb();
+
+export function resetAuthModule(auth: Auth): void {
+  if (AuthModule === auth) {
+    AuthModule = new AuthWeb();
+  }
+}

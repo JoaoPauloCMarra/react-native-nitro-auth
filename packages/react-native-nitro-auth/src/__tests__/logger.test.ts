@@ -10,8 +10,7 @@ type ConsoleSpies = {
 function callLoggerDebug(message: string): void {
   const descriptor = Object.getOwnPropertyDescriptor(logger, "debug");
   const debugLogger = descriptor?.value as
-    | ((message: string) => void)
-    | undefined;
+    ((message: string) => void) | undefined;
   debugLogger?.(message);
 }
 

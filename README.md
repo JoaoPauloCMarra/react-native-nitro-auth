@@ -5,8 +5,8 @@
 [![CI](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/react-native-nitro-auth?color=007ec6)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/LICENSE)
 [![React Native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb)](https://reactnative.dev/)
-[![Expo](https://img.shields.io/badge/expo-SDK%2056-000020)](https://docs.expo.dev/)
-[![Nitro Modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.35.7-black)](https://nitro.margelo.com/)
+[![Expo](https://img.shields.io/badge/expo-SDK%2057-000020)](https://docs.expo.dev/)
+[![Nitro Modules](https://img.shields.io/badge/nitro--modules-0.36.x-black)](https://nitro.margelo.com/)
 [![TypeScript](https://img.shields.io/badge/typescript-6.0-3178c6)](https://www.typescriptlang.org/)
 
 Google Sign-In, Apple Sign-In, and Microsoft Entra ID for React Native and
@@ -14,8 +14,10 @@ Expo, powered by Nitro Modules.
 
 Use it when you want one typed authentication API for native social login, web
 OAuth, token refresh, incremental scopes, account listeners, and consistent
-`AuthError` handling. The package keeps tokens in memory; your app decides what
-to persist and where.
+`AuthError` handling. Native refresh tokens stay in memory. Web session metadata
+uses configurable browser storage, with token persistence disabled by default.
+Your backend remains responsible for validating tokens and creating application
+sessions.
 
 ## Install
 
@@ -38,6 +40,16 @@ cd ios && pod install
 
 Expo Go cannot load Nitro native modules. Use an Expo development build or a
 bare app.
+
+## Requirements
+
+| Dependency                   | Supported range or validated baseline |
+| ---------------------------- | ------------------------------------- |
+| React Native                 | `>=0.75.0`; validated with `0.86.2`   |
+| React                        | Validated with `19.2.3`               |
+| React Native Nitro Modules   | `>=0.36.4 <0.37.0`                    |
+| Expo                         | Development builds; validated with 57 |
+| iOS                          | `16.4` or later                       |
 
 ## Expo Config
 
@@ -106,6 +118,18 @@ Plugin options:
 Web reads provider client IDs from `expo.extra`; native platforms read values
 written by the plugin during prebuild.
 
+Web options in `expo.extra`:
+
+| Option                        | Default     | Purpose                                      |
+| ----------------------------- | ----------- | -------------------------------------------- |
+| `googleWebClientId`           | —           | Google OAuth client ID.                      |
+| `appleWebClientId`            | —           | Apple Services ID.                           |
+| `microsoftClientId`           | —           | Microsoft Entra ID application ID.           |
+| `microsoftTenant`             | `common`    | Microsoft tenant, domain, or B2C policy.     |
+| `microsoftB2cDomain`          | —           | Microsoft B2C hostname.                      |
+| `nitroAuthWebStorage`         | `session`   | `session`, `local`, or `memory`.              |
+| `nitroAuthPersistTokensOnWeb` | `false`     | Persist token fields in configured storage.  |
+
 On iOS, the plugin also applies the CocoaPods modular-header settings required
 by the Google Sign-In dependency chain (`AppCheckCore`, `GoogleUtilities`, and
 `RecaptchaInterop`). Expo apps should not add those pods manually through
@@ -121,8 +145,8 @@ path such as `contoso.onmicrosoft.com/B2C_1_signin`.
 ## Quick Start
 
 ```tsx
+import { Button } from "react-native";
 import {
-  AuthService,
   useAuth,
   type ProviderLoginOptions,
 } from "react-native-nitro-auth";
@@ -144,11 +168,19 @@ export function SignInButton() {
 
   return <Button title="Continue with Google" onPress={signInWithGoogle} />;
 }
+```
 
-await AuthService.login("microsoft", {
-  tenant: "organizations",
-  prompt: "select_account",
-});
+Imperative callers can use the same provider-aware options:
+
+```ts
+import { AuthService } from "react-native-nitro-auth";
+
+async function signInWithMicrosoft() {
+  await AuthService.login("microsoft", {
+    tenant: "organizations",
+    prompt: "select_account",
+  });
+}
 ```
 
 ## Providers
@@ -156,25 +188,27 @@ await AuthService.login("microsoft", {
 | Provider  | Native       | Web | Notes                                                                 |
 | --------- | ------------ | --- | --------------------------------------------------------------------- |
 | Google    | iOS, Android | Yes | Supports account picker, login hint, refresh, and incremental scopes. |
-| Apple     | iOS          | Yes | Apple returns name and email only on first authorization.             |
-| Microsoft | iOS, Android | Yes | Supports tenant and B2C configuration.                                |
+| Apple     | iOS          | Yes | Returns name and email only on first authorization.                   |
+| Microsoft | iOS, Android | Yes | Supports tenant, B2C, refresh, and incremental scopes.                |
 
-Use `expo-auth-session`, `react-native-app-auth`, Auth0, Firebase Auth, or your
-identity provider SDK when you need a generic OAuth/OIDC provider, password
-auth, MFA, hosted user management, or server session management.
+Apple Sign-In is unavailable on Android. Use `expo-auth-session`,
+`react-native-app-auth`, Auth0, Firebase Auth, or your identity provider SDK
+when you need generic OAuth/OIDC providers, password authentication, MFA,
+hosted user management, or server session management.
 
 ## API
 
 Main exports:
 
-- `useAuth()` for React state, login, logout, refresh, and listeners.
-- `AuthService` for imperative login, refresh, logout, and user reads.
+- `useAuth()` for reactive user, scope, loading, and error state.
+- `AuthService` for imperative operations and account listeners.
 - `SocialButton` for provider-aware UI.
-- `AuthProvider` for the `"google"`, `"apple"`, and `"microsoft"` provider names.
+- `AuthProvider` for `"google"`, `"apple"`, and `"microsoft"`.
 - `AuthError` and `AuthErrorCode` for deterministic failures.
-- Provider option types for strongly typed login calls.
+- Provider-specific option types for strongly typed login calls.
 
-Provider-aware login calls reject unsupported option fields at compile time:
+Both `useAuth().login()` and `AuthService.login()` reject option fields that do
+not belong to the selected provider:
 
 ```ts
 import type {
@@ -204,17 +238,71 @@ Supported login options:
 
 `prompt` is typed as `"login"`, `"consent"`, `"select_account"`, or `"none"`.
 
-## Storage Model
+### Session operations
 
-Tokens are held in memory. Persist only the snapshot your app actually needs,
-preferably in your own secure storage or backend session. JWT decode on the
-client is for display and routing only; signature validation belongs on your
-server.
+- `logout()` clears package session state and signs out provider SDK state where
+  available. It does not revoke a provider grant or your backend session.
+- `silentRestore()` resolves with or without a restorable session. It rejects
+  configuration, network, and parse failures instead of treating them as a
+  missing session.
+- `requestScopes()` supports Google and Microsoft and may require user
+  interaction.
+- `revokeScopes()` removes scopes from package state; it does not revoke them at
+  the provider.
+- `getAccessToken()` returns the current access token and refreshes near-expiry
+  Google or Microsoft credentials when supported.
+- `refreshToken()` supports Google and Microsoft. Apple token exchange and
+  refresh belong on your backend.
+- `revokeAccess()` clears local state only after provider revocation succeeds.
+  Client-side revocation supports Google web and iOS sessions, plus Android
+  sessions created through legacy Google Sign-In. Unsupported providers and
+  modern Android Google sessions reject with `unsupported_provider`.
+
+## Storage and Security
+
+Native token fields, including Microsoft refresh tokens, are held in memory by
+this package. Provider SDKs may retain their own sign-in state, which
+`silentRestore()` can use. Persist only the minimum application session data
+you need, preferably in platform secure storage or on your backend.
+
+On web, user metadata and scopes use `sessionStorage` by default. Choose
+`local`, `session`, or `memory` with `nitroAuthWebStorage`. Token fields and the
+Microsoft refresh token remain in memory unless
+`nitroAuthPersistTokensOnWeb` is explicitly enabled. Enabling it places those
+credentials in the configured storage and changes your XSS risk profile.
+
+JWT decoding in this package is for display and routing only. Validate token
+signatures, issuer, audience, nonce, and expiry on your server before creating
+an application session.
 
 ## Error Contract
 
-Async public APIs throw `AuthError` with a stable `code`, `provider`, `platform`,
-and `message`. Use `instanceof AuthError` when branching in UI code.
+`AuthService` operations and `useAuth()` mutations throw `AuthError` with
+`name`, stable `code`, `message`, and optional `underlyingMessage`. `message`
+equals `code`; `underlyingMessage` preserves a differing raw platform message.
+
+```ts
+import {
+  AuthError,
+  AuthService,
+  type AuthErrorCode,
+} from "react-native-nitro-auth";
+
+async function signIn(
+  reportFailure: (code: AuthErrorCode, detail: string | undefined) => void,
+) {
+  try {
+    await AuthService.login("google");
+  } catch (error) {
+    if (error instanceof AuthError) {
+      if (error.code === "cancelled") return;
+      reportFailure(error.code, error.underlyingMessage);
+      return;
+    }
+    throw error;
+  }
+}
+```
 
 Error codes are `cancelled`, `timeout`, `popup_blocked`, `network_error`,
 `configuration_error`, `not_signed_in`, `operation_in_progress`,
@@ -230,8 +318,8 @@ Error codes are `cancelled`, `timeout`, `popup_blocked`, `network_error`,
 | Web      | Google, Apple, and Microsoft OAuth through Expo web config. |
 | Expo     | Development builds with the config plugin.                  |
 
-Validated baseline: Expo SDK 56, React Native 0.85.3, React 19.2.3, and Nitro
-Modules 0.35.7.
+Validated baseline: Expo SDK 57, React Native 0.86.2, React 19.2.3, and Nitro
+Modules 0.36.4. Package peer range: `>=0.36.4 <0.37.0`.
 
 ## Troubleshooting
 
@@ -255,6 +343,13 @@ bun run example:ios
 
 Run native example builds before release when changing plugin, native, Nitro, or
 packaging files.
+
+## Links
+
+- [npm package](https://www.npmjs.com/package/react-native-nitro-auth)
+- [GitHub repository](https://github.com/JoaoPauloCMarra/react-native-nitro-auth)
+- [Issue tracker](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/issues)
+- [Changelog](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/CHANGELOG.md)
 
 ## License
 

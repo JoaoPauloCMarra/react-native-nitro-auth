@@ -290,6 +290,18 @@ describe("AuthService", () => {
     });
   });
 
+  it("recreates the native hybrid object after disposal", () => {
+    const creationCount = (NitroModules.createHybridObject as jest.Mock).mock
+      .calls.length;
+
+    AuthService.dispose();
+    void AuthService.currentUser;
+
+    expect(NitroModules.createHybridObject).toHaveBeenCalledTimes(
+      creationCount + 1,
+    );
+  });
+
   describe("setLoggingEnabled", () => {
     it("forwards boolean to native module", () => {
       AuthService.setLoggingEnabled(true);
@@ -348,13 +360,15 @@ describe("AuthService", () => {
     expect(auth.equals).toHaveBeenCalledWith(auth);
   });
 
-  it("normalizes optional native members that older native builds may omit", () => {
+  it("normalizes optional native members that older native builds may omit", async () => {
     const auth = native();
+    auth.logout.mockClear();
     const partialAuth = {
       ...auth,
       grantedScopes: undefined,
       onAuthStateChanged: undefined,
       onTokensRefreshed: undefined,
+      revokeAccess: undefined,
       setLoggingEnabled: undefined,
     } as unknown as MockHybridObject;
     const service = createAuthService(() => partialAuth);
@@ -365,5 +379,9 @@ describe("AuthService", () => {
     expect(() => {
       service.setLoggingEnabled(true);
     }).not.toThrow();
+    await expect(service.revokeAccess()).rejects.toMatchObject({
+      code: "configuration_error",
+    });
+    expect(auth.logout).not.toHaveBeenCalled();
   });
 });

@@ -186,9 +186,17 @@ std::shared_ptr<Promise<AuthTokens>> PlatformAuth::refreshToken() {
 
 std::shared_ptr<Promise<std::optional<AuthUser>>> PlatformAuth::silentRestore() {
     auto promise = Promise<std::optional<AuthUser>>::create();
-    [AuthAdapter initializeWithCompletion:^(NSDictionary* _Nullable data) {
+    [AuthAdapter initializeWithCompletion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
+        if (error != nil) {
+            if ([error isEqualToString:@"not_signed_in"]) {
+                promise->resolve(std::nullopt);
+            } else {
+                promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
+            }
+            return;
+        }
         if (data == nil) {
-            promise->resolve(std::nullopt);
+            promise->reject(std::make_exception_ptr(std::runtime_error("unknown")));
             return;
         }
         AuthUser user;
@@ -226,9 +234,21 @@ void PlatformAuth::logout() {
     [AuthAdapter logout];
 }
 
-std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess() {
+std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess(AuthProvider provider) {
     auto promise = Promise<void>::create();
-    [AuthAdapter revokeAccessWithCompletion:^(NSString* _Nullable error) {
+    NSString* providerName;
+    switch (provider) {
+        case AuthProvider::GOOGLE:
+            providerName = @"google";
+            break;
+        case AuthProvider::APPLE:
+            providerName = @"apple";
+            break;
+        case AuthProvider::MICROSOFT:
+            providerName = @"microsoft";
+            break;
+    }
+    [AuthAdapter revokeAccessWithProvider:providerName completion:^(NSString* _Nullable error) {
         if (error != nil) {
             promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
             return;

@@ -556,9 +556,16 @@ public class AuthAdapter: NSObject {
   }
 
   @objc
-  public static func initialize(completion: @escaping (NSDictionary?) -> Void) {
+  public static func initialize(completion: @escaping (NSDictionary?, String?) -> Void) {
     if Bundle.main.object(forInfoDictionaryKey: "GIDClientID") != nil {
       GIDSignIn.sharedInstance.restorePreviousSignIn { user, error in
+        if let error = error {
+          let mappedError = mapError(error)
+          if mappedError != "not_signed_in" {
+            completion(nil, mappedError)
+            return
+          }
+        }
         if let user = user {
           tokenStoreLock.lock()
           let cachedServerAuthCode = inMemoryGoogleServerAuthCode
@@ -575,7 +582,7 @@ public class AuthAdapter: NSObject {
           "hostedDomain": user.configuration.hostedDomain ?? "",
           "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000
           ]
-          completion(data as NSDictionary)
+          completion(data as NSDictionary, nil)
           return
         }
         self.tryMicrosoftSilentRefresh(completion: completion)
@@ -585,18 +592,20 @@ public class AuthAdapter: NSObject {
     }
   }
 
-  private static func tryMicrosoftSilentRefresh(completion: @escaping (NSDictionary?) -> Void) {
+  private static func tryMicrosoftSilentRefresh(
+    completion: @escaping (NSDictionary?, String?) -> Void
+  ) {
     tokenStoreLock.lock()
     let refreshToken = inMemoryMicrosoftRefreshToken
     let currentScopes = inMemoryMicrosoftScopes
     tokenStoreLock.unlock()
     guard let refreshToken = refreshToken else {
-      completion(nil)
+      completion(nil, "not_signed_in")
       return
     }
     
     guard let clientId = Bundle.main.object(forInfoDictionaryKey: "MSALClientID") as? String, !clientId.isEmpty else {
-      completion(nil)
+      completion(nil, "configuration_error")
       return
     }
     
@@ -604,7 +613,7 @@ public class AuthAdapter: NSObject {
     let b2cDomain = Bundle.main.object(forInfoDictionaryKey: "MSALB2cDomain") as? String
     guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
           let tokenUrl = URL(string: "\(authBaseUrl)oauth2/v2.0/token") else {
-      completion(nil)
+      completion(nil, "configuration_error")
       return
     }
 
@@ -622,27 +631,24 @@ public class AuthAdapter: NSObject {
     
     URLSession.shared.dataTask(with: request) { data, response, error in
       DispatchQueue.main.async {
-        if let error = error {
-          #if DEBUG
-          print("[NitroAuth] Microsoft silent refresh network error: \(error.localizedDescription)")
-          #endif
-          completion(nil)
+        if error != nil {
+          completion(nil, "network_error")
           return
         }
         if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-          #if DEBUG
-          print("[NitroAuth] Microsoft silent refresh HTTP \(httpResponse.statusCode)")
-          #endif
-          completion(nil)
+          if let data = data,
+             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+             let errorCode = json["error"] as? String {
+            completion(nil, mapOAuthError(errorCode))
+          } else {
+            completion(nil, "network_error")
+          }
           return
         }
         guard let data = data,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let idToken = json["id_token"] as? String else {
-          #if DEBUG
-          print("[NitroAuth] Microsoft silent refresh: failed to parse token response")
-          #endif
-          completion(nil)
+          completion(nil, "parse_error")
           return
         }
 
@@ -669,7 +675,7 @@ public class AuthAdapter: NSObject {
           "scopes": currentScopes,
           "expirationTime": expirationTime
         ]
-        completion(resultData as NSDictionary)
+        completion(resultData as NSDictionary, nil)
       }
     }.resume()
   }
@@ -822,18 +828,27 @@ public class AuthAdapter: NSObject {
   }
 
   @objc
-  public static func revokeAccess(completion: @escaping (String?) -> Void) {
-    GIDSignIn.sharedInstance.disconnect { error in
-      tokenStoreLock.lock()
-      inMemoryMicrosoftRefreshToken = nil
-      inMemoryMicrosoftScopes = defaultMicrosoftScopes
-      inMemoryGoogleServerAuthCode = nil
-      tokenStoreLock.unlock()
+  public static func revokeAccess(
+    provider: String,
+    completion: @escaping (String?) -> Void
+  ) {
+    guard provider == "google" else {
+      completion("unsupported_provider")
+      return
+    }
+    guard GIDSignIn.sharedInstance.currentUser != nil else {
+      completion("not_signed_in")
+      return
+    }
 
+    GIDSignIn.sharedInstance.disconnect { error in
       if let error = error {
         completion(mapError(error))
         return
       }
+      tokenStoreLock.lock()
+      inMemoryGoogleServerAuthCode = nil
+      tokenStoreLock.unlock()
       completion(nil)
     }
   }

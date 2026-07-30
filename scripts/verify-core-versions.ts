@@ -1,10 +1,14 @@
 const projectRoot = import.meta.dir + "/..";
 
 const expectedVersions = {
+  expo: "~57.0.9",
+  nitrogen: "0.36.4",
   react: "19.2.3",
   "react-dom": "19.2.3",
-  "react-native": "0.85.3",
+  "react-native": "0.86.2",
+  "react-native-nitro-modules": "0.36.4",
 } as const;
+const expectedNitroPeerRange = ">=0.36.4 <0.37.0";
 
 type DependencyName = keyof typeof expectedVersions;
 type JsonRecord = Record<string, unknown>;
@@ -19,6 +23,9 @@ const checks: Array<{
       ["overrides", "react"],
       ["overrides", "react-dom"],
       ["overrides", "react-native"],
+      ["overrides", "expo"],
+      ["overrides", "react-native-nitro-modules"],
+      ["devDependencies", "nitrogen"],
     ],
   },
   {
@@ -27,6 +34,8 @@ const checks: Array<{
       ["dependencies", "react"],
       ["dependencies", "react-dom"],
       ["dependencies", "react-native"],
+      ["dependencies", "expo"],
+      ["dependencies", "react-native-nitro-modules"],
     ],
   },
   {
@@ -34,6 +43,7 @@ const checks: Array<{
     fields: [
       ["devDependencies", "react"],
       ["devDependencies", "react-native"],
+      ["devDependencies", "react-native-nitro-modules"],
     ],
   },
 ];
@@ -67,6 +77,19 @@ for (const check of checks) {
       );
     }
   }
+}
+
+const packageJson = await readJson(
+  "packages/react-native-nitro-auth/package.json"
+);
+const actualNitroPeerRange = getPathValue(packageJson, [
+  "peerDependencies",
+  "react-native-nitro-modules",
+]);
+if (actualNitroPeerRange !== expectedNitroPeerRange) {
+  failures.push(
+    `${projectRoot}/packages/react-native-nitro-auth/package.json -> peerDependencies.react-native-nitro-modules: expected "${expectedNitroPeerRange}", got "${String(actualNitroPeerRange)}"`
+  );
 }
 
 if (failures.length > 0) {
