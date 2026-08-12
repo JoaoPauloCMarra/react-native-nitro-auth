@@ -484,28 +484,19 @@ std::shared_ptr<Promise<void>> HybridAuth::requestScopes(const std::vector<std::
   return promise;
 }
 
-std::shared_ptr<Promise<ScopeRevocationResult>> HybridAuth::revokeScopes(const std::vector<std::string>& scopes) {
+std::shared_ptr<Promise<void>> HybridAuth::revokeScopes(
+    const std::vector<std::string>& scopes) {
   log("revokeScopes");
-  auto promise = Promise<ScopeRevocationResult>::create();
-  std::vector<std::string> revokedScopes;
   {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
-    const std::unordered_set<std::string> scopesToRemove(scopes.begin(), scopes.end());
-    for (const auto& scope : _grantedScopes) {
-      if (scopesToRemove.find(scope) != scopesToRemove.end()) {
-        revokedScopes.push_back(scope);
-      }
-    }
     removeGrantedScopes(_grantedScopes, scopes);
     if (_currentUser) {
       _currentUser->scopes = _grantedScopes;
     }
   }
-  ScopeRevocationResult result;
-  result.revokedAtProvider = false;
-  result.revokedScopes = revokedScopes;
   notifyAuthStateChanged();
-  promise->resolve(result);
+  auto promise = Promise<void>::create();
+  promise->resolve();
   return promise;
 }
 

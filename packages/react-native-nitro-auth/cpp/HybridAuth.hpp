@@ -5,7 +5,6 @@
 #include "AuthEvent.hpp"
 #include "LoginOptions.hpp"
 #include "AuthTokens.hpp"
-#include "ScopeRevocationResult.hpp"
 #include <cstdint>
 #include <optional>
 #include <mutex>
@@ -26,7 +25,7 @@ public:
 
   std::shared_ptr<Promise<void>> login(AuthProvider provider, const std::optional<LoginOptions>& options) override;
   std::shared_ptr<Promise<void>> requestScopes(const std::vector<std::string>& scopes) override;
-  std::shared_ptr<Promise<ScopeRevocationResult>> revokeScopes(const std::vector<std::string>& scopes) override;
+  std::shared_ptr<Promise<void>> revokeScopes(const std::vector<std::string>& scopes) override;
   std::shared_ptr<Promise<void>> revokeAccess() override;
   std::shared_ptr<Promise<std::optional<std::string>>> getAccessToken() override;
   std::shared_ptr<Promise<AuthTokens>> refreshToken() override;

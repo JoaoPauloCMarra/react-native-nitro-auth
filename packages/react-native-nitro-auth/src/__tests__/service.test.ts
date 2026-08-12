@@ -458,15 +458,23 @@ describe("AuthService", () => {
   });
 
   describe("revokeScopes", () => {
-    it("resolves with the typed local-only result", async () => {
-      native().revokeScopes.mockResolvedValueOnce({
+    it("preserves the void result", async () => {
+      native().revokeScopes.mockResolvedValueOnce(undefined);
+      await expect(
+        AuthService.revokeScopes(["email"]),
+      ).resolves.toBeUndefined();
+    });
+
+    it("exposes the typed result through the additive method", async () => {
+      native().grantedScopes = ["email", "profile"];
+      native().revokeScopes.mockResolvedValueOnce(undefined);
+      await expect(
+        AuthService.revokeScopesWithResult(["email"]),
+      ).resolves.toEqual({
         revokedAtProvider: false,
         revokedScopes: ["email"],
       });
-      await expect(AuthService.revokeScopes(["email"])).resolves.toEqual({
-        revokedAtProvider: false,
-        revokedScopes: ["email"],
-      });
+      expect(native().revokeScopes).toHaveBeenCalledWith(["email"]);
     });
   });
 });

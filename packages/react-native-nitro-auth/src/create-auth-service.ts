@@ -82,10 +82,22 @@ export function createAuthService(
       );
     },
 
-    revokeScopes(scopes: string[]): Promise<ScopeRevocationResult> {
+    revokeScopes(scopes: string[]): Promise<void> {
       return wrapAuthOperation("revokeScopes", () =>
         getAuth().revokeScopes(scopes),
       );
+    },
+
+    revokeScopesWithResult(scopes: string[]): Promise<ScopeRevocationResult> {
+      return wrapAuthOperation("revokeScopes", async () => {
+        const auth = getAuth();
+        const scopesToRevoke = new Set(scopes);
+        const revokedScopes = auth.grantedScopes.filter((scope) =>
+          scopesToRevoke.has(scope),
+        );
+        await auth.revokeScopes(scopes);
+        return { revokedAtProvider: false, revokedScopes };
+      });
     },
 
     revokeAccess() {

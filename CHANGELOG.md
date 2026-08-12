@@ -4,14 +4,9 @@
 
 ### Breaking changes
 
-- Web tokens no longer persist merely because a custom storage adapter is
-  supplied. Set `nitroAuthPersistTokensOnWeb: true` explicitly if the app
-  accepts the browser-storage and XSS risk; otherwise tokens remain
-  memory-only.
-- `revokeScopes()` now returns
-  `{ revokedAtProvider: false, revokedScopes }` instead of `void`. Remove
-  explicit `Promise<void>` annotations around this call or update them to
-  `Promise<ScopeRevocationResult>`.
+- `AuthErrorCode` adds `interaction_required`. Exhaustive switches over this
+  union must handle the new case. This is retained because it distinguishes a
+  required interactive login from configuration, network, and token failures.
 
 ### Added
 
@@ -24,6 +19,8 @@
 - Added privacy-safe typed auth lifecycle events via `onAuthEvent()`
   (`login_started`, `login_succeeded`, `login_failed`, `tokens_refreshed`,
   `refresh_failed`, `session_changed`, `logout`, `dispose`).
+- Added `revokeScopesWithResult()` for the typed local-only result while
+  preserving the established `Promise<void>` return from `revokeScopes()`.
 - Added `nitroAuthPersistProfileOnWeb` to keep web profile PII (email, name,
   photo) out of storage, and declared `expo-constants` as an optional peer for
   the web provider-config read.
@@ -38,6 +35,9 @@
   reduced from 100 ms to 500 ms.
 - Web silent restore never opens interactive UI: near-expiry Google sessions
   reject with `interaction_required`.
+- Existing custom web storage adapters continue to persist tokens unless
+  `nitroAuthPersistTokensOnWeb: false` is explicit. New integrations should
+  make this security choice explicit.
 - Native dispose rejects pending work with `cancelled`, clears listeners, and
   performs platform teardown; Android populates the error envelope with the
   underlying provider message.

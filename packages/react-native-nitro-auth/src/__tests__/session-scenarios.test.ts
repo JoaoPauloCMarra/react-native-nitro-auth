@@ -19,11 +19,7 @@
 
 import { TextDecoder, TextEncoder } from "util";
 import { createAuthService } from "../create-auth-service";
-import type {
-  AuthTokens,
-  AuthUser,
-  ScopeRevocationResult,
-} from "../Auth.nitro";
+import type { AuthTokens, AuthUser } from "../Auth.nitro";
 
 type SessionFacade = {
   login(provider: "google" | "microsoft"): Promise<void>;
@@ -495,11 +491,7 @@ function createNativeFacade(): {
     },
     login,
     requestScopes: () => Promise.resolve(),
-    revokeScopes: () =>
-      Promise.resolve<ScopeRevocationResult>({
-        revokedAtProvider: false,
-        revokedScopes: [],
-      }),
+    revokeScopes: () => Promise.resolve(),
     revokeAccess: () => Promise.resolve(),
     getAccessToken: () => Promise.resolve(undefined),
     refreshToken,

@@ -543,7 +543,7 @@ void testDisposeRejectsPendingWorkAndClearsListeners() {
   assert(listenerCalls + eventCalls == callsBefore);
 }
 
-void testRevokeScopesReturnsLocalOnlyResult() {
+void testRevokeScopesPreservesVoidContract() {
   resetPlatformMocks();
   auto auth = std::make_shared<HybridAuth>();
 
@@ -553,10 +553,6 @@ void testRevokeScopesReturnsLocalOnlyResult() {
 
   auto revokePromise = auth->revokeScopes({"profile", "missing", "profile"});
   assert(revokePromise->isResolved());
-  auto result = revokePromise->getResult();
-  assert(!result.revokedAtProvider);
-  const std::vector<std::string> expectedRevoked{"profile"};
-  assert(result.revokedScopes == expectedRevoked);
   const std::vector<std::string> remaining{"email"};
   assert(auth->getGrantedScopes() == remaining);
 }
@@ -613,7 +609,7 @@ int main() {
   testLoginFailedEventCarriesTypedErrorCode();
   testRefreshFailedEventCarriesTypedErrorCode();
   testDisposeRejectsPendingWorkAndClearsListeners();
-  testRevokeScopesReturnsLocalOnlyResult();
+  testRevokeScopesPreservesVoidContract();
   testSessionScenariosInterleaveWithoutUnresolvedPromises();
 
   std::cout << "HybridAuth tests passed!" << std::endl;

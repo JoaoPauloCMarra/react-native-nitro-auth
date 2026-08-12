@@ -49,7 +49,8 @@ export type UseAuthReturn = AuthState & {
   login: AuthLogin;
   logout: () => void;
   requestScopes: (scopes: string[]) => Promise<void>;
-  revokeScopes: (scopes: string[]) => Promise<ScopeRevocationResult>;
+  revokeScopes: (scopes: string[]) => Promise<void>;
+  revokeScopesWithResult: (scopes: string[]) => Promise<ScopeRevocationResult>;
   revokeAccess: () => Promise<void>;
   getAccessToken: () => Promise<string | undefined>;
   refreshToken: () => Promise<AuthTokens>;
@@ -142,10 +143,25 @@ export function useAuth(): UseAuthReturn {
   );
 
   const revokeScopes = useCallback(
+    async (scopesToRevoke: string[]): Promise<void> => {
+      setState((prev) => ({ ...prev, loading: true, error: undefined }));
+      try {
+        await AuthService.revokeScopes(scopesToRevoke);
+        syncStateFromService(false, undefined);
+      } catch (e) {
+        const error = AuthError.from(e);
+        setState((prev) => ({ ...prev, loading: false, error }));
+        throw error;
+      }
+    },
+    [syncStateFromService],
+  );
+
+  const revokeScopesWithResult = useCallback(
     async (scopesToRevoke: string[]): Promise<ScopeRevocationResult> => {
       setState((prev) => ({ ...prev, loading: true, error: undefined }));
       try {
-        const result = await AuthService.revokeScopes(scopesToRevoke);
+        const result = await AuthService.revokeScopesWithResult(scopesToRevoke);
         syncStateFromService(false, undefined);
         return result;
       } catch (e) {
@@ -232,6 +248,7 @@ export function useAuth(): UseAuthReturn {
       logout,
       requestScopes,
       revokeScopes,
+      revokeScopesWithResult,
       revokeAccess,
       getAccessToken,
       refreshToken,
@@ -243,6 +260,7 @@ export function useAuth(): UseAuthReturn {
       logout,
       requestScopes,
       revokeScopes,
+      revokeScopesWithResult,
       revokeAccess,
       getAccessToken,
       refreshToken,

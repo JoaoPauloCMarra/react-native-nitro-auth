@@ -7,7 +7,6 @@ import type {
   AuthErrorCode,
   AuthEvent,
   AuthEventType,
-  ScopeRevocationResult,
 } from "./Auth.nitro";
 import type { JSStorageAdapter } from "./js-storage-adapter";
 import { logger } from "./utils/logger";
@@ -351,10 +350,10 @@ class AuthWeb implements Auth {
   }
 
   private shouldPersistTokensInStorage(): boolean {
-    // Security-first default: tokens stay memory-only unless the consumer
-    // explicitly opts in. A custom storage adapter changes WHERE values are
-    // stored, never WHETHER tokens may be persisted.
-    return this._config.nitroAuthPersistTokensOnWeb === true;
+    return (
+      this._config.nitroAuthPersistTokensOnWeb ??
+      this._storageAdapter !== undefined
+    );
   }
 
   private shouldPersistProfile(): boolean {
@@ -758,12 +757,9 @@ class AuthWeb implements Auth {
     }
   }
 
-  async revokeScopes(scopes: string[]): Promise<ScopeRevocationResult> {
+  async revokeScopes(scopes: string[]): Promise<void> {
     logger.log("Revoking scopes:", scopes);
     const scopesToRevoke = new Set(scopes);
-    const revokedScopes = this._grantedScopes.filter((scope) =>
-      scopesToRevoke.has(scope),
-    );
     this._grantedScopes = this._grantedScopes.filter(
       (scope) => !scopesToRevoke.has(scope),
     );
@@ -772,10 +768,6 @@ class AuthWeb implements Auth {
       this._currentUser.scopes = this._grantedScopes;
       this.updateUser(this._currentUser);
     }
-    return {
-      revokedAtProvider: false,
-      revokedScopes,
-    };
   }
 
   async revokeAccess(): Promise<void> {

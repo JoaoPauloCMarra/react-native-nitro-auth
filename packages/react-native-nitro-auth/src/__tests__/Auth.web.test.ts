@@ -1193,7 +1193,7 @@ describe("AuthModule (web)", () => {
     expect(auth.currentUser?.userId).toBe("sub-123");
   });
 
-  it("revokeScopes returns a typed local-only result", async () => {
+  it("revokeScopes preserves the void contract", async () => {
     sessionStorage.setItem(
       CACHE_KEY,
       JSON.stringify({
@@ -1204,12 +1204,9 @@ describe("AuthModule (web)", () => {
     sessionStorage.setItem(SCOPES_KEY, JSON.stringify(["email", "profile"]));
     const auth = await loadAuthModule();
 
-    const result = await auth.revokeScopes(["email", "missing"]);
-
-    expect(result).toEqual({
-      revokedAtProvider: false,
-      revokedScopes: ["email"],
-    });
+    await expect(
+      auth.revokeScopes(["email", "missing"]),
+    ).resolves.toBeUndefined();
     expect(auth.grantedScopes).toEqual(["profile"]);
     expect(auth.currentUser?.scopes).toEqual(["profile"]);
   });

@@ -103,7 +103,7 @@ export interface Auth extends HybridObject<{ ios: "c++"; android: "c++" }> {
 
   login(provider: AuthProvider, options?: LoginOptions): Promise<void>;
   requestScopes(scopes: string[]): Promise<void>;
-  revokeScopes(scopes: string[]): Promise<ScopeRevocationResult>;
+  revokeScopes(scopes: string[]): Promise<void>;
   revokeAccess(): Promise<void>;
   getAccessToken(): Promise<string | undefined>;
   refreshToken(): Promise<AuthTokens>;

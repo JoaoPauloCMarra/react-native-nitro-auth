@@ -19,8 +19,6 @@ namespace margelo::nitro::NitroAuth { struct AuthUser; }
 namespace margelo::nitro::NitroAuth { enum class AuthProvider; }
 // Forward declaration of `LoginOptions` to properly resolve imports.
 namespace margelo::nitro::NitroAuth { struct LoginOptions; }
-// Forward declaration of `ScopeRevocationResult` to properly resolve imports.
-namespace margelo::nitro::NitroAuth { struct ScopeRevocationResult; }
 // Forward declaration of `AuthTokens` to properly resolve imports.
 namespace margelo::nitro::NitroAuth { struct AuthTokens; }
 // Forward declaration of `AuthEvent` to properly resolve imports.
@@ -33,7 +31,6 @@ namespace margelo::nitro::NitroAuth { struct AuthEvent; }
 #include <NitroModules/Promise.hpp>
 #include "AuthProvider.hpp"
 #include "LoginOptions.hpp"
-#include "ScopeRevocationResult.hpp"
 #include "AuthTokens.hpp"
 #include <functional>
 #include "AuthEvent.hpp"
@@ -73,7 +70,7 @@ namespace margelo::nitro::NitroAuth {
       // Methods
       virtual std::shared_ptr<Promise<void>> login(AuthProvider provider, const std::optional<LoginOptions>& options) = 0;
       virtual std::shared_ptr<Promise<void>> requestScopes(const std::vector<std::string>& scopes) = 0;
-      virtual std::shared_ptr<Promise<ScopeRevocationResult>> revokeScopes(const std::vector<std::string>& scopes) = 0;
+      virtual std::shared_ptr<Promise<void>> revokeScopes(const std::vector<std::string>& scopes) = 0;
       virtual std::shared_ptr<Promise<void>> revokeAccess() = 0;
       virtual std::shared_ptr<Promise<std::optional<std::string>>> getAccessToken() = 0;
       virtual std::shared_ptr<Promise<AuthTokens>> refreshToken() = 0;
