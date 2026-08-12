@@ -6,6 +6,7 @@ lib/
 dist/
 build/
 *.tsbuildinfo
+.coverage/
 
 # Turbo
 .turbo/
@@ -69,9 +70,6 @@ local.properties
 *.jsbundle
 *.metro.health-check*
 
-# Nitro generated code
-nitrogen/generated/
-
 # C++ build artifacts
 *.o
 *.a
@@ -116,3 +114,6 @@ temp/
 *.md
 !README.md
 !CHANGELOG.md
+!SECURITY.md
+!docs/**/*.md
+!packages/**/SECURITY.md

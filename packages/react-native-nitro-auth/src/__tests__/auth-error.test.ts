@@ -6,6 +6,7 @@ import {
 
 const VALID_CODES = [
   "cancelled",
+  "interaction_required",
   "timeout",
   "popup_blocked",
   "network_error",
@@ -62,8 +63,76 @@ describe("toAuthErrorCode", () => {
     );
   });
 
+  it("normalizes legacy native disposed errors to cancelled", () => {
+    expect(toAuthErrorCode("disposed")).toBe("cancelled");
+  });
+
   it("returns 'unknown' for empty string", () => {
     expect(toAuthErrorCode("")).toBe("unknown");
+  });
+});
+
+describe("AuthError envelope", () => {
+  it("extracts the structured web envelope (code + underlyingError)", () => {
+    const err = new AuthError({
+      code: "network_error",
+      underlyingError: "fetch failed",
+    });
+    expect(err.code).toBe("network_error");
+    expect(err.underlyingMessage).toBe("fetch failed");
+    expect(err.operation).toBeUndefined();
+  });
+
+  it("extracts the structured envelope (code + underlyingMessage)", () => {
+    const err = new AuthError({
+      code: "token_error",
+      underlyingMessage: "invalid_grant",
+    });
+    expect(err.code).toBe("token_error");
+    expect(err.underlyingMessage).toBe("invalid_grant");
+  });
+
+  it("ignores non-code structured envelopes and falls back to message parsing", () => {
+    const err = new AuthError({ code: "not_a_code", detail: "x" });
+    expect(err.code).toBe("unknown");
+    expect(err.underlyingMessage).toBe("[object Object]");
+  });
+
+  it("attaches the operation passed to the constructor", () => {
+    const err = new AuthError("cancelled", "login");
+    expect(err.code).toBe("cancelled");
+    expect(err.operation).toBe("login");
+  });
+
+  it("from() attaches the operation to newly wrapped errors", () => {
+    const err = AuthError.from(new Error("network_error"), "refreshToken");
+    expect(err.code).toBe("network_error");
+    expect(err.operation).toBe("refreshToken");
+  });
+
+  it("from() returns existing AuthError instances unchanged", () => {
+    const original = new AuthError("cancelled");
+    expect(AuthError.from(original, "login")).toBe(original);
+  });
+
+  it("from() wraps the structured web envelope with an operation", () => {
+    const err = AuthError.from(
+      { code: "invalid_state", underlyingError: "State mismatch" },
+      "silentRestore",
+    );
+    expect(err.code).toBe("invalid_state");
+    expect(err.underlyingMessage).toBe("State mismatch");
+    expect(err.operation).toBe("silentRestore");
+  });
+
+  it("preserves the underlying message for prefixed native envelopes", () => {
+    const err = AuthError.from(
+      new Error("refresh_failed: invalid_grant"),
+      "refreshToken",
+    );
+    expect(err.code).toBe("refresh_failed");
+    expect(err.underlyingMessage).toBe("refresh_failed: invalid_grant");
+    expect(err.operation).toBe("refreshToken");
   });
 });
 

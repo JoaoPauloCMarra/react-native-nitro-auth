@@ -161,9 +161,11 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
     test("AuthError maps structured codes", () => {
       const codes: AuthErrorCode[] = [
         "cancelled",
+        "interaction_required",
         "timeout",
         "network_error",
         "configuration_error",
+        "not_signed_in",
         "unsupported_provider",
         "invalid_state",
         "invalid_nonce",
@@ -222,16 +224,29 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
         ),
     currentUser && currentUser.provider !== "apple"
       ? test("revokeScopes validates the active provider", async () => {
-          await AuthService.revokeScopes(["email"]);
+          const result = await AuthService.revokeScopes(["email"]);
+          assert(
+            result.revokedAtProvider === false &&
+              Array.isArray(result.revokedScopes),
+            "revokeScopes must return the typed local-only result",
+          );
         })
       : unsupported(
           "revokeScopes validates the active provider",
           currentUser ? "Scopes are not supported for Apple" : "Sign in first",
         ),
-    unsupported(
-      "logout validates the active session",
-      "Manual destructive action",
-    ),
+    currentUser
+      ? unsupported(
+          "logout clears the active session",
+          "Manual destructive action",
+        )
+      : test("logout is idempotent when signed out", () => {
+          AuthService.logout();
+          assert(
+            AuthService.currentUser === undefined,
+            "logout must leave the session cleared",
+          );
+        }),
     {
       name: "Android Play Services is present",
       unsupportedReason:
@@ -305,6 +320,11 @@ export const SmokeTestCard = memo(function SmokeTestCard() {
           ) : null}
         </View>
         <Pressable
+          accessibilityLabel={
+            results.length > 0 ? "Run smoke tests again" : "Run smoke tests"
+          }
+          accessibilityRole="button"
+          accessibilityState={{ busy: running, disabled: running }}
           style={[styles.runButton, running && styles.runButtonDisabled]}
           onPress={runTests}
           disabled={running}

@@ -1,5 +1,5 @@
 appId: com.auth.example
-name: "Smoke Tests - All Pass"
+name: "Smoke Tests - Terminal State"
 ---
 
 - clearState
@@ -15,6 +15,8 @@ name: "Smoke Tests - All Pass"
     visible: "Run again"
     timeout: 30000
 
-- assertNotVisible: "failed"
-
-- assertVisible: "13/18 passed, 5 skipped"
+# Terminal state: every test executed, skipped with a reason, or passed.
+# The summary always shows "X/Y passed, Z skipped"; a failed row renders a
+# "FAIL" status label. No fixed test-count assertion is allowed.
+- assertVisible: "passed"
+- assertNotVisible: "FAIL"

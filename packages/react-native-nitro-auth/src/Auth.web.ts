@@ -5,9 +5,19 @@ import type {
   LoginOptions,
   AuthTokens,
   AuthErrorCode,
+  AuthEvent,
+  AuthEventType,
+  ScopeRevocationResult,
 } from "./Auth.nitro";
 import type { JSStorageAdapter } from "./js-storage-adapter";
 import { logger } from "./utils/logger";
+import { mapOAuthErrorCode } from "./utils/oauth-error";
+import {
+  buildAuthorizationCodeBody,
+  buildRefreshTokenBody,
+  parseExpiresInMilliseconds,
+  parseTokenResponse,
+} from "./utils/oauth-token-client";
 
 const CACHE_KEY = "nitro_auth_user";
 const SCOPES_KEY = "nitro_auth_scopes";
@@ -18,6 +28,7 @@ const STORAGE_MODE_SESSION = "session";
 const STORAGE_MODE_LOCAL = "local";
 const STORAGE_MODE_MEMORY = "memory";
 const POPUP_POLL_INTERVAL_MS = 100;
+const POPUP_POLL_INTERVAL_CROSS_ORIGIN_MS = 1000;
 const POPUP_TIMEOUT_MS = 120000;
 const WEB_STORAGE_MODES = new Set([
   STORAGE_MODE_SESSION,
@@ -36,6 +47,7 @@ const MICROSOFT_DOMAIN_PATTERN =
   /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
 const WEB_AUTH_ERROR_CODES: ReadonlySet<string> = new Set<AuthErrorCode>([
   "cancelled",
+  "interaction_required",
   "timeout",
   "popup_blocked",
   "network_error",
@@ -83,6 +95,7 @@ type AuthWebExtraConfig = {
   appleWebClientId?: string;
   nitroAuthWebStorage?: "session" | "local" | "memory";
   nitroAuthPersistTokensOnWeb?: boolean;
+  nitroAuthPersistProfileOnWeb?: boolean;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -91,11 +104,13 @@ type AppleAuthInitConfig = Parameters<
 >[0];
 
 class AuthWebError extends Error {
+  public readonly code: AuthErrorCode;
   public readonly underlyingError: string | undefined;
 
   constructor(message: AuthErrorCode, underlyingError?: string) {
     super(message);
     this.name = "AuthWebError";
+    this.code = message;
     this.underlyingError = underlyingError;
   }
 }
@@ -147,25 +162,6 @@ function setOrDelete<T extends object, K extends keyof T>(
   target[key] = value;
 }
 
-const parseExpiresInSeconds = (value: unknown): number | undefined => {
-  const candidate =
-    typeof value === "number"
-      ? value
-      : typeof value === "string" && value.trim().length > 0
-        ? Number(value)
-        : undefined;
-
-  if (
-    typeof candidate !== "number" ||
-    !Number.isFinite(candidate) ||
-    candidate < 0
-  ) {
-    return undefined;
-  }
-
-  return candidate;
-};
-
 const parseAuthUser = (value: unknown): AuthUser | undefined => {
   if (!isJsonObject(value) || !isAuthProvider(value.provider)) {
     return undefined;
@@ -192,6 +188,14 @@ const parseAuthUser = (value: unknown): AuthUser | undefined => {
     "serverAuthCode",
     getOptionalString(value, "serverAuthCode"),
   );
+  setIfDefined(
+    user,
+    "authorizationCode",
+    getOptionalString(value, "authorizationCode"),
+  );
+  setIfDefined(user, "userId", getOptionalString(value, "userId"));
+  setIfDefined(user, "phoneNumber", getOptionalString(value, "phoneNumber"));
+  setIfDefined(user, "hostedDomain", getOptionalString(value, "hostedDomain"));
   setIfDefined(user, "scopes", scopes);
   setIfDefined(
     user,
@@ -264,6 +268,13 @@ const parseAuthWebExtraConfig = (value: unknown): AuthWebExtraConfig => {
       ? value.nitroAuthPersistTokensOnWeb
       : undefined,
   );
+  setIfDefined(
+    config,
+    "nitroAuthPersistProfileOnWeb",
+    typeof value.nitroAuthPersistProfileOnWeb === "boolean"
+      ? value.nitroAuthPersistProfileOnWeb
+      : undefined,
+  );
   return config;
 };
 
@@ -289,10 +300,13 @@ class AuthWeb implements Auth {
   private _grantedScopes: string[] = [];
   private _listeners: ((user: AuthUser | undefined) => void)[] = [];
   private _tokenListeners: ((tokens: AuthTokens) => void)[] = [];
+  private _eventListeners: ((event: AuthEvent) => void)[] = [];
   private _storageAdapter: WebStorageDriver | undefined;
   private _browserStorageResolved = false;
   private _browserStorageCache: Storage | undefined;
   private _refreshPromise: Promise<AuthTokens> | undefined;
+  private _refreshReject: ((error: unknown) => void) | undefined;
+  private _loginReject: ((error: unknown) => void) | undefined;
   private _pendingGoogleNonce: string | undefined;
   private _loginInFlight: boolean = false;
   private _sessionGeneration = 0;
@@ -337,10 +351,14 @@ class AuthWeb implements Auth {
   }
 
   private shouldPersistTokensInStorage(): boolean {
-    if (this._storageAdapter) {
-      return true;
-    }
+    // Security-first default: tokens stay memory-only unless the consumer
+    // explicitly opts in. A custom storage adapter changes WHERE values are
+    // stored, never WHETHER tokens may be persisted.
     return this._config.nitroAuthPersistTokensOnWeb === true;
+  }
+
+  private shouldPersistProfile(): boolean {
+    return this._config.nitroAuthPersistProfileOnWeb !== false;
   }
 
   private getWebStorageMode(): "session" | "local" | "memory" {
@@ -446,15 +464,19 @@ class AuthWeb implements Auth {
   }
 
   private sanitizeUserForPersistence(user: AuthUser): AuthUser {
-    if (this.shouldPersistTokensInStorage()) {
-      return user;
-    }
-
     const safeUser = { ...user };
-    delete safeUser.accessToken;
-    delete safeUser.idToken;
-    delete safeUser.serverAuthCode;
-    delete safeUser.authorizationCode;
+    if (!this.shouldPersistTokensInStorage()) {
+      delete safeUser.accessToken;
+      delete safeUser.idToken;
+      delete safeUser.serverAuthCode;
+      delete safeUser.authorizationCode;
+      delete safeUser.refreshToken;
+    }
+    if (!this.shouldPersistProfile()) {
+      delete safeUser.email;
+      delete safeUser.name;
+      delete safeUser.photo;
+    }
     return safeUser;
   }
 
@@ -492,7 +514,13 @@ class AuthWeb implements Auth {
           delete safeUser.idToken;
           delete safeUser.serverAuthCode;
           delete safeUser.authorizationCode;
+          delete safeUser.refreshToken;
           this._currentUser = safeUser;
+        }
+        if (!this.shouldPersistProfile()) {
+          delete this._currentUser.email;
+          delete this._currentUser.name;
+          delete this._currentUser.photo;
         }
       } catch (error) {
         logger.warn("Failed to parse cached auth user; clearing cache", {
@@ -519,8 +547,11 @@ class AuthWeb implements Auth {
       }
     }
 
-    if (!this.shouldPersistTokensInStorage() && !this._storageAdapter) {
+    if (!this.shouldPersistTokensInStorage()) {
       this.removePersistedBrowserValue(MS_REFRESH_TOKEN_KEY);
+      if (this._storageAdapter) {
+        this.removeValue(MS_REFRESH_TOKEN_KEY);
+      }
     }
   }
 
@@ -544,7 +575,11 @@ class AuthWeb implements Auth {
     callback: (user: AuthUser | undefined) => void,
   ): () => void {
     this._listeners.push(callback);
-    callback(this._currentUser);
+    try {
+      callback(this._currentUser);
+    } catch (error) {
+      logger.warn("Auth state listener failed", { error: String(error) });
+    }
     return () => {
       this._listeners = this._listeners.filter((l) => l !== callback);
     };
@@ -557,10 +592,39 @@ class AuthWeb implements Auth {
     };
   }
 
+  onAuthEvent(callback: (event: AuthEvent) => void): () => void {
+    this._eventListeners.push(callback);
+    return () => {
+      this._eventListeners = this._eventListeners.filter((l) => l !== callback);
+    };
+  }
+
+  private emitEvent(
+    type: AuthEventType,
+    provider?: AuthProvider,
+    errorCode?: AuthErrorCode,
+  ): void {
+    const event: AuthEvent = { type };
+    setIfDefined(event, "provider", provider);
+    setIfDefined(event, "errorCode", errorCode);
+    for (const listener of [...this._eventListeners]) {
+      try {
+        listener(event);
+      } catch (error) {
+        logger.warn("Auth event listener failed", { error: String(error) });
+      }
+    }
+  }
+
   private notify() {
     for (const listener of [...this._listeners]) {
-      listener(this._currentUser);
+      try {
+        listener(this._currentUser);
+      } catch (error) {
+        logger.warn("Auth state listener failed", { error: String(error) });
+      }
     }
+    this.emitEvent("session_changed", this._currentUser?.provider);
   }
 
   private notifyTokenListeners(tokens: AuthTokens): void {
@@ -583,11 +647,26 @@ class AuthWeb implements Auth {
     }
 
     this._loginInFlight = true;
+    let rejectLogin: ((error: unknown) => void) | undefined;
+    const operationPromise = Promise.resolve().then(operation);
+    const cancellable = new Promise<void>((resolve, reject) => {
+      rejectLogin = reject;
+      void operationPromise.then(resolve).catch(reject);
+    });
+    this._loginReject = rejectLogin;
     try {
-      await operation();
+      await cancellable;
     } finally {
       this._loginInFlight = false;
+      this._loginReject = undefined;
     }
+  }
+
+  /** Cancels the active login so logout/dispose settle pending work. */
+  private cancelActiveLogin(): void {
+    this._loginReject?.(
+      new AuthWebError("cancelled", "Auth operation was cancelled"),
+    );
   }
 
   private assertActiveGeneration(generation: number): void {
@@ -602,6 +681,9 @@ class AuthWeb implements Auth {
     logger.log(`Starting login with ${provider}`, { scopes: options?.scopes });
     try {
       await this.runLoginOperation(async () => {
+        // Only emit after the in-flight guard: a rejected duplicate login
+        // must not claim it "started".
+        this.emitEvent("login_started", provider);
         if (provider === "google") {
           const scopes = options?.scopes ?? DEFAULT_SCOPES;
           await this.loginGoogle(scopes, loginHint, options, generation);
@@ -630,9 +712,11 @@ class AuthWeb implements Auth {
           `Unsupported auth provider: ${provider}`,
         );
       });
+      this.emitEvent("login_succeeded", provider);
       logger.log(`Login successful with ${provider}`);
     } catch (e: unknown) {
       const error = this.mapError(e);
+      this.emitEvent("login_failed", provider, error.code);
       logger.error(`Login failed for ${provider}:`, error.message);
       throw error;
     }
@@ -640,11 +724,12 @@ class AuthWeb implements Auth {
 
   async requestScopes(scopes: string[]): Promise<void> {
     if (!this._currentUser) {
-      throw new Error("No user logged in");
+      throw new AuthWebError("not_signed_in", "No user logged in");
     }
     const provider = this._currentUser.provider;
     if (provider !== "google" && provider !== "microsoft") {
-      throw new Error(
+      throw new AuthWebError(
+        "unsupported_provider",
         "Scope management only supported for Google and Microsoft",
       );
     }
@@ -673,16 +758,24 @@ class AuthWeb implements Auth {
     }
   }
 
-  async revokeScopes(scopes: string[]): Promise<void> {
+  async revokeScopes(scopes: string[]): Promise<ScopeRevocationResult> {
     logger.log("Revoking scopes:", scopes);
+    const scopesToRevoke = new Set(scopes);
+    const revokedScopes = this._grantedScopes.filter((scope) =>
+      scopesToRevoke.has(scope),
+    );
     this._grantedScopes = this._grantedScopes.filter(
-      (s) => !scopes.includes(s),
+      (scope) => !scopesToRevoke.has(scope),
     );
     this.saveValue(SCOPES_KEY, JSON.stringify(this._grantedScopes));
     if (this._currentUser) {
       this._currentUser.scopes = this._grantedScopes;
       this.updateUser(this._currentUser);
     }
+    return {
+      revokedAtProvider: false,
+      revokedScopes,
+    };
   }
 
   async revokeAccess(): Promise<void> {
@@ -742,13 +835,24 @@ class AuthWeb implements Auth {
       return this._refreshPromise;
     }
 
-    const refreshPromise = this.performRefreshToken(this._sessionGeneration);
+    const generation = this._sessionGeneration;
+    let rejectRefresh: ((error: unknown) => void) | undefined;
+    const refreshPromise = new Promise<AuthTokens>((resolve, reject) => {
+      rejectRefresh = reject;
+      void this.performRefreshToken(generation).then(resolve).catch(reject);
+    });
     this._refreshPromise = refreshPromise;
+    this._refreshReject = rejectRefresh;
     try {
       return await refreshPromise;
+    } catch (e: unknown) {
+      const error = this.mapError(e);
+      this.emitEvent("refresh_failed", this._currentUser?.provider, error.code);
+      throw error;
     } finally {
       if (this._refreshPromise === refreshPromise) {
         this._refreshPromise = undefined;
+        this._refreshReject = undefined;
       }
     }
   }
@@ -777,10 +881,10 @@ class AuthWeb implements Auth {
 
       const authBaseUrl = this.getMicrosoftAuthBaseUrl(tenant, b2cDomain);
       const tokenUrl = `${authBaseUrl}oauth2/v2.0/token`;
-      const body = new URLSearchParams({
-        client_id: clientId,
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
+      const body = buildRefreshTokenBody({
+        tokenUrl,
+        clientId,
+        refreshToken,
       });
 
       let response: Response;
@@ -798,24 +902,27 @@ class AuthWeb implements Auth {
 
       const json = await this.parseResponseObject(response);
       this.assertActiveGeneration(generation);
-      if (!response.ok) {
+      const parsed = parseTokenResponse(json, "refresh");
+      if (!parsed.ok) {
         throw new AuthWebError(
-          "refresh_failed",
-          getOptionalString(json, "error_description") ??
-            getOptionalString(json, "error") ??
-            "Token refresh failed",
+          parsed.errorCode,
+          parsed.underlyingMessage ?? "Token refresh failed",
         );
       }
-
-      const idToken = getOptionalString(json, "id_token");
-      const accessToken = getOptionalString(json, "access_token");
-      const newRefreshToken = getOptionalString(json, "refresh_token");
+      const idToken = parsed.tokens.idToken;
+      if (!idToken) {
+        throw new AuthWebError(
+          "no_id_token",
+          "No id_token in token refresh response",
+        );
+      }
+      const accessToken = parsed.tokens.accessToken;
+      const newRefreshToken = parsed.tokens.refreshToken;
+      const expirationTime = parsed.tokens.expirationTime;
 
       if (newRefreshToken) {
         this.saveRefreshToken(newRefreshToken);
       }
-
-      const expirationTime = this.getExpirationTime(json["expires_in"]);
 
       const currentUser = this._currentUser;
       if (!currentUser) {
@@ -844,6 +951,7 @@ class AuthWeb implements Auth {
       setIfDefined(tokens, "idToken", effectiveIdToken);
       setIfDefined(tokens, "refreshToken", newRefreshToken);
       setIfDefined(tokens, "expirationTime", expirationTime);
+      this.emitEvent("tokens_refreshed", "microsoft");
       this.notifyTokenListeners(tokens);
       return tokens;
     }
@@ -869,11 +977,12 @@ class AuthWeb implements Auth {
     setIfDefined(tokens, "idToken", this._currentUser.idToken);
     setIfDefined(tokens, "refreshToken", this._currentUser.refreshToken);
     setIfDefined(tokens, "expirationTime", this._currentUser.expirationTime);
+    this.emitEvent("tokens_refreshed", "google");
     this.notifyTokenListeners(tokens);
     return tokens;
   }
 
-  private mapError(error: unknown): Error {
+  private mapError(error: unknown): AuthWebError {
     if (error instanceof AuthWebError) {
       return error;
     }
@@ -986,48 +1095,21 @@ class AuthWeb implements Auth {
     }
   }
 
-  private mapOAuthErrorCode(error: string): AuthErrorCode {
-    const normalizedError = error.trim().toLowerCase();
-    if (
-      normalizedError === "access_denied" ||
-      normalizedError === "popup_closed_by_user" ||
-      normalizedError === "user_cancelled"
-    ) {
-      return "cancelled";
+  /**
+   * Accepts only the exact registered redirect target. The provider redirects
+   * to the page root (`redirectUri` = origin), optionally carrying a hash or
+   * query section; any other path is rejected instead of being parsed.
+   */
+  private isExactRedirectTarget(url: string, origin: string): boolean {
+    if (url === origin || url === `${origin}/`) {
+      return true;
     }
-
-    if (
-      normalizedError === "server_error" ||
-      normalizedError === "temporarily_unavailable"
-    ) {
-      return "network_error";
-    }
-
-    if (
-      normalizedError === "invalid_client" ||
-      normalizedError === "invalid_scope" ||
-      normalizedError === "unauthorized_client"
-    ) {
-      return "configuration_error";
-    }
-
-    if (
-      normalizedError === "invalid_grant" ||
-      normalizedError === "invalid_token"
-    ) {
-      return "token_error";
-    }
-
-    return "unknown";
-  }
-
-  private getExpirationTime(expiresIn: unknown): number | undefined {
-    const expiresInSeconds = parseExpiresInSeconds(expiresIn);
-    if (expiresInSeconds === undefined) {
-      return undefined;
-    }
-
-    return Date.now() + expiresInSeconds * 1000;
+    return (
+      url.startsWith(`${origin}#`) ||
+      url.startsWith(`${origin}/#`) ||
+      url.startsWith(`${origin}?`) ||
+      url.startsWith(`${origin}/?`)
+    );
   }
 
   private waitForPopupRedirect(
@@ -1037,14 +1119,11 @@ class AuthWeb implements Auth {
     onRedirect: (url: string) => Promise<void> | void,
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      let crossOriginLogShown = false;
+      let settled = false;
+      let crossOrigin = false;
 
-      const cleanup = (
-        intervalId: number,
-        timeoutId: number,
-        shouldClosePopup: boolean,
-      ) => {
-        window.clearInterval(intervalId);
+      const cleanup = (timeoutId: number, shouldClosePopup: boolean) => {
+        settled = true;
         window.clearTimeout(timeoutId);
         if (shouldClosePopup && !popup.closed) {
           popup.close();
@@ -1052,13 +1131,16 @@ class AuthWeb implements Auth {
       };
 
       const timeoutId = window.setTimeout(() => {
-        cleanup(intervalId, timeoutId, true);
+        cleanup(timeoutId, true);
         reject(new Error(`${provider.toLowerCase()}_auth_timeout`));
       }, POPUP_TIMEOUT_MS);
 
-      const intervalId = window.setInterval(() => {
+      const poll = () => {
+        if (settled) {
+          return;
+        }
         if (popup.closed) {
-          cleanup(intervalId, timeoutId, false);
+          cleanup(timeoutId, false);
           reject(new Error("cancelled"));
           return;
         }
@@ -1067,20 +1149,26 @@ class AuthWeb implements Auth {
         try {
           url = popup.location.href;
         } catch (error) {
-          if (!crossOriginLogShown) {
+          // Cross-origin: the popup is on the provider domain. Poll slowly
+          // there; same-origin reads are only possible before the popup
+          // navigates away and after it returns to the redirect target.
+          if (!crossOrigin) {
+            crossOrigin = true;
             logger.debug(`Waiting for ${provider} auth redirect`, {
               error: String(error),
             });
-            crossOriginLogShown = true;
           }
+          window.setTimeout(poll, POPUP_POLL_INTERVAL_CROSS_ORIGIN_MS);
+          return;
+        }
+        crossOrigin = false;
+
+        if (!this.isExactRedirectTarget(url, redirectUri)) {
+          window.setTimeout(poll, POPUP_POLL_INTERVAL_MS);
           return;
         }
 
-        if (!url.startsWith(redirectUri)) {
-          return;
-        }
-
-        cleanup(intervalId, timeoutId, true);
+        cleanup(timeoutId, true);
         void Promise.resolve()
           .then(() => onRedirect(url))
           .then(() => {
@@ -1089,7 +1177,9 @@ class AuthWeb implements Auth {
           .catch((error: unknown) => {
             reject(error);
           });
-      }, POPUP_POLL_INTERVAL_MS);
+      };
+
+      window.setTimeout(poll, POPUP_POLL_INTERVAL_MS);
     });
   }
 
@@ -1108,6 +1198,7 @@ class AuthWeb implements Auth {
     }
 
     const nonce = options?.nonce ?? crypto.randomUUID();
+    const state = crypto.randomUUID();
     this._pendingGoogleNonce = nonce;
     return new Promise((resolve, reject) => {
       const redirectUri = window.location.origin;
@@ -1117,6 +1208,7 @@ class AuthWeb implements Auth {
       authUrl.searchParams.set("response_type", "id_token token code");
       authUrl.searchParams.set("scope", scopes.join(" "));
       authUrl.searchParams.set("nonce", nonce);
+      authUrl.searchParams.set("state", state);
       authUrl.searchParams.set("access_type", "offline");
       authUrl.searchParams.set(
         "prompt",
@@ -1159,9 +1251,16 @@ class AuthWeb implements Auth {
         const error = params.get("error");
         const errorDescription = params.get("error_description");
 
+        if (params.get("state") !== state) {
+          throw new AuthWebError(
+            "invalid_state",
+            "State mismatch - possible CSRF attack",
+          );
+        }
+
         if (error) {
           throw new AuthWebError(
-            this.mapOAuthErrorCode(error),
+            mapOAuthErrorCode(error, "authorize"),
             errorDescription ?? error,
           );
         }
@@ -1197,7 +1296,11 @@ class AuthWeb implements Auth {
         setIfDefined(user, "serverAuthCode", code ?? undefined);
         setIfDefined(user, "userId", getOptionalString(decoded, "sub"));
         setIfDefined(user, "hostedDomain", getOptionalString(decoded, "hd"));
-        setIfDefined(user, "expirationTime", this.getExpirationTime(expiresIn));
+        setIfDefined(
+          user,
+          "expirationTime",
+          parseExpiresInMilliseconds(expiresIn),
+        );
         this.updateUser(user);
       })
         .then(() => {
@@ -1301,17 +1404,17 @@ class AuthWeb implements Auth {
           const error = urlObj.searchParams.get("error");
           const errorDescription = urlObj.searchParams.get("error_description");
 
-          if (error) {
-            throw new AuthWebError(
-              this.mapOAuthErrorCode(error),
-              errorDescription ?? error,
-            );
-          }
-
           if (returnedState !== state) {
             throw new AuthWebError(
               "invalid_state",
               "State mismatch - possible CSRF attack",
+            );
+          }
+
+          if (error) {
+            throw new AuthWebError(
+              mapOAuthErrorCode(error, "authorize"),
+              errorDescription ?? error,
             );
           }
 
@@ -1377,12 +1480,12 @@ class AuthWeb implements Auth {
     );
     const tokenUrl = `${authBaseUrl}oauth2/v2.0/token`;
 
-    const body = new URLSearchParams({
-      client_id: clientId,
+    const body = buildAuthorizationCodeBody({
+      tokenUrl,
+      clientId,
       code,
-      redirect_uri: redirectUri,
-      grant_type: "authorization_code",
-      code_verifier: codeVerifier,
+      redirectUri,
+      codeVerifier,
     });
 
     const response = await fetch(tokenUrl, {
@@ -1398,16 +1501,15 @@ class AuthWeb implements Auth {
       this.assertActiveGeneration(generation);
     }
 
-    if (!response.ok) {
+    const parsed = parseTokenResponse(json, "token");
+    if (!parsed.ok) {
       throw new AuthWebError(
-        "token_error",
-        getOptionalString(json, "error_description") ??
-          getOptionalString(json, "error") ??
-          "Token exchange failed",
+        parsed.errorCode,
+        parsed.underlyingMessage ?? "Token exchange failed",
       );
     }
 
-    const idToken = getOptionalString(json, "id_token");
+    const idToken = parsed.tokens.idToken;
     if (!idToken) {
       throw new AuthWebError("no_id_token", "No id_token in token response");
     }
@@ -1421,8 +1523,8 @@ class AuthWeb implements Auth {
       );
     }
 
-    const accessToken = getOptionalString(json, "access_token");
-    const refreshToken = getOptionalString(json, "refresh_token");
+    const accessToken = parsed.tokens.accessToken;
+    const refreshToken = parsed.tokens.refreshToken;
 
     if (refreshToken) {
       this.saveRefreshToken(refreshToken);
@@ -1439,11 +1541,7 @@ class AuthWeb implements Auth {
     };
     setIfDefined(user, "accessToken", accessToken);
     setIfDefined(user, "refreshToken", refreshToken);
-    setIfDefined(
-      user,
-      "expirationTime",
-      this.getExpirationTime(json["expires_in"]),
-    );
+    setIfDefined(user, "expirationTime", parsed.tokens.expirationTime);
     this.updateUser(user);
   }
 
@@ -1608,6 +1706,7 @@ class AuthWeb implements Auth {
       throw new Error("Apple SDK not loaded");
     }
 
+    const nonce = options?.nonce ?? crypto.randomUUID();
     const appleAuthConfig: AppleAuthInitConfig = {
       clientId,
       scope: (options?.scopes?.length
@@ -1617,7 +1716,7 @@ class AuthWeb implements Auth {
       redirectURI: window.location.origin,
       usePopup: true,
     };
-    setIfDefined(appleAuthConfig, "nonce", options?.nonce);
+    setIfDefined(appleAuthConfig, "nonce", nonce);
     window.AppleID.auth.init(appleAuthConfig);
 
     try {
@@ -1625,9 +1724,17 @@ class AuthWeb implements Auth {
       if (generation !== undefined) {
         this.assertActiveGeneration(generation);
       }
+      const idToken = response.authorization.id_token;
+      const idTokenClaims = this.parseJwtPayload(idToken);
+      if (getOptionalString(idTokenClaims, "nonce") !== nonce) {
+        throw new AuthWebError(
+          "invalid_nonce",
+          "Nonce mismatch - identity token may be replayed",
+        );
+      }
       const user: AuthUser = {
         provider: "apple",
-        idToken: response.authorization.id_token,
+        idToken,
       };
       setIfDefined(user, "authorizationCode", response.authorization.code);
       setIfDefined(user, "email", response.user?.email);
@@ -1644,13 +1751,38 @@ class AuthWeb implements Auth {
     }
   }
 
+  private isAccessTokenExpiring(user: AuthUser): boolean {
+    if (!user.expirationTime) {
+      return false;
+    }
+    return Date.now() + 300000 > user.expirationTime;
+  }
+
   async silentRestore(): Promise<void> {
     logger.log("Attempting silent restore...");
     this.loadFromCache();
-    if (this._currentUser) {
+    const user = this._currentUser;
+    if (user) {
       try {
-        await this.getAccessToken();
-        logger.log("Silent restore successful (token refreshed)");
+        if (user.provider === "google") {
+          // Silent restore must never open interactive UI. A near-expiry
+          // Google token can only be refreshed with user interaction, so a
+          // deterministic typed result is returned instead.
+          if (this.isAccessTokenExpiring(user)) {
+            throw new AuthWebError(
+              "interaction_required",
+              "Google token refresh requires user interaction",
+            );
+          }
+        } else if (
+          user.provider === "microsoft" &&
+          this.isAccessTokenExpiring(user) &&
+          this.loadRefreshToken()
+        ) {
+          // Network-only refresh: no popup is opened.
+          await this.performRefreshToken(this._sessionGeneration);
+        }
+        logger.log("Silent restore successful");
       } catch (e) {
         const error = this.mapError(e);
         logger.warn("Silent restore failed to refresh token:", error);
@@ -1661,16 +1793,26 @@ class AuthWeb implements Auth {
   }
 
   logout(): void {
+    const provider = this._currentUser?.provider;
     this._sessionGeneration++;
     this._currentUser = undefined;
     this._grantedScopes = [];
-    this._refreshPromise = undefined;
     this._pendingGoogleNonce = undefined;
     this._loginInFlight = false;
+    const rejectRefresh = this._refreshReject;
+    this._refreshPromise = undefined;
+    this._refreshReject = undefined;
+    this.cancelActiveLogin();
+    if (rejectRefresh) {
+      rejectRefresh(
+        new AuthWebError("not_signed_in", "Auth session was cleared"),
+      );
+    }
     this.removeFromCache(CACHE_KEY);
     this.removeFromCache(SCOPES_KEY);
     this.removeFromCache(MS_REFRESH_TOKEN_KEY);
     this.notify();
+    this.emitEvent("logout", provider);
   }
 
   private updateUser(user: AuthUser) {
@@ -1697,8 +1839,10 @@ class AuthWeb implements Auth {
   dispose() {
     this._disposed = true;
     this.logout();
+    this.emitEvent("dispose");
     this._listeners = [];
     this._tokenListeners = [];
+    this._eventListeners = [];
   }
   equals(other: unknown) {
     return other === this;

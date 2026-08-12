@@ -2,8 +2,10 @@
 
 #include "HybridAuthSpec.hpp"
 #include "AuthUser.hpp"
+#include "AuthEvent.hpp"
 #include "LoginOptions.hpp"
 #include "AuthTokens.hpp"
+#include "ScopeRevocationResult.hpp"
 #include <cstdint>
 #include <optional>
 #include <mutex>
@@ -24,7 +26,7 @@ public:
 
   std::shared_ptr<Promise<void>> login(AuthProvider provider, const std::optional<LoginOptions>& options) override;
   std::shared_ptr<Promise<void>> requestScopes(const std::vector<std::string>& scopes) override;
-  std::shared_ptr<Promise<void>> revokeScopes(const std::vector<std::string>& scopes) override;
+  std::shared_ptr<Promise<ScopeRevocationResult>> revokeScopes(const std::vector<std::string>& scopes) override;
   std::shared_ptr<Promise<void>> revokeAccess() override;
   std::shared_ptr<Promise<std::optional<std::string>>> getAccessToken() override;
   std::shared_ptr<Promise<AuthTokens>> refreshToken() override;
@@ -33,13 +35,16 @@ public:
   std::shared_ptr<Promise<void>> silentRestore() override;
   std::function<void()> onAuthStateChanged(const std::function<void(const std::optional<AuthUser>&)>& callback) override;
   std::function<void()> onTokensRefreshed(const std::function<void(const AuthTokens&)>& callback) override;
+  std::function<void()> onAuthEvent(const std::function<void(const AuthEvent&)>& callback) override;
   void setLoggingEnabled(bool enabled) override;
+  void dispose() override;
   // Note: setStorageAdapter is kept internally but not exposed in public API
   // Storage is in-memory only by default
 
 private:
   void notifyAuthStateChanged();
   void notifyTokensRefreshed(const AuthTokens& tokens);
+  void emitAuthEvent(AuthEventType type, std::optional<AuthProvider> provider = std::nullopt, std::optional<AuthErrorCode> errorCode = std::nullopt);
   std::shared_ptr<Promise<AuthTokens>> advanceSessionGenerationLocked();
   void trackSessionPromiseLocked(const std::shared_ptr<Promise<void>>& promise);
   std::vector<std::shared_ptr<Promise<void>>> takePendingSessionPromisesLocked();
@@ -53,11 +58,13 @@ private:
 
   std::map<uint64_t, std::function<void(const AuthTokens&)>> _tokenListeners;
   uint64_t _nextTokenListenerId = 0;
+  std::map<uint64_t, std::function<void(const AuthEvent&)>> _eventListeners;
+  uint64_t _nextEventListenerId = 0;
   std::shared_ptr<Promise<AuthTokens>> _refreshInFlight;
   std::vector<std::weak_ptr<Promise<void>>> _sessionPromises;
   uint64_t _sessionGeneration = 0;
   bool _loggingEnabled = false;
-  
+
   // recursive_mutex: listeners resolved inside a lock scope may re-enter Auth methods
   // that also acquire _mutex, causing deadlock with a non-recursive mutex.
   std::recursive_mutex _mutex;

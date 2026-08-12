@@ -1,5 +1,65 @@
 # Changelog
 
+## 0.7.0 - 2026-08-12
+
+### Breaking changes
+
+- Web tokens no longer persist merely because a custom storage adapter is
+  supplied. Set `nitroAuthPersistTokensOnWeb: true` explicitly if the app
+  accepts the browser-storage and XSS risk; otherwise tokens remain
+  memory-only.
+- `revokeScopes()` now returns
+  `{ revokedAtProvider: false, revokedScopes }` instead of `void`. Remove
+  explicit `Promise<void>` annotations around this call or update them to
+  `Promise<ScopeRevocationResult>`.
+
+### Added
+
+- Added the `interaction_required` error code for silent-restore and OAuth
+  `interaction_required`/`login_required`/`consent_required` responses.
+- Added typed provider token capabilities
+  (`getProviderTokenCapabilities`, `ProviderTokenCapabilities`) documenting
+  per-platform access-token, refresh, server-auth-code, and expiry-source
+  support, including the Android Google access-token limitation.
+- Added privacy-safe typed auth lifecycle events via `onAuthEvent()`
+  (`login_started`, `login_succeeded`, `login_failed`, `tokens_refreshed`,
+  `refresh_failed`, `session_changed`, `logout`, `dispose`).
+- Added `nitroAuthPersistProfileOnWeb` to keep web profile PII (email, name,
+  photo) out of storage, and declared `expo-constants` as an optional peer for
+  the web provider-config read.
+### Changed
+- `AuthError` now carries the failed `operation` phase and preserves
+  `underlyingMessage` from native `<code>: <detail>` envelopes; message text is
+  never used as control flow.
+- `expirationTime` is documented as access-token expiry on every platform, with
+  the Android Google ID-token `exp` fallback made explicit.
+- Web Google login now verifies redirect `state` before parsing and web popups
+  are matched against the exact registered redirect target; popup polling was
+  reduced from 100 ms to 500 ms.
+- Web silent restore never opens interactive UI: near-expiry Google sessions
+  reject with `interaction_required`.
+- Native dispose rejects pending work with `cancelled`, clears listeners, and
+  performs platform teardown; Android populates the error envelope with the
+  underlying provider message.
+- Android Google sign-in error mapping now covers `operation_in_progress`,
+  `not_signed_in`, and the canonical OAuth table with refresh-context
+  `refresh_failed` semantics.
+- OAuth provider errors now map through one canonical table on iOS, Android,
+  and web; refresh operations surface grant failures as `refresh_failed`.
+
+### Fixed
+
+- Android Microsoft sign-in now resolves as `cancelled` when the user dismisses
+  the browser, instead of leaving the login promise pending.
+- The public `SocialButton` exposes its label, busy state, and disabled state to
+  assistive technology, and no longer renders an unavailable Apple glyph on
+  Android.
+- Restored iOS compilation for Apple nonce validation by making the shared JWT
+  decoder available to the file-local authorization delegate.
+- Web Apple login validates the identity-token `nonce` claim; iOS validates it
+  when a nonce is provided.
+- Web refresh now requires an `id_token` in the token response, matching iOS.
+
 ## 0.6.6 - 2026-07-30
 
 ### Changed

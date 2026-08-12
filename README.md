@@ -4,9 +4,9 @@
 [![npm downloads](https://img.shields.io/npm/dm/react-native-nitro-auth?color=22c55e&label=downloads)](https://www.npmjs.com/package/react-native-nitro-auth)
 [![CI](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/react-native-nitro-auth?color=007ec6)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/LICENSE)
-[![React Native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb)](https://reactnative.dev/)
-[![Expo](https://img.shields.io/badge/expo-SDK%2057-000020)](https://docs.expo.dev/)
-[![Nitro Modules](https://img.shields.io/badge/nitro--modules-0.36.x-black)](https://nitro.margelo.com/)
+[![React Native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb)](https://reactnative.dev/docs/0.86/getting-started-without-a-framework)
+[![Expo](https://img.shields.io/badge/expo-SDK%2057-000020)](https://docs.expo.dev/versions/v57.0.0/)
+[![Nitro Modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.36.5%20%3C0.37.0-black)](https://nitro.margelo.com/)
 [![TypeScript](https://img.shields.io/badge/typescript-6.0-3178c6)](https://www.typescriptlang.org/)
 
 Google Sign-In, Apple Sign-In, and Microsoft Entra ID for React Native and
@@ -47,7 +47,7 @@ bare app.
 | ---------------------------- | ------------------------------------- |
 | React Native                 | `>=0.75.0`; validated with `0.86.2`   |
 | React                        | Validated with `19.2.3`               |
-| React Native Nitro Modules   | `>=0.36.4 <0.37.0`                    |
+| React Native Nitro Modules   | `>=0.36.5 <0.37.0`                    |
 | Expo                         | Development builds; validated with 57 |
 | iOS                          | `16.4` or later                       |
 
@@ -129,6 +129,11 @@ Web options in `expo.extra`:
 | `microsoftB2cDomain`          | —           | Microsoft B2C hostname.                      |
 | `nitroAuthWebStorage`         | `session`   | `session`, `local`, or `memory`.              |
 | `nitroAuthPersistTokensOnWeb` | `false`     | Persist token fields in configured storage.  |
+| `nitroAuthPersistProfileOnWeb`| `true`      | Persist email/name/photo in configured storage. |
+
+Web reads `expo-constants` for these options. `expo-constants` is an optional
+peer dependency: without it, web falls back to defaults and provider client
+IDs must be configured another way.
 
 On iOS, the plugin also applies the CocoaPods modular-header settings required
 by the Google Sign-In dependency chain (`AppCheckCore`, `GoogleUtilities`, and
@@ -242,13 +247,14 @@ Supported login options:
 
 - `logout()` clears package session state and signs out provider SDK state where
   available. It does not revoke a provider grant or your backend session.
-- `silentRestore()` resolves with or without a restorable session. It rejects
-  configuration, network, and parse failures instead of treating them as a
-  missing session.
+- `silentRestore()` resolves with or without a restorable session. It never
+  opens interactive UI: a near-expiry Google session rejects with
+  `interaction_required` instead of showing a popup.
 - `requestScopes()` supports Google and Microsoft and may require user
   interaction.
-- `revokeScopes()` removes scopes from package state; it does not revoke them at
-  the provider.
+- `revokeScopes()` removes scopes from package state and returns a typed
+  local-only result (`{ revokedAtProvider: false, revokedScopes }`); it does
+  not revoke them at the provider.
 - `getAccessToken()` returns the current access token and refreshes near-expiry
   Google or Microsoft credentials when supported.
 - `refreshToken()` supports Google and Microsoft. Apple token exchange and
@@ -257,6 +263,46 @@ Supported login options:
   Client-side revocation supports Google web and iOS sessions, plus Android
   sessions created through legacy Google Sign-In. Unsupported providers and
   modern Android Google sessions reject with `unsupported_provider`.
+
+### Token semantics and capabilities
+
+`expirationTime` is the access-token expiry in epoch milliseconds on every
+platform. Android Google never returns an OAuth access token, so its
+`expirationTime` uses the ID-token `exp` claim as a documented fallback and
+`getAccessToken()` stays `undefined`.
+
+Typed platform capabilities are exported so consumers never assume tokens the
+provider cannot produce:
+
+```ts
+import { getProviderTokenCapabilities } from "react-native-nitro-auth";
+
+const androidGoogle = getProviderTokenCapabilities("google", "android");
+// { supportsAccessToken: false, accessTokenExpirySource: "id_token", ... }
+```
+
+| Provider  | Platform | Access token | Client-side refresh | Server auth code | Expiry source |
+| --------- | -------- | ------------ | ------------------- | ---------------- | ------------- |
+| Google    | iOS      | yes          | yes                 | yes              | access token  |
+| Google    | Android  | no           | yes (silent)        | yes (legacy)     | ID-token `exp` |
+| Google    | Web      | yes          | yes                 | yes              | access token  |
+| Apple     | iOS/Web  | no           | no                  | no               | —             |
+| Microsoft | all      | yes          | yes                 | no               | access token  |
+
+## Events
+
+`onAuthEvent()` subscribes to privacy-safe typed lifecycle events:
+`login_started`, `login_succeeded`, `login_failed`, `tokens_refreshed`,
+`refresh_failed`, `session_changed`, `logout`, and `dispose`. Events carry the
+provider and a typed error code only — never tokens or user payloads.
+
+```ts
+const unsubscribe = AuthService.onAuthEvent((event) => {
+  if (event.type === "login_failed") {
+    report(event.provider, event.errorCode);
+  }
+});
+```
 
 ## Storage and Security
 
@@ -270,6 +316,10 @@ On web, user metadata and scopes use `sessionStorage` by default. Choose
 Microsoft refresh token remain in memory unless
 `nitroAuthPersistTokensOnWeb` is explicitly enabled. Enabling it places those
 credentials in the configured storage and changes your XSS risk profile.
+Profile metadata (email, name, photo) is persisted by default; set
+`nitroAuthPersistProfileOnWeb: false` to keep profile PII out of storage.
+Supplying a custom storage adapter changes where values are stored — it never
+enables token persistence by itself.
 
 JWT decoding in this package is for display and routing only. Validate token
 signatures, issuer, audience, nonce, and expiry on your server before creating
@@ -278,8 +328,11 @@ an application session.
 ## Error Contract
 
 `AuthService` operations and `useAuth()` mutations throw `AuthError` with
-`name`, stable `code`, `message`, and optional `underlyingMessage`. `message`
-equals `code`; `underlyingMessage` preserves a differing raw platform message.
+`name`, stable `code`, `operation`, `message`, and optional
+`underlyingMessage`. `message` equals `code`; `operation` names the failed
+phase; `underlyingMessage` preserves a differing raw platform message. The
+full canonical OAuth error table and lifecycle contracts live in
+`docs/error-contract.md`.
 
 ```ts
 import {
@@ -304,10 +357,11 @@ async function signIn(
 }
 ```
 
-Error codes are `cancelled`, `timeout`, `popup_blocked`, `network_error`,
-`configuration_error`, `not_signed_in`, `operation_in_progress`,
-`unsupported_provider`, `invalid_state`, `invalid_nonce`, `token_error`,
-`no_id_token`, `parse_error`, `refresh_failed`, and `unknown`.
+Error codes are `cancelled`, `interaction_required`, `timeout`,
+`popup_blocked`, `network_error`, `configuration_error`, `not_signed_in`,
+`operation_in_progress`, `unsupported_provider`, `invalid_state`,
+`invalid_nonce`, `token_error`, `no_id_token`, `parse_error`,
+`refresh_failed`, and `unknown`.
 
 ## Platform Support
 
@@ -319,7 +373,7 @@ Error codes are `cancelled`, `timeout`, `popup_blocked`, `network_error`,
 | Expo     | Development builds with the config plugin.                  |
 
 Validated baseline: Expo SDK 57, React Native 0.86.2, React 19.2.3, and Nitro
-Modules 0.36.4. Package peer range: `>=0.36.4 <0.37.0`.
+Modules 0.36.5. Package peer range: `>=0.36.5 <0.37.0`.
 
 ## Troubleshooting
 

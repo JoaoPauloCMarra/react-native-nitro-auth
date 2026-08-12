@@ -10,6 +10,8 @@
         HybridObject(const HybridObject&) = delete;
         HybridObject& operator=(const HybridObject&) = delete;
 
+        virtual void dispose() {}
+
       protected:
         virtual void loadHybridMethods() {}
 
