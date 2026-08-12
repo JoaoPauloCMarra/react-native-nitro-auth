@@ -128,7 +128,7 @@ Web options in `expo.extra`:
 | `microsoftTenant`             | `common`    | Microsoft tenant, domain, or B2C policy.     |
 | `microsoftB2cDomain`          | —           | Microsoft B2C hostname.                      |
 | `nitroAuthWebStorage`         | `session`   | `session`, `local`, or `memory`.              |
-| `nitroAuthPersistTokensOnWeb` | `false`     | Persist token fields in configured storage.  |
+| `nitroAuthPersistTokensOnWeb` | adapter-dependent | Persist token fields in configured storage. Set explicitly in new integrations. |
 | `nitroAuthPersistProfileOnWeb`| `true`      | Persist email/name/photo in configured storage. |
 
 Web reads `expo-constants` for these options. `expo-constants` is an optional
@@ -252,9 +252,10 @@ Supported login options:
   `interaction_required` instead of showing a popup.
 - `requestScopes()` supports Google and Microsoft and may require user
   interaction.
-- `revokeScopes()` removes scopes from package state and returns a typed
-  local-only result (`{ revokedAtProvider: false, revokedScopes }`); it does
-  not revoke them at the provider.
+- `revokeScopes()` removes scopes from package state and preserves its
+  `Promise<void>` contract. `revokeScopesWithResult()` returns
+  `{ revokedAtProvider: false, revokedScopes }`. Neither method revokes scopes
+  at the provider.
 - `getAccessToken()` returns the current access token and refreshes near-expiry
   Google or Microsoft credentials when supported.
 - `refreshToken()` supports Google and Microsoft. Apple token exchange and
@@ -313,13 +314,16 @@ you need, preferably in platform secure storage or on your backend.
 
 On web, user metadata and scopes use `sessionStorage` by default. Choose
 `local`, `session`, or `memory` with `nitroAuthWebStorage`. Token fields and the
-Microsoft refresh token remain in memory unless
-`nitroAuthPersistTokensOnWeb` is explicitly enabled. Enabling it places those
-credentials in the configured storage and changes your XSS risk profile.
+Microsoft refresh token remain in memory unless token persistence is enabled.
+Set `nitroAuthPersistTokensOnWeb` explicitly in new integrations. For backward
+compatibility, a custom storage adapter still enables token persistence when
+the option is omitted; set it to `false` to keep tokens in memory. Enabling
+persistence places credentials in the configured storage and changes your XSS
+risk profile.
 Profile metadata (email, name, photo) is persisted by default; set
 `nitroAuthPersistProfileOnWeb: false` to keep profile PII out of storage.
-Supplying a custom storage adapter changes where values are stored — it never
-enables token persistence by itself.
+Supplying a custom storage adapter without an explicit token-persistence option
+keeps the pre-0.7 behavior and persists tokens.
 
 JWT decoding in this package is for display and routing only. Validate token
 signatures, issuer, audience, nonce, and expiry on your server before creating

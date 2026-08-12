@@ -20,11 +20,6 @@ std::exception_ptr makeAuthError(const char* message) {
   return std::make_exception_ptr(std::runtime_error(message));
 }
 
-/**
- * Native error messages follow the stable `<code>` or `<code>: <detail>`
- * envelope. This extracts the leading code for typed observability events;
- * message text is never used for control flow.
- */
 AuthErrorCode authErrorCodeFromMessage(const std::string& message) {
   const std::string code = message.substr(0, message.find(':'));
   switch (hashString(code.c_str(), code.size())) {

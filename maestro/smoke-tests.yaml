@@ -9,14 +9,13 @@ name: "Smoke Tests - Terminal State"
     element: "Smoke Tests"
     direction: DOWN
 
-- tapOn: "Run"
+- tapOn: "Run smoke tests"
 
 - extendedWaitUntil:
-    visible: "Run again"
+    visible: "Run smoke tests again"
     timeout: 30000
 
-# Terminal state: every test executed, skipped with a reason, or passed.
-# The summary always shows "X/Y passed, Z skipped"; a failed row renders a
-# "FAIL" status label. No fixed test-count assertion is allowed.
-- assertVisible: "passed"
+- extendedWaitUntil:
+    visible: ".*passed,.*skipped"
+    timeout: 30000
 - assertNotVisible: "FAIL"

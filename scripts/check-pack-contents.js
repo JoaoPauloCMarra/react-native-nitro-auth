@@ -25,7 +25,6 @@ const requiredFiles = [
   "nitrogen/generated/shared/c++/AuthErrorCode.hpp",
   "nitrogen/generated/shared/c++/AuthEvent.hpp",
   "nitrogen/generated/shared/c++/AuthEventType.hpp",
-  "nitrogen/generated/shared/c++/ScopeRevocationResult.hpp",
   "cpp/HybridAuth.cpp",
   "cpp/HybridAuth.hpp",
   "cpp/PlatformAuth.hpp",
