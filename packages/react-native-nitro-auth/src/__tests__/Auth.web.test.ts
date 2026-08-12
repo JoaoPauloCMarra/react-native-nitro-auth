@@ -58,6 +58,8 @@ type TestAuthModule = {
   }>;
   silentRestore: () => Promise<void>;
   dispose: () => void;
+  equals: (other: unknown) => boolean;
+  setLoggingEnabled: (enabled: boolean) => void;
   setWebStorageAdapter: (
     adapter:
       | {
@@ -341,6 +343,19 @@ describe("AuthModule (web)", () => {
     await expect(auth.login("google")).rejects.toMatchObject({
       code: "configuration_error",
     });
+  });
+
+  it("implements the HybridObject identity and logging methods", async () => {
+    const auth = await loadAuthModule();
+
+    expect(auth.equals(auth)).toBe(true);
+    expect(auth.equals({})).toBe(false);
+    expect(() => {
+      auth.setLoggingEnabled(true);
+    }).not.toThrow();
+    expect(() => {
+      auth.setLoggingEnabled(false);
+    }).not.toThrow();
   });
 
   it("propagates configuration failures during silent restore", async () => {

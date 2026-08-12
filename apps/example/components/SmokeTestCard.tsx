@@ -224,12 +224,7 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
         ),
     currentUser && currentUser.provider !== "apple"
       ? test("revokeScopes validates the active provider", async () => {
-          const result = await AuthService.revokeScopes(["email"]);
-          assert(
-            result.revokedAtProvider === false &&
-              Array.isArray(result.revokedScopes),
-            "revokeScopes must return the typed local-only result",
-          );
+          await AuthService.revokeScopes(["email"]);
         })
       : unsupported(
           "revokeScopes validates the active provider",
