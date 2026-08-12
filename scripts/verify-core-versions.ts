@@ -1,14 +1,14 @@
 const projectRoot = import.meta.dir + "/..";
 
 const expectedVersions = {
-  expo: "~57.0.9",
-  nitrogen: "0.36.4",
+  expo: "~57.0.12",
+  nitrogen: "0.36.5",
   react: "19.2.3",
   "react-dom": "19.2.3",
   "react-native": "0.86.2",
-  "react-native-nitro-modules": "0.36.4",
+  "react-native-nitro-modules": "0.36.5",
 } as const;
-const expectedNitroPeerRange = ">=0.36.4 <0.37.0";
+const expectedNitroPeerRange = ">=0.36.5 <0.37.0";
 
 type DependencyName = keyof typeof expectedVersions;
 type JsonRecord = Record<string, unknown>;

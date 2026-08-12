@@ -174,9 +174,16 @@ function formatProvider(provider: AuthProvider | undefined): string {
 }
 
 function getErrorStatus(error: AuthError): string {
-  return error.underlyingMessage
-    ? `${error.code}: ${error.underlyingMessage}`
-    : error.code;
+  if (!error.underlyingMessage) {
+    return error.code;
+  }
+
+  const codePrefix = `${error.code}:`;
+  const detail = error.underlyingMessage.startsWith(codePrefix)
+    ? error.underlyingMessage.slice(codePrefix.length).trim()
+    : error.underlyingMessage;
+
+  return detail ? `${error.code}: ${detail}` : error.code;
 }
 
 function normalizeOptionText(value: string): string | undefined {
@@ -313,7 +320,11 @@ export function FeatureDemo() {
         setNotice("Done", "success");
       } catch (e) {
         const error = AuthError.from(e);
-        setNotice(getErrorStatus(error), "error");
+        if (error.code === "cancelled") {
+          setNotice("Sign-in cancelled", "idle");
+        } else {
+          setNotice(getErrorStatus(error), "error");
+        }
       } finally {
         actionInFlightRef.current = false;
       }
@@ -624,7 +635,7 @@ export function FeatureDemo() {
           <Text style={styles.statusText}>
             {auth.loading ? "Working" : status}
           </Text>
-          {auth.error ? (
+          {auth.error && statusTone === "error" ? (
             <Text style={styles.errorText}>{getErrorStatus(auth.error)}</Text>
           ) : null}
         </View>
@@ -632,8 +643,15 @@ export function FeatureDemo() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Sign In</Text>
-            <Pressable style={styles.smallButton} onPress={cycleButtonVariant}>
-              <Text style={styles.smallButtonText}>{buttonVariant}</Text>
+            <Pressable
+              accessibilityLabel={`Change sign-in button style. Current style: ${buttonVariant}`}
+              accessibilityRole="button"
+              style={styles.smallButton}
+              onPress={cycleButtonVariant}
+            >
+              <Text style={styles.smallButtonText}>
+                Style · {buttonVariant}
+              </Text>
             </Pressable>
           </View>
 
@@ -810,6 +828,13 @@ export function FeatureDemo() {
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Advanced Options</Text>
             <Pressable
+              accessibilityLabel={
+                advancedOptionsVisible
+                  ? "Hide advanced options"
+                  : "Show advanced options"
+              }
+              accessibilityRole="button"
+              accessibilityState={{ expanded: advancedOptionsVisible }}
               style={styles.smallButton}
               onPress={() => {
                 setAdvancedOptionsVisible((visible) => !visible);
@@ -911,6 +936,8 @@ export function FeatureDemo() {
                   Microsoft prompt: {microsoftPrompt ?? "default"}
                 </Text>
                 <Pressable
+                  accessibilityLabel={`Change Microsoft prompt. Current value: ${microsoftPrompt ?? "default"}`}
+                  accessibilityRole="button"
                   style={styles.smallButton}
                   onPress={cycleMicrosoftPrompt}
                 >
@@ -1050,6 +1077,11 @@ const ActionButton = memo(function ActionButton({
 
   return (
     <Pressable
+      accessibilityLabel={
+        disabled && disabledReason ? `${label}. ${disabledReason}` : label
+      }
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
       style={[
         styles.actionButton,
         buttonStyle,

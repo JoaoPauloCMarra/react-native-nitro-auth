@@ -22,6 +22,7 @@ type MockHybridObject = {
   refreshToken: jest.Mock;
   onAuthStateChanged: jest.Mock;
   onTokensRefreshed: jest.Mock;
+  onAuthEvent: jest.Mock;
   silentRestore: jest.Mock;
   setLoggingEnabled: jest.Mock;
   dispose: jest.Mock;
@@ -58,6 +59,7 @@ jest.mock("react-native-nitro-modules", () => {
     onTokensRefreshed: jest.fn((_callback: (tokens: AuthTokens) => void) =>
       jest.fn(),
     ),
+    onAuthEvent: jest.fn((_callback: (event: unknown) => void) => jest.fn()),
     setLoggingEnabled: jest.fn(),
     dispose: jest.fn(),
     equals: jest.fn(),
@@ -101,6 +103,7 @@ describe("AuthService", () => {
       hybridObject.silentRestore.mockReset();
       hybridObject.onAuthStateChanged.mockReset();
       hybridObject.onTokensRefreshed.mockReset();
+      hybridObject.onAuthEvent.mockReset();
       hybridObject.setLoggingEnabled.mockReset();
       hybridObject.dispose.mockReset();
       hybridObject.equals.mockReset();
@@ -112,6 +115,9 @@ describe("AuthService", () => {
       );
       hybridObject.onTokensRefreshed.mockImplementation(
         (_callback: (tokens: AuthTokens) => void) => jest.fn(),
+      );
+      hybridObject.onAuthEvent.mockImplementation(
+        (_callback: (event: unknown) => void) => jest.fn(),
       );
     }
   });
@@ -368,6 +374,7 @@ describe("AuthService", () => {
       grantedScopes: undefined,
       onAuthStateChanged: undefined,
       onTokensRefreshed: undefined,
+      onAuthEvent: undefined,
       revokeAccess: undefined,
       setLoggingEnabled: undefined,
     } as unknown as MockHybridObject;
@@ -376,6 +383,7 @@ describe("AuthService", () => {
     expect(service.grantedScopes).toEqual([]);
     expect(service.onAuthStateChanged(jest.fn())).toEqual(expect.any(Function));
     expect(service.onTokensRefreshed(jest.fn())).toEqual(expect.any(Function));
+    expect(service.onAuthEvent(jest.fn())).toEqual(expect.any(Function));
     expect(() => {
       service.setLoggingEnabled(true);
     }).not.toThrow();
@@ -383,5 +391,90 @@ describe("AuthService", () => {
       code: "configuration_error",
     });
     expect(auth.logout).not.toHaveBeenCalled();
+  });
+
+  describe("error envelope", () => {
+    it.each([
+      ["login", "network_error"],
+      ["requestScopes", "cancelled"],
+      ["revokeScopes", "token_error"],
+      ["revokeAccess", "network_error"],
+      ["getAccessToken", "no_id_token"],
+      ["refreshToken", "refresh_failed"],
+      ["silentRestore", "configuration_error"],
+    ] as const)(
+      "attaches the %s operation to wrapped failures",
+      async (operation, code) => {
+        native()[operation].mockRejectedValueOnce(new Error(code));
+        const run = () => {
+          switch (operation) {
+            case "login":
+              return AuthService.login("google");
+            case "requestScopes":
+              return AuthService.requestScopes(["email"]);
+            case "revokeScopes":
+              return AuthService.revokeScopes(["email"]);
+            case "revokeAccess":
+              return AuthService.revokeAccess();
+            case "getAccessToken":
+              return AuthService.getAccessToken();
+            case "refreshToken":
+              return AuthService.refreshToken();
+            case "silentRestore":
+              return AuthService.silentRestore();
+          }
+        };
+        const error = await run().catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(AuthError);
+        expect((error as AuthError).code).toBe(code);
+        expect((error as AuthError).operation).toBe(operation);
+      },
+    );
+
+    it("preserves the underlying message from native envelopes", async () => {
+      native().refreshToken.mockRejectedValueOnce(
+        new Error("refresh_failed: invalid_grant"),
+      );
+      const error = await AuthService.refreshToken().catch((e: unknown) => e);
+      expect((error as AuthError).code).toBe("refresh_failed");
+      expect((error as AuthError).underlyingMessage).toBe(
+        "refresh_failed: invalid_grant",
+      );
+      expect((error as AuthError).operation).toBe("refreshToken");
+    });
+  });
+
+  describe("onAuthEvent", () => {
+    it("forwards the typed event callback to the native module", () => {
+      const unsubscribe = jest.fn();
+      native().onAuthEvent.mockReturnValueOnce(unsubscribe);
+      const callback = jest.fn();
+
+      const result = AuthService.onAuthEvent(callback);
+
+      expect(result).toBe(unsubscribe);
+      expect(native().onAuthEvent).toHaveBeenCalledWith(callback);
+    });
+  });
+
+  describe("revokeScopes", () => {
+    it("preserves the void result", async () => {
+      native().revokeScopes.mockResolvedValueOnce(undefined);
+      await expect(
+        AuthService.revokeScopes(["email"]),
+      ).resolves.toBeUndefined();
+    });
+
+    it("exposes the typed result through the additive method", async () => {
+      native().grantedScopes = ["email", "profile"];
+      native().revokeScopes.mockResolvedValueOnce(undefined);
+      await expect(
+        AuthService.revokeScopesWithResult(["email"]),
+      ).resolves.toEqual({
+        revokedAtProvider: false,
+        revokedScopes: ["email"],
+      });
+      expect(native().revokeScopes).toHaveBeenCalledWith(["email"]);
+    });
   });
 });

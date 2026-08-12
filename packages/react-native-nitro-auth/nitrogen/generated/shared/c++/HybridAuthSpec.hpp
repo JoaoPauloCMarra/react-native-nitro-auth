@@ -21,6 +21,8 @@ namespace margelo::nitro::NitroAuth { enum class AuthProvider; }
 namespace margelo::nitro::NitroAuth { struct LoginOptions; }
 // Forward declaration of `AuthTokens` to properly resolve imports.
 namespace margelo::nitro::NitroAuth { struct AuthTokens; }
+// Forward declaration of `AuthEvent` to properly resolve imports.
+namespace margelo::nitro::NitroAuth { struct AuthEvent; }
 
 #include "AuthUser.hpp"
 #include <optional>
@@ -31,6 +33,7 @@ namespace margelo::nitro::NitroAuth { struct AuthTokens; }
 #include "LoginOptions.hpp"
 #include "AuthTokens.hpp"
 #include <functional>
+#include "AuthEvent.hpp"
 
 namespace margelo::nitro::NitroAuth {
 
@@ -75,6 +78,7 @@ namespace margelo::nitro::NitroAuth {
       virtual std::shared_ptr<Promise<void>> silentRestore() = 0;
       virtual std::function<void()> onAuthStateChanged(const std::function<void(const std::optional<AuthUser>& /* user */)>& callback) = 0;
       virtual std::function<void()> onTokensRefreshed(const std::function<void(const AuthTokens& /* tokens */)>& callback) = 0;
+      virtual std::function<void()> onAuthEvent(const std::function<void(const AuthEvent& /* event */)>& callback) = 0;
       virtual void setLoggingEnabled(bool enabled) = 0;
 
     protected:

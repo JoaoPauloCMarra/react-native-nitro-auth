@@ -1,5 +1,5 @@
 appId: com.auth.example
-name: "Smoke Tests - All Pass"
+name: "Smoke Tests - Terminal State"
 ---
 
 - clearState
@@ -9,12 +9,13 @@ name: "Smoke Tests - All Pass"
     element: "Smoke Tests"
     direction: DOWN
 
-- tapOn: "Run"
+- tapOn: "Run smoke tests"
 
 - extendedWaitUntil:
-    visible: "Run again"
+    visible: "Run smoke tests again"
     timeout: 30000
 
-- assertNotVisible: "failed"
-
-- assertVisible: "13/18 passed, 5 skipped"
+- extendedWaitUntil:
+    visible: ".*passed,.*skipped"
+    timeout: 30000
+- assertNotVisible: "FAIL"

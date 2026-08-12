@@ -28,6 +28,13 @@ const tests = [
 ];
 
 function resolveTool(name) {
+  const xcrun = spawnSync("xcrun", ["--find", name], {
+    encoding: "utf8",
+  });
+  if (xcrun.status === 0 && xcrun.stdout.trim()) {
+    return xcrun.stdout.trim();
+  }
+
   const pathResult = spawnSync(
     "bash",
     ["-lc", `command -v ${name} || compgen -c ${name}- | sort -V | tail -n 1`],
@@ -169,6 +176,8 @@ const mocks = {
         virtual ~HybridObject() = default;
         HybridObject(const HybridObject&) = delete;
         HybridObject& operator=(const HybridObject&) = delete;
+
+        virtual void dispose() {}
 
       protected:
         virtual void loadHybridMethods() {}

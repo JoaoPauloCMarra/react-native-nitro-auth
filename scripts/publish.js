@@ -33,6 +33,18 @@ const quick = hasFlag("--quick");
 const tag = getArgValue("--tag") || "latest";
 const otp = getArgValue("--otp");
 
+function validateNpmTag(tag) {
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(tag)) {
+    throw new Error(`Invalid npm dist tag: ${tag}`);
+  }
+
+  if (/^v?\d+\.\d+\.\d+/.test(tag)) {
+    throw new Error(
+      `Invalid npm dist tag "${tag}": use a release channel like latest or next.`,
+    );
+  }
+}
+
 function hasFlag(name) {
   return args.includes(name);
 }
@@ -154,6 +166,30 @@ function checkRegistryVersion(packageName, version) {
   console.log(`  ✓ ${packageName}@${version} is not published`);
 }
 
+function recordCurrentRegistryState(packageName) {
+  // Read-only registry snapshot (X10): record the current dist-tags without
+  // mutating the registry. New-version provenance stays PENDING until an
+  // authorized publish completes.
+  const result = run(`bun pm view ${packageName} dist-tags --json`, {
+    capture: true,
+  });
+  if (!result.ok || result.stdout === "") {
+    log(
+      `  ! Could not read current dist-tags for ${packageName}; continuing`,
+      "yellow",
+    );
+    return;
+  }
+  try {
+    const tags = JSON.parse(result.stdout);
+    console.log(
+      `  ✓ Current registry dist-tags: ${JSON.stringify(tags)}`,
+    );
+  } catch {
+    console.log(`  ✓ Current registry dist-tags: ${result.stdout}`);
+  }
+}
+
 function checkPublishAuth() {
   if (dryRun) {
     console.log("  ✓ npm auth not required for dry run");
@@ -166,6 +202,61 @@ function checkPublishAuth() {
   }
 
   console.log(`  ✓ Logged in to npm as ${whoami.stdout}`);
+}
+
+function getExactReleaseTag(version) {
+  const result = run(`git tag --points-at HEAD`, { capture: true });
+  const tags = result.ok
+    ? result.stdout.split("\n").map((entry) => entry.trim()).filter(Boolean)
+    : [];
+  return tags.includes(`v${version}`) ? `v${version}` : null;
+}
+
+function assertReleaseTag(version) {
+  const expected = `v${version}`;
+  const exactTag = getExactReleaseTag(version);
+
+  if (dryRun) {
+    if (exactTag) {
+      console.log(`  ✓ HEAD is exactly tagged ${expected}`);
+      return;
+    }
+    log(
+      `  ! HEAD is not tagged ${expected}; release existence/provenance stays PENDING in dry run`,
+      "yellow",
+    );
+    return;
+  }
+
+  if (!exactTag) {
+    throw new Error(
+      `HEAD is not exactly tagged ${expected}. Create the release before publishing.`,
+    );
+  }
+  console.log(`  ✓ Release tag ${expected} exists at HEAD`);
+}
+
+function assertChangelogCovers(version) {
+  const changelogPath = path.join(packageDir, "CHANGELOG.md");
+  const changelog = fs.readFileSync(changelogPath, "utf8");
+  const topEntry = changelog.match(/^##\s+([^\s]+)/m)?.[1];
+
+  if (topEntry === version) {
+    console.log(`  ✓ CHANGELOG.md top entry covers ${version}`);
+    return;
+  }
+
+  if (dryRun && topEntry === "Unreleased") {
+    log(
+      "  ! CHANGELOG.md top entry is Unreleased; rename it to the release version before publishing",
+      "yellow",
+    );
+    return;
+  }
+
+  throw new Error(
+    `CHANGELOG.md top entry is ${topEntry ?? "missing"}, expected ${version}.`,
+  );
 }
 
 function buildPublishArgs() {
@@ -243,6 +334,7 @@ function ask(question) {
 async function main() {
   const packageJson = readPackageJson();
   const publishArgs = buildPublishArgs();
+  validateNpmTag(tag);
 
   console.log("");
   log("Publishing react-native-nitro-auth", "bold");
@@ -253,7 +345,10 @@ async function main() {
   console.log("");
 
   requireCleanGitStatus();
+  assertReleaseTag(packageJson.version);
+  assertChangelogCovers(packageJson.version);
   checkRegistryVersion(packageJson.name, packageJson.version);
+  recordCurrentRegistryState(packageJson.name);
   checkPublishAuth();
 
   if (!skipChecks) {
@@ -265,13 +360,23 @@ async function main() {
     log("Skipping release checks by request", "yellow");
   }
 
-  log("Syncing package docs...", "cyan");
-  must("bun scripts/sync-package-docs.ts", {
-    label: "Sync README, CHANGELOG, and LICENSE",
-  });
+  // Preflight must never write tracked files (X5): dry runs compare the
+  // package docs, the real publish flow syncs them.
+  log(
+    dryRun
+      ? "Checking package docs are in sync..."
+      : "Syncing package docs...",
+    "cyan",
+  );
+  must(
+    dryRun
+      ? "bun scripts/sync-package-docs.ts --check"
+      : "bun scripts/sync-package-docs.ts",
+    { label: "Sync or verify README, CHANGELOG, and LICENSE" },
+  );
 
   log("Checking package contents...", "cyan");
-  must("bun pm pack --dry-run", { cwd: packageDir, label: "Pack dry run" });
+  must("bun scripts/check-pack-contents.js", { label: "Pack content audit" });
 
   if (skipPublishDryRun) {
     log("Publish dry run skipped by environment", "yellow");

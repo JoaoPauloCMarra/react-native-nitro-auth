@@ -1,4 +1,9 @@
-import type { Auth, AuthProvider, LoginOptions } from "./Auth.nitro";
+import type {
+  Auth,
+  AuthProvider,
+  LoginOptions,
+  ScopeRevocationResult,
+} from "./Auth.nitro";
 
 type StrictLoginOptions<AllowedKeys extends keyof LoginOptions> = Pick<
   LoginOptions,
@@ -53,4 +58,5 @@ export type AuthLogin = <Provider extends AuthProvider>(
 
 export type TypedAuth = Omit<Auth, "login"> & {
   login: AuthLogin;
+  revokeScopesWithResult: (scopes: string[]) => Promise<ScopeRevocationResult>;
 };

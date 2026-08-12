@@ -22,13 +22,21 @@ module.exports = {
     "!src/index.web.ts",
     "!src/service.web.ts",
     "!src/global.d.ts",
-    // Browser OAuth is covered by behavior tests, but not included in the
-    // package coverage gate because provider redirect branches are environment-owned.
-    "!src/Auth.web.ts",
   ],
   coverageThreshold: {
     global: {
       branches: 90,
+      functions: 90,
+      lines: 90,
+      statements: 90,
+    },
+    // The web OAuth adapter (Auth.web.ts) is covered by behavior fixtures and
+    // the shared session-scenario suite. Its branch bar is lower because
+    // browser-environment branches (TextDecoder fallback, window guards,
+    // cross-origin popup timing) are not reachable in jsdom; statement, line,
+    // and function coverage still meet the global bar.
+    "src/Auth.web.ts": {
+      branches: 80,
       functions: 90,
       lines: 90,
       statements: 90,

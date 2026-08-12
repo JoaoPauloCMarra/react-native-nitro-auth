@@ -6,6 +6,7 @@ import {
   StyleSheet,
   View,
   ActivityIndicator,
+  Platform,
 } from "react-native";
 import { AuthService } from "../service";
 import { logger } from "../utils/logger";
@@ -130,9 +131,16 @@ export const SocialButton = React.memo(function SocialButton({
     () => [styles.iconText, { color: textColor }],
     [textColor],
   );
+  const accessibilityState = useMemo(
+    () => ({ busy: loading, disabled: isDisabled }),
+    [isDisabled, loading],
+  );
 
   return (
     <Pressable
+      accessibilityLabel={`Sign in with ${PROVIDER_LABELS[provider]}`}
+      accessibilityRole="button"
+      accessibilityState={accessibilityState}
       style={[styles.button, buttonStyle, style]}
       onPress={handleLogin}
       disabled={isDisabled}
@@ -147,11 +155,13 @@ export const SocialButton = React.memo(function SocialButton({
                 <Text style={styles.iconText}>G</Text>
               </View>
             )}
-            {provider === "apple" && variant !== "primary" && (
-              <View style={styles.iconPlaceholder}>
-                <Text style={appleIconStyle}></Text>
-              </View>
-            )}
+            {provider === "apple" &&
+              variant !== "primary" &&
+              Platform.OS !== "android" && (
+                <View style={styles.iconPlaceholder}>
+                  <Text style={appleIconStyle}></Text>
+                </View>
+              )}
             {provider === "microsoft" && variant !== "primary" && (
               <View style={styles.iconPlaceholder}>
                 <Text style={styles.microsoftIconText}>⊞</Text>

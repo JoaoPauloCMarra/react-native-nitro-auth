@@ -66,6 +66,8 @@ object AuthAdapter {
     @Volatile
     private var microsoftAuthInProgress = false
     @Volatile
+    private var microsoftBrowserWasOpened = false
+    @Volatile
     private var hasLegacyGoogleSession = false
 
     @Volatile
@@ -121,8 +123,18 @@ object AuthAdapter {
             lifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
                 override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) { currentActivity = activity }
                 override fun onActivityStarted(activity: Activity) { currentActivity = activity }
-                override fun onActivityResumed(activity: Activity) { currentActivity = activity }
-                override fun onActivityPaused(activity: Activity) { if (currentActivity == activity) currentActivity = null }
+                override fun onActivityResumed(activity: Activity) {
+                    currentActivity = activity
+                    if (microsoftAuthInProgress && microsoftBrowserWasOpened) {
+                        val origin = pendingOrigin
+                        clearPkceState()
+                        nativeOnLoginError(origin, "cancelled", "Microsoft sign-in was dismissed")
+                    }
+                }
+                override fun onActivityPaused(activity: Activity) {
+                    if (microsoftAuthInProgress) microsoftBrowserWasOpened = true
+                    if (currentActivity == activity) currentActivity = null
+                }
                 override fun onActivityStopped(activity: Activity) { if (currentActivity == activity) currentActivity = null }
                 override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
                 override fun onActivityDestroyed(activity: Activity) { if (currentActivity == activity) currentActivity = null }
@@ -159,7 +171,7 @@ object AuthAdapter {
     fun onSignInSuccess(account: GoogleSignInAccount, scopes: List<String>, origin: String = "login") {
         appContext ?: return
         hasLegacyGoogleSession = true
-        val expirationTime = getJwtExpirationTimeMs(account.idToken)
+        val expirationTime = getGoogleExpirationTimeMs(account.idToken)
         nativeOnLoginSuccess(origin, "google", account.email, account.displayName,
             account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
             account.id, null, null, scopes.toTypedArray(), expirationTime)
@@ -168,6 +180,8 @@ object AuthAdapter {
     fun onSignInError(errorCode: Int, message: String?, origin: String = "login") {
         val mappedError = when (errorCode) {
             12501 -> "cancelled"
+            12502 -> "operation_in_progress"
+            4 -> "not_signed_in"
             7 -> "network_error"
             8, 10 -> "configuration_error"
             else -> "unknown"
@@ -246,6 +260,7 @@ object AuthAdapter {
                 return
             }
             microsoftAuthInProgress = true
+            microsoftBrowserWasOpened = false
             pendingMicrosoftScopes = effectiveScopes
         }
 
@@ -320,7 +335,7 @@ object AuthAdapter {
         val origin = pendingOrigin
         if (error != null) {
             clearPkceState()
-            val mappedError = mapMicrosoftOAuthError(error)
+            val mappedError = mapMicrosoftOAuthError(error, "authorize")
             nativeOnLoginError(origin, mappedError, errorDescription ?: error)
             return
         }
@@ -410,7 +425,7 @@ object AuthAdapter {
                 val error = json.optString("error", "token_error")
                 val desc = json.optString("error_description", "Failed to exchange code for tokens")
                 clearPkceState()
-                nativeOnLoginError(origin, mapMicrosoftOAuthError(error), desc)
+                nativeOnLoginError(origin, mapMicrosoftOAuthError(error, "token"), desc)
             } catch (e: Exception) {
                 clearPkceState()
                 nativeOnLoginError(origin, "token_error", "Failed to exchange code for tokens")
@@ -492,16 +507,29 @@ object AuthAdapter {
         pendingMicrosoftB2cDomain = null
         pendingMicrosoftScopes = emptyList()
         microsoftAuthInProgress = false
+        microsoftBrowserWasOpened = false
     }
 
-    private fun mapMicrosoftOAuthError(error: String): String {
-        return when (error) {
-            "access_denied", "interaction_required" -> "cancelled"
-            "invalid_client", "unauthorized_client" -> "configuration_error"
-            "invalid_grant", "invalid_request", "invalid_scope" -> "token_error"
-            "temporarily_unavailable", "server_error" -> "network_error"
-            else -> "token_error"
+    /**
+     * Canonical OAuth 2.0 / OIDC error-to-AuthErrorCode mapping. This table
+     * mirrors `src/utils/oauth-error.ts` and `ios/AuthAdapter.swift`;
+     * `docs/error-contract.md` is the single source of truth.
+     *
+     * `context` selects the operation bucket: "authorize"/"token" surface
+     * token/grant failures as `token_error`; "refresh" surfaces them as
+     * `refresh_failed`.
+     */
+    private fun mapMicrosoftOAuthError(error: String, context: String = "authorize"): String {
+        val normalized = error.trim().lowercase()
+        val code = when (normalized) {
+            "access_denied", "user_cancelled", "popup_closed_by_user" -> "cancelled"
+            "interaction_required", "login_required", "consent_required" -> "interaction_required"
+            "invalid_client", "invalid_scope", "unauthorized_client" -> "configuration_error"
+            "invalid_grant", "invalid_request", "invalid_token" -> "token_error"
+            "server_error", "temporarily_unavailable" -> "network_error"
+            else -> "unknown"
         }
+        return if (context == "refresh" && code == "token_error") "refresh_failed" else code
     }
 
     private fun decodeJwt(token: String): Map<String, String> {
@@ -522,7 +550,13 @@ object AuthAdapter {
         }
     }
 
-    private fun getJwtExpirationTimeMs(idToken: String?): Long? {
+    /**
+     * `expirationTime` is defined as the access-token expiry in epoch
+     * milliseconds. Android Google never returns an OAuth access token, so
+     * this documented fallback derives the expiry from the ID-token `exp`
+     * claim instead. See `docs/error-contract.md`.
+     */
+    private fun getGoogleExpirationTimeMs(idToken: String?): Long? {
         if (idToken.isNullOrEmpty()) return null
         val expSeconds = decodeJwt(idToken)["exp"]?.toLongOrNull() ?: return null
         return expSeconds * 1000
@@ -674,7 +708,7 @@ object AuthAdapter {
         }
 
         if (googleIdTokenCredential != null) {
-            val expirationTime = getJwtExpirationTimeMs(googleIdTokenCredential.idToken)
+            val expirationTime = getGoogleExpirationTimeMs(googleIdTokenCredential.idToken)
             nativeOnLoginSuccess(
                 origin, "google",
                 googleIdTokenCredential.email,
@@ -747,7 +781,7 @@ object AuthAdapter {
             client.silentSignIn().addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     val acc = task.result
-                    nativeOnRefreshSuccess(acc?.idToken, null, getJwtExpirationTimeMs(acc?.idToken))
+                    nativeOnRefreshSuccess(acc?.idToken, null, getGoogleExpirationTimeMs(acc?.idToken))
                 } else {
                     nativeOnRefreshError("network_error", task.exception?.message ?: "Silent sign-in failed")
                 }
@@ -835,7 +869,7 @@ object AuthAdapter {
         val account = GoogleSignIn.getLastSignedInAccount(ctx)
         if (account != null) {
             hasLegacyGoogleSession = true
-            val expirationTime = getJwtExpirationTimeMs(account.idToken)
+            val expirationTime = getGoogleExpirationTimeMs(account.idToken)
             nativeOnLoginSuccess("silent", "google", account.email, account.displayName,
                 account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
                 account.id, null, null, account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), expirationTime)
@@ -917,9 +951,9 @@ object AuthAdapter {
                                 val json = org.json.JSONObject(responseBody)
                                 val errorCode = json.optString("error", "token_error")
                                 val errorDesc = json.optString("error_description", "Token refresh failed")
-                                Pair(mapMicrosoftOAuthError(errorCode), errorDesc)
+                                Pair(mapMicrosoftOAuthError(errorCode, "refresh"), errorDesc)
                             } catch (e: Exception) {
-                                Pair("token_error", "Token refresh failed")
+                                Pair("refresh_failed", "Token refresh failed")
                             }
                             nativeOnLoginError("silent", mappedError.first, mappedError.second)
                         }
@@ -1006,9 +1040,9 @@ object AuthAdapter {
                                 val json = org.json.JSONObject(errorBody)
                                 val errorCode = json.optString("error", "token_error")
                                 val errorDesc = json.optString("error_description", "Token refresh failed")
-                                Pair(mapMicrosoftOAuthError(errorCode), errorDesc)
+                                Pair(mapMicrosoftOAuthError(errorCode, "refresh"), errorDesc)
                             } catch (e: Exception) {
-                                Pair("token_error", "Token refresh failed")
+                                Pair("refresh_failed", "Token refresh failed")
                             }
                             nativeOnRefreshError(mappedError.first, mappedError.second)
                         }

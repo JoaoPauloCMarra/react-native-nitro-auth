@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <iostream>
@@ -428,6 +429,165 @@ void testRefreshTokenSuccessFailureAndTokenListenerPaths() {
   auth->setLoggingEnabled(true);
 }
 
+void testTypedAuthEventsAcrossLoginRefreshLogout() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  std::vector<AuthEventType> eventTypes;
+  std::optional<AuthProvider> loginFailedProvider;
+  std::optional<AuthErrorCode> loginFailedCode;
+
+  auth->onAuthEvent([&](const AuthEvent& event) {
+    eventTypes.push_back(event.type);
+    if (event.type == AuthEventType::LOGIN_FAILED) {
+      loginFailedProvider = event.provider;
+      loginFailedCode = event.errorCode;
+    }
+  });
+
+  auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  assert(std::find(eventTypes.begin(), eventTypes.end(), AuthEventType::LOGIN_STARTED) != eventTypes.end());
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "fresh", futureTimestampMs()));
+  assert(loginPromise->isResolved());
+  assert(std::find(eventTypes.begin(), eventTypes.end(), AuthEventType::LOGIN_SUCCEEDED) != eventTypes.end());
+  assert(std::find(eventTypes.begin(), eventTypes.end(), AuthEventType::SESSION_CHANGED) != eventTypes.end());
+
+  auto refreshPromise = auth->refreshToken();
+  lastRefreshPromise->resolve(makeTokens("new-token", "id"));
+  assert(refreshPromise->isResolved());
+  assert(std::find(eventTypes.begin(), eventTypes.end(), AuthEventType::TOKENS_REFRESHED) != eventTypes.end());
+
+  auth->logout();
+  assert(std::find(eventTypes.begin(), eventTypes.end(), AuthEventType::LOGOUT) != eventTypes.end());
+}
+
+void testLoginFailedEventCarriesTypedErrorCode() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  std::optional<AuthErrorCode> failedCode;
+  std::optional<AuthProvider> failedProvider;
+
+  auth->onAuthEvent([&](const AuthEvent& event) {
+    if (event.type == AuthEventType::LOGIN_FAILED) {
+      failedCode = event.errorCode;
+      failedProvider = event.provider;
+    }
+  });
+
+  auto loginPromise = auth->login(AuthProvider::MICROSOFT, std::nullopt);
+  lastLoginPromise->reject(std::make_exception_ptr(std::runtime_error("cancelled: user closed the browser")));
+  assert(loginPromise->isRejected());
+  assert(failedProvider == AuthProvider::MICROSOFT);
+  assert(failedCode == AuthErrorCode::CANCELLED);
+
+  auto refreshPromise = auth->refreshToken();
+  lastRefreshPromise->reject(std::make_exception_ptr(std::runtime_error("refresh_failed: invalid_grant")));
+  assert(refreshPromise->isRejected());
+}
+
+void testRefreshFailedEventCarriesTypedErrorCode() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  std::optional<AuthErrorCode> failedCode;
+  int refreshFailedEvents = 0;
+
+  auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "old", expiredTimestampMs()));
+  assert(loginPromise->isResolved());
+
+  auth->onAuthEvent([&](const AuthEvent& event) {
+    if (event.type == AuthEventType::REFRESH_FAILED) {
+      refreshFailedEvents++;
+      failedCode = event.errorCode;
+    }
+  });
+
+  auto refreshPromise = auth->refreshToken();
+  lastRefreshPromise->reject(std::make_exception_ptr(std::runtime_error("network_error: connection refused")));
+  assert(refreshPromise->isRejected());
+  assert(refreshFailedEvents == 1);
+  assert(failedCode == AuthErrorCode::NETWORK_ERROR);
+}
+
+void testDisposeRejectsPendingWorkAndClearsListeners() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  int listenerCalls = 0;
+  int eventCalls = 0;
+  bool didDisposeEvent = false;
+
+  auth->onAuthStateChanged([&listenerCalls](const std::optional<AuthUser>&) {
+    listenerCalls++;
+  });
+  auth->onAuthEvent([&](const AuthEvent& event) {
+    eventCalls++;
+    if (event.type == AuthEventType::DISPOSE) {
+      didDisposeEvent = true;
+    }
+  });
+
+  auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  auto restorePromise = auth->silentRestore();
+  auto refreshPromise = auth->refreshToken();
+
+  auth->dispose();
+
+  assert(loginPromise->isRejected());
+  assert(restorePromise->isRejected());
+  assert(refreshPromise->isRejected());
+  assert(didDisposeEvent);
+  assert(didLogout);
+
+  int callsBefore = listenerCalls + eventCalls;
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "late"));
+  assert(!auth->getCurrentUser().has_value());
+  assert(listenerCalls + eventCalls == callsBefore);
+}
+
+void testRevokeScopesPreservesVoidContract() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+
+  auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"email", "profile"}));
+  assert(loginPromise->isResolved());
+
+  auto revokePromise = auth->revokeScopes({"profile", "missing", "profile"});
+  assert(revokePromise->isResolved());
+  const std::vector<std::string> remaining{"email"};
+  assert(auth->getGrantedScopes() == remaining);
+}
+
+void testSessionScenariosInterleaveWithoutUnresolvedPromises() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+
+  // SC-05: dispose rejects a pending login.
+  auto pendingLogin = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  auth->dispose();
+  assert(pendingLogin->isRejected());
+
+  // SC-09: a new login cancels the pending one; the duplicate settles when
+  // its platform operation settles (the platform rejects it with
+  // operation_in_progress; the mock resolves normally).
+  auto first = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  auto second = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  assert(first->isRejected());
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "second"));
+  assert(second->isResolved());
+  assert(auth->getCurrentUser()->accessToken == "second");
+
+  // SC-03/SC-04: logout cancels in-flight refresh and clears the session.
+  auto fresh = std::make_shared<HybridAuth>();
+  auto loginPromise = fresh->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "old"));
+  assert(loginPromise->isResolved());
+  auto refreshPromise = fresh->refreshToken();
+  fresh->logout();
+  assert(refreshPromise->isRejected());
+  assert(!fresh->getCurrentUser().has_value());
+  assert(fresh->getGrantedScopes().empty());
+}
+
 } // namespace
 
 int main() {
@@ -445,6 +605,12 @@ int main() {
   testScopeRejectionAndNoUserRevokePaths();
   testAccessTokenReadRefreshAndFallbackPaths();
   testRefreshTokenSuccessFailureAndTokenListenerPaths();
+  testTypedAuthEventsAcrossLoginRefreshLogout();
+  testLoginFailedEventCarriesTypedErrorCode();
+  testRefreshFailedEventCarriesTypedErrorCode();
+  testDisposeRejectsPendingWorkAndClearsListeners();
+  testRevokeScopesPreservesVoidContract();
+  testSessionScenariosInterleaveWithoutUnresolvedPromises();
 
   std::cout << "HybridAuth tests passed!" << std::endl;
   return 0;

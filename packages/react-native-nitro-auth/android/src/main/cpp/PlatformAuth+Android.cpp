@@ -625,21 +625,27 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginError(
     env->ReleaseStringUTFChars(error, errorCStr);
 
     // errorStr is the structured AuthErrorCode (e.g. "cancelled", "network_error").
-    // underlyingError is a raw platform message for debugging — it must not replace the code.
+    // The raw platform message is appended after the stable code so JavaScript
+    // receives the typed envelope `code: underlyingMessage`. Message text is
+    // never used as control flow; the code prefix is the contract.
+    std::string envelope = errorStr;
     if (underlyingError) {
-        const char* uCStr = env->GetStringUTFChars(underlyingError, nullptr);
-        env->ReleaseStringUTFChars(underlyingError, uCStr);
-        // underlyingError is intentionally discarded here; the structured code is sufficient
-        // for consumers. If richer debugging is needed, add it to the AuthUser.underlyingError field.
+      const char* uCStr = env->GetStringUTFChars(underlyingError, nullptr);
+      std::string underlyingStr(uCStr);
+      env->ReleaseStringUTFChars(underlyingError, uCStr);
+      if (!underlyingStr.empty()) {
+        envelope = errorStr + ": " + underlyingStr;
+      }
     }
 
-    if (loginPromise) loginPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
-    if (scopesPromise) scopesPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
+    auto rejection = std::make_exception_ptr(std::runtime_error(envelope));
+    if (loginPromise) loginPromise->reject(rejection);
+    if (scopesPromise) scopesPromise->reject(rejection);
     if (silentPromise) {
-        if (errorStr == "not_signed_in") silentPromise->resolve(std::nullopt);
-        else silentPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
+      if (errorStr == "not_signed_in") silentPromise->resolve(std::nullopt);
+      else silentPromise->reject(rejection);
     }
-}
+  }
 
 extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshSuccess(
     JNIEnv* env, jclass, jstring idToken, jstring accessToken, jobject expirationTime) {
@@ -687,13 +693,18 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshError
         std::string errorStr(errorCStr);
         env->ReleaseStringUTFChars(error, errorCStr);
 
+        std::string envelope = errorStr;
         if (underlyingError) {
             const char* uCStr = env->GetStringUTFChars(underlyingError, nullptr);
+            std::string underlyingStr(uCStr);
             env->ReleaseStringUTFChars(underlyingError, uCStr);
+            if (!underlyingStr.empty()) {
+                envelope = errorStr + ": " + underlyingStr;
+            }
         }
-        refreshPromise->reject(std::make_exception_ptr(std::runtime_error(errorStr)));
+        refreshPromise->reject(std::make_exception_ptr(std::runtime_error(envelope)));
     }
-}
+  }
 
 extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRevokeAccessResult(
     JNIEnv* env, jclass, jstring error, jstring underlyingError) {
@@ -714,14 +725,19 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRevokeAccess
     const char* errorChars = env->GetStringUTFChars(error, nullptr);
     std::string errorString(errorChars);
     env->ReleaseStringUTFChars(error, errorChars);
+    std::string envelope = errorString;
     if (underlyingError) {
         const char* underlyingChars = env->GetStringUTFChars(underlyingError, nullptr);
+        std::string underlyingString(underlyingChars);
         env->ReleaseStringUTFChars(underlyingError, underlyingChars);
+        if (!underlyingString.empty()) {
+            envelope = errorString + ": " + underlyingString;
+        }
     }
     revokeAccessPromise->reject(
-        std::make_exception_ptr(std::runtime_error(errorString))
+        std::make_exception_ptr(std::runtime_error(envelope))
     );
-}
+  }
 
 extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeDispose(JNIEnv* env, jclass) {
     std::shared_ptr<Promise<AuthUser>> loginPromise;
@@ -743,7 +759,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeDispose(JNIEnv
         gRevokeAccessPromise = nullptr;
     }
 
-    auto disposed = std::make_exception_ptr(std::runtime_error("disposed"));
+    auto disposed = std::make_exception_ptr(std::runtime_error("cancelled"));
     if (loginPromise) loginPromise->reject(disposed);
     if (scopesPromise) scopesPromise->reject(disposed);
     if (refreshPromise) refreshPromise->reject(disposed);

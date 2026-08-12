@@ -104,7 +104,7 @@ public class AuthAdapter: NSObject {
       }
       
       let controller = ASAuthorizationController(authorizationRequests: [request])
-      let delegate = AppleSignInDelegate(completion: complete)
+      let delegate = AppleSignInDelegate(expectedNonce: nonce, completion: complete)
       controller.delegate = delegate
       activeAppleSignInController = controller
       objc_setAssociatedObject(controller, &delegateHandle, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
@@ -226,7 +226,7 @@ public class AuthAdapter: NSObject {
         if let errorCode = params["error"] {
           // OAuth error codes are already structured (e.g. "access_denied").
           // Map well-known ones; fall back to "unknown".
-          let mapped = mapOAuthError(errorCode)
+          let mapped = mapOAuthError(errorCode, context: "authorize")
           completeAndClearSession(nil, mapped)
           return
         }
@@ -357,7 +357,7 @@ public class AuthAdapter: NSObject {
         }
 
         if let errorCode = json["error"] as? String {
-          completion(nil, mapOAuthError(errorCode))
+          completion(nil, mapOAuthError(errorCode, context: "token"))
           return
         }
 
@@ -399,14 +399,13 @@ public class AuthAdapter: NSObject {
           "serverAuthCode": "",
           "scopes": scopes,
           "expirationTime": expirationTime,
-          "underlyingError": ""
         ]
         completion(resultData as NSDictionary, nil)
       }
     }.resume()
   }
   
-  private static func decodeJwt(_ token: String) -> [String: String] {
+  fileprivate static func decodeJwt(_ token: String) -> [String: String] {
     let parts = token.components(separatedBy: ".")
     guard parts.count >= 2 else { return [:] }
     
@@ -459,7 +458,6 @@ public class AuthAdapter: NSObject {
       "userId": user.userID ?? "",
       "hostedDomain": user.configuration.hostedDomain ?? "",
       "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000,
-      "underlyingError": ""
     ]
     completion(data as NSDictionary, nil)
   }
@@ -491,15 +489,34 @@ public class AuthAdapter: NSObject {
     return "unknown"
   }
 
-  /// Maps OAuth 2.0 error codes (returned in query params or JSON) to AuthErrorCode values.
-  private static func mapOAuthError(_ oauthCode: String) -> String {
-    switch oauthCode {
-    case "access_denied": return "cancelled"
-    case "invalid_client", "unauthorized_client", "invalid_scope": return "configuration_error"
-    case "invalid_grant", "invalid_request": return "token_error"
-    case "temporarily_unavailable", "server_error": return "network_error"
-    default: return "unknown"
+  /// Maps OAuth 2.0 error codes (returned in query params or JSON) to
+  /// AuthErrorCode values. This table mirrors `src/utils/oauth-error.ts` and
+  /// `AuthAdapter.kt`; `docs/error-contract.md` is the single source of truth.
+  ///
+  /// `context` selects the operation bucket: "authorize"/"token" surface
+  /// token/grant failures as `token_error`; "refresh" surfaces them as
+  /// `refresh_failed`.
+  private static func mapOAuthError(_ oauthCode: String, context: String = "authorize") -> String {
+    let normalized = oauthCode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let code: String
+    switch normalized {
+    case "access_denied", "user_cancelled", "popup_closed_by_user":
+      code = "cancelled"
+    case "interaction_required", "login_required", "consent_required":
+      code = "interaction_required"
+    case "invalid_client", "invalid_scope", "unauthorized_client":
+      code = "configuration_error"
+    case "invalid_grant", "invalid_request", "invalid_token":
+      code = "token_error"
+    case "server_error", "temporarily_unavailable":
+      code = "network_error"
+    default:
+      code = "unknown"
     }
+    if context == "refresh" && code == "token_error" {
+      return "refresh_failed"
+    }
+    return code
   }
 
   @objc
@@ -546,7 +563,6 @@ public class AuthAdapter: NSObject {
           "accessToken": user.accessToken.tokenString,
           "idToken": user.idToken?.tokenString ?? "",
           "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000,
-          "underlyingError": ""
         ]
         completion(data as NSDictionary, nil)
       }
@@ -639,7 +655,7 @@ public class AuthAdapter: NSObject {
           if let data = data,
              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
              let errorCode = json["error"] as? String {
-            completion(nil, mapOAuthError(errorCode))
+            completion(nil, mapOAuthError(errorCode, context: "refresh"))
           } else {
             completion(nil, "network_error")
           }
@@ -724,7 +740,7 @@ public class AuthAdapter: NSObject {
           return
         }
         if let errorCode = json["error"] as? String {
-          completion(nil, AuthAdapter.mapOAuthError(errorCode))
+          completion(nil, AuthAdapter.mapOAuthError(errorCode, context: "refresh"))
           return
         }
         if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
@@ -745,7 +761,6 @@ public class AuthAdapter: NSObject {
           "accessToken": accessToken,
           "idToken": idToken,
           "expirationTime": expirationTime,
-          "underlyingError": ""
         ]
         completion(tokensData as NSDictionary, nil)
       }
@@ -893,19 +908,32 @@ private var delegateHandle: UInt8 = 0
 private var contextProviderHandle: UInt8 = 0
 
 class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
+  let expectedNonce: String?
   let completion: (NSDictionary?, String?) -> Void
-  
-  init(completion: @escaping (NSDictionary?, String?) -> Void) {
+
+  init(expectedNonce: String?, completion: @escaping (NSDictionary?, String?) -> Void) {
+    self.expectedNonce = expectedNonce
     self.completion = completion
   }
-  
+
   func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
     if let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential {
       let email = appleIDCredential.email
       let fullName = appleIDCredential.fullName
       let name = [fullName?.givenName, fullName?.familyName].compactMap { $0 }.joined(separator: " ")
       let idToken = appleIDCredential.identityToken.flatMap { String(data: $0, encoding: .utf8) }
-      
+
+      // When a nonce was requested, verify the identity token carries it.
+      // Apple SDKs bind the nonce into the token; the claim check prevents a
+      // replayed or swapped token from being accepted.
+      if let expectedNonce = expectedNonce, let idToken = idToken {
+        let claims = AuthAdapter.decodeJwt(idToken)
+        guard claims["nonce"] == expectedNonce else {
+          completion(nil, "invalid_nonce")
+          return
+        }
+      }
+
       let data: [String: Any] = [
         "provider": "apple",
         "email": email ?? "",
@@ -913,7 +941,6 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
         "idToken": idToken ?? "",
         "authorizationCode": appleIDCredential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) } ?? "",
         "userId": appleIDCredential.user,
-        "underlyingError": ""
       ]
       completion(data as NSDictionary, nil)
     } else {

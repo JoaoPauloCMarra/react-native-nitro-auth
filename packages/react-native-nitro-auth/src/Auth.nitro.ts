@@ -4,6 +4,7 @@ export type AuthProvider = "google" | "apple" | "microsoft";
 
 export type AuthErrorCode =
   | "cancelled"
+  | "interaction_required"
   | "timeout"
   | "popup_blocked"
   | "network_error"
@@ -65,8 +66,34 @@ export interface AuthUser {
   hostedDomain?: string;
   scopes?: string[];
   expirationTime?: number;
-  /** Raw native error message */
+  /**
+   * @deprecated Reserved for compatibility. Structured failure details are
+   * delivered through the `AuthError` envelope (`code`, `operation`, and
+   * `underlyingMessage`), not through the signed-in user object.
+   */
   underlyingError?: string;
+}
+
+export interface ScopeRevocationResult {
+  /** Always false: scope revocation is local-only on every supported platform. */
+  revokedAtProvider: false;
+  revokedScopes: string[];
+}
+
+export type AuthEventType =
+  | "login_started"
+  | "login_succeeded"
+  | "login_failed"
+  | "tokens_refreshed"
+  | "refresh_failed"
+  | "session_changed"
+  | "logout"
+  | "dispose";
+
+export interface AuthEvent {
+  type: AuthEventType;
+  provider?: AuthProvider;
+  errorCode?: AuthErrorCode;
 }
 
 export interface Auth extends HybridObject<{ ios: "c++"; android: "c++" }> {
@@ -88,5 +115,6 @@ export interface Auth extends HybridObject<{ ios: "c++"; android: "c++" }> {
     callback: (user: AuthUser | undefined) => void,
   ): () => void;
   onTokensRefreshed(callback: (tokens: AuthTokens) => void): () => void;
+  onAuthEvent(callback: (event: AuthEvent) => void): () => void;
   setLoggingEnabled(enabled: boolean): void;
 }
