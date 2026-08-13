@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.0 - 2026-08-13
+
+### Breaking changes
+
+- None.
+
+### Added
+
+- `AuthService.loginAndGetUser()` runs the existing `login()` native call and
+  returns `currentUser`, or rejects with `not_signed_in` when login succeeds
+  without a session. `login()` remains `Promise<void>`.
+- The Expo plugin derives `ios.googleUrlScheme` from `ios.googleClientId` when
+  the scheme is omitted. An explicit `ios.googleUrlScheme` still wins.
+
+### Changed
+
+- Documented that `logout()` is synchronous `void`.
+
 ## 0.7.0 - 2026-08-12
 
 ### Breaking changes

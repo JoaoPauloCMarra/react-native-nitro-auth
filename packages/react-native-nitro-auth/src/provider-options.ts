@@ -1,6 +1,7 @@
 import type {
   Auth,
   AuthProvider,
+  AuthUser,
   LoginOptions,
   ScopeRevocationResult,
 } from "./Auth.nitro";
@@ -56,7 +57,13 @@ export type AuthLogin = <Provider extends AuthProvider>(
   options?: ProviderLoginOptions<Provider>,
 ) => Promise<void>;
 
+export type AuthLoginAndGetUser = <Provider extends AuthProvider>(
+  provider: Provider,
+  options?: ProviderLoginOptions<Provider>,
+) => Promise<AuthUser>;
+
 export type TypedAuth = Omit<Auth, "login"> & {
   login: AuthLogin;
+  loginAndGetUser: AuthLoginAndGetUser;
   revokeScopesWithResult: (scopes: string[]) => Promise<ScopeRevocationResult>;
 };

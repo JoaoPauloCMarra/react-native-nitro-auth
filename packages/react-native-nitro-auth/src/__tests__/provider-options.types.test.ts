@@ -1,5 +1,6 @@
 import type {
   AuthLogin,
+  AuthLoginAndGetUser,
   AppleIOSLoginOptions,
   AppleLoginOptions,
   AppleWebLoginOptions,
@@ -63,6 +64,9 @@ type WebServiceUsesTypedAuth = AssertTrue<
 type TypedAuthUsesProviderLogin = AssertTrue<
   IsAssignable<TypedAuth["login"], AuthLogin>
 >;
+type TypedAuthUsesLoginAndGetUser = AssertTrue<
+  IsAssignable<TypedAuth["loginAndGetUser"], AuthLoginAndGetUser>
+>;
 type HookUsesProviderLogin = AssertTrue<
   IsAssignable<UseAuthReturn["login"], AuthLogin>
 >;
@@ -120,6 +124,7 @@ void (0 as unknown as MicrosoftPromptValues);
 void (0 as unknown as NativeServiceUsesTypedAuth);
 void (0 as unknown as WebServiceUsesTypedAuth);
 void (0 as unknown as TypedAuthUsesProviderLogin);
+void (0 as unknown as TypedAuthUsesLoginAndGetUser);
 void (0 as unknown as HookUsesProviderLogin);
 void (0 as unknown as WebProviderOptionsMatchNative);
 void (0 as unknown as WebHookUsesProviderLogin);

@@ -72,7 +72,6 @@ export default {
           ios: {
             googleClientId: process.env.GOOGLE_IOS_CLIENT_ID,
             googleServerClientId: process.env.GOOGLE_SERVER_CLIENT_ID,
-            googleUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME,
             appleSignIn: true,
             microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
             microsoftTenant: process.env.MICROSOFT_TENANT,
@@ -105,7 +104,7 @@ Plugin options:
 | ---------------------------- | -------- | -------------------------------- |
 | `ios.googleClientId`         | iOS      | Google Sign-In on iOS.           |
 | `ios.googleServerClientId`   | iOS      | Google server auth code flow.    |
-| `ios.googleUrlScheme`        | iOS      | Google redirect URL scheme.      |
+| `ios.googleUrlScheme`        | iOS      | Optional Google redirect scheme. Derived from `ios.googleClientId` when omitted. |
 | `ios.appleSignIn`            | iOS      | Apple Sign-In entitlement.       |
 | `ios.microsoftClientId`      | iOS      | Microsoft Entra ID native login. |
 | `ios.microsoftTenant`        | iOS      | Microsoft tenant override.       |
@@ -114,6 +113,11 @@ Plugin options:
 | `android.microsoftClientId`  | Android  | Microsoft Entra ID native login. |
 | `android.microsoftTenant`    | Android  | Microsoft tenant override.       |
 | `android.microsoftB2cDomain` | Android  | Microsoft B2C hostname.          |
+
+When `ios.googleUrlScheme` is omitted, the plugin derives
+`com.googleusercontent.apps.<id>` from an iOS client ID that ends in
+`.apps.googleusercontent.com`. Set `ios.googleUrlScheme` only to override that
+value.
 
 Web reads provider client IDs from `expo.extra`; native platforms read values
 written by the plugin during prebuild.
@@ -178,7 +182,24 @@ export function SignInButton() {
 Imperative callers can use the same provider-aware options:
 
 ```ts
-import { AuthService } from "react-native-nitro-auth";
+import { AuthError, AuthService } from "react-native-nitro-auth";
+
+async function signInWithGoogle() {
+  try {
+    const user = await AuthService.loginAndGetUser("google", {
+      forceAccountPicker: true,
+    });
+    return user.idToken;
+  } catch (error) {
+    if (
+      error instanceof AuthError &&
+      (error.code === "cancelled" || error.code === "timeout")
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
+}
 
 async function signInWithMicrosoft() {
   await AuthService.login("microsoft", {
@@ -187,6 +208,11 @@ async function signInWithMicrosoft() {
   });
 }
 ```
+
+`login()` still returns `Promise<void>` and leaves the session on
+`AuthService.currentUser`. `loginAndGetUser()` runs the same native login, then
+returns that user or rejects with `not_signed_in`. `logout()` is synchronous and
+returns `void`.
 
 ## Providers
 
@@ -207,6 +233,8 @@ Main exports:
 
 - `useAuth()` for reactive user, scope, loading, and error state.
 - `AuthService` for imperative operations and account listeners.
+- `AuthService.loginAndGetUser()` when the caller needs the signed-in user from
+  the same call.
 - `SocialButton` for provider-aware UI.
 - `AuthProvider` for `"google"`, `"apple"`, and `"microsoft"`.
 - `AuthError` and `AuthErrorCode` for deterministic failures.
@@ -245,8 +273,9 @@ Supported login options:
 
 ### Session operations
 
-- `logout()` clears package session state and signs out provider SDK state where
-  available. It does not revoke a provider grant or your backend session.
+- `logout()` is synchronous and returns `void`. It clears package session state
+  and signs out provider SDK state where available. It does not revoke a
+  provider grant or your backend session. Do not `await` it.
 - `silentRestore()` resolves with or without a restorable session. It never
   opens interactive UI: a near-expiry Google session rejects with
   `interaction_required` instead of showing a popup.

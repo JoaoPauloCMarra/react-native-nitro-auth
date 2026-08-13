@@ -76,6 +76,20 @@ export function createAuthService(
       );
     },
 
+    loginAndGetUser<Provider extends AuthProvider>(
+      provider: Provider,
+      options?: ProviderLoginOptions<Provider>,
+    ) {
+      return wrapAuthOperation("login", async () => {
+        await getAuth().login(provider, options);
+        const user = getAuth().currentUser;
+        if (!user) {
+          throw new AuthError("not_signed_in", "login");
+        }
+        return user;
+      });
+    },
+
     requestScopes(scopes: string[]) {
       return wrapAuthOperation("requestScopes", () =>
         getAuth().requestScopes(scopes),
