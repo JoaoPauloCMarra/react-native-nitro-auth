@@ -28,6 +28,33 @@ function getNitroAuthIosExtraPods(extraPods = []) {
   return pods;
 }
 
+const GOOGLE_IOS_CLIENT_ID_SUFFIX = ".apps.googleusercontent.com";
+
+function googleIosUrlSchemeFromClientId(clientId) {
+  if (typeof clientId !== "string") {
+    return undefined;
+  }
+  const trimmed = clientId.trim();
+  if (!trimmed.endsWith(GOOGLE_IOS_CLIENT_ID_SUFFIX)) {
+    return undefined;
+  }
+  const prefix = trimmed.slice(0, -GOOGLE_IOS_CLIENT_ID_SUFFIX.length);
+  if (!prefix) {
+    return undefined;
+  }
+  return `com.googleusercontent.apps.${prefix}`;
+}
+
+function resolveGoogleUrlScheme(ios = {}) {
+  if (typeof ios.googleUrlScheme === "string") {
+    const explicitScheme = ios.googleUrlScheme.trim();
+    if (explicitScheme) {
+      return explicitScheme;
+    }
+  }
+  return googleIosUrlSchemeFromClientId(ios.googleClientId);
+}
+
 const withNitroAuth = (config, props = {}) => {
   const { ios = {}, android = {} } = props;
 
@@ -44,17 +71,18 @@ const withNitroAuth = (config, props = {}) => {
     if (ios.googleServerClientId) {
       config.modResults.GIDServerClientID = ios.googleServerClientId;
     }
-    if (ios.googleUrlScheme) {
+    const googleUrlScheme = resolveGoogleUrlScheme(ios);
+    if (googleUrlScheme) {
       const existingSchemes = config.modResults.CFBundleURLTypes || [];
       if (
         !existingSchemes.some((scheme) =>
-          scheme.CFBundleURLSchemes.includes(ios.googleUrlScheme),
+          scheme.CFBundleURLSchemes.includes(googleUrlScheme),
         )
       ) {
         config.modResults.CFBundleURLTypes = [
           ...existingSchemes,
           {
-            CFBundleURLSchemes: [ios.googleUrlScheme],
+            CFBundleURLSchemes: [googleUrlScheme],
           },
         ];
       }
@@ -194,4 +222,6 @@ module.exports.withNitroAuth = withNitroAuth;
 module.exports._internal = {
   getNitroAuthIosExtraPods,
   googleSignInIosPods,
+  googleIosUrlSchemeFromClientId,
+  resolveGoogleUrlScheme,
 };

@@ -132,6 +132,7 @@ describe("AuthService", () => {
 
   it("should have all required methods", () => {
     expect(AuthService.login).toBeDefined();
+    expect(AuthService.loginAndGetUser).toBeDefined();
     expect(AuthService.logout).toBeDefined();
     expect(AuthService.requestScopes).toBeDefined();
     expect(AuthService.revokeScopes).toBeDefined();
@@ -166,6 +167,41 @@ describe("AuthService", () => {
       const error = await AuthService.login("google").catch((e: unknown) => e);
       expect(error).toBeInstanceOf(AuthError);
       expect((error as AuthError).code).toBe("network_error");
+    });
+
+    it("loginAndGetUser returns currentUser after login", async () => {
+      const user: AuthUser = {
+        provider: "google",
+        idToken: "id-token",
+      };
+      native().login.mockResolvedValueOnce(undefined);
+      mockCurrentUser = user;
+
+      await expect(AuthService.loginAndGetUser("google")).resolves.toEqual(
+        user,
+      );
+      expect(native().login).toHaveBeenCalledWith("google", undefined);
+    });
+
+    it("loginAndGetUser throws not_signed_in when login leaves currentUser empty", async () => {
+      native().login.mockResolvedValueOnce(undefined);
+      mockCurrentUser = undefined;
+
+      const error = await AuthService.loginAndGetUser("google").catch(
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(AuthError);
+      expect((error as AuthError).code).toBe("not_signed_in");
+      expect((error as AuthError).operation).toBe("login");
+    });
+
+    it("loginAndGetUser wraps native login errors in AuthError", async () => {
+      native().login.mockRejectedValueOnce(new Error("cancelled"));
+      const error = await AuthService.loginAndGetUser("google").catch(
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(AuthError);
+      expect((error as AuthError).code).toBe("cancelled");
     });
 
     it("requestScopes wraps native error in AuthError", async () => {
