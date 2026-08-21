@@ -9,6 +9,7 @@ import {
   Platform,
 } from "react-native";
 import { AuthService } from "../service";
+import { AuthError } from "../utils/auth-error";
 import { logger } from "../utils/logger";
 import type { AuthProvider, AuthUser } from "../Auth.nitro";
 
@@ -22,7 +23,7 @@ export type SocialButtonProps = {
   textStyle?: TextStyle;
   disabled?: boolean;
   onSuccess?: (user: AuthUser) => void;
-  onError?: (error: unknown) => void;
+  onError?: (error: AuthError) => void;
   onPress?: () => void;
 };
 
@@ -99,7 +100,7 @@ export const SocialButton = React.memo(function SocialButton({
       }
     } catch (error) {
       if (onError) {
-        onError(error);
+        onError(AuthError.from(error));
       } else if (__DEV__) {
         logger.error("SocialButton unhandled error:", error);
       }

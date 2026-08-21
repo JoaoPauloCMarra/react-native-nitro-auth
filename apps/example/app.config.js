@@ -38,7 +38,6 @@ const appConfig = {
           },
         },
       ],
-      "react-native-nitro-storage",
       [
         "react-native-nitro-auth",
         {

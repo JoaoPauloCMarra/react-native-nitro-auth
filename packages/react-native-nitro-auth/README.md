@@ -4,9 +4,9 @@
 [![npm downloads](https://img.shields.io/npm/dm/react-native-nitro-auth?color=22c55e&label=downloads)](https://www.npmjs.com/package/react-native-nitro-auth)
 [![CI](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/react-native-nitro-auth?color=007ec6)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/LICENSE)
-[![React Native](https://img.shields.io/badge/react--native-%3E%3D0.75-61dafb)](https://reactnative.dev/docs/0.86/getting-started-without-a-framework)
-[![Expo](https://img.shields.io/badge/expo-SDK%2057-000020)](https://docs.expo.dev/versions/v57.0.0/)
-[![Nitro Modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.36.5%20%3C0.37.0-black)](https://nitro.margelo.com/)
+[![React Native](https://img.shields.io/badge/react--native-0.87.0-61dafb)](https://reactnative.dev/docs/0.87/getting-started-without-a-framework)
+[![Expo](https://img.shields.io/badge/expo-SDK%2057%20%28RN%200.86.2%29-000020)](https://docs.expo.dev/versions/v57.0.0/)
+[![Nitro Modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.37.0%20%3C0.38.0-black)](https://nitro.margelo.com/)
 [![TypeScript](https://img.shields.io/badge/typescript-6.0-3178c6)](https://www.typescriptlang.org/)
 
 Google Sign-In, Apple Sign-In, and Microsoft Entra ID for React Native and
@@ -45,10 +45,10 @@ bare app.
 
 | Dependency                   | Supported range or validated baseline |
 | ---------------------------- | ------------------------------------- |
-| React Native                 | `>=0.75.0`; validated with `0.86.2`   |
+| React Native                 | `>=0.75.0`; package gate `0.87.0`, Expo example `0.86.2` |
 | React                        | Validated with `19.2.3`               |
-| React Native Nitro Modules   | `>=0.36.5 <0.37.0`                    |
-| Expo                         | Development builds; validated with 57 |
+| React Native Nitro Modules   | `>=0.37.0 <0.38.0`                    |
+| Expo                         | SDK `57.0.15` development builds; RN `0.86.2` |
 | iOS                          | `16.4` or later                       |
 
 ## Expo Config
@@ -138,6 +138,16 @@ Web options in `expo.extra`:
 Web reads `expo-constants` for these options. `expo-constants` is an optional
 peer dependency: without it, web falls back to defaults and provider client
 IDs must be configured another way.
+
+### Web OAuth redirects
+
+Web Google, Microsoft, and Apple flows use `window.location.origin` as the OAuth
+redirect URI. Register the exact origin with each provider, without adding an
+OAuth callback path. Google and Microsoft complete in a popup; their callbacks
+may return query or hash parameters at the page root. The package accepts only
+that registered root target, verifies `state` before reading the response, and
+verifies the identity-token `nonce` before creating a session. Apple uses the
+same origin through the Apple JS popup flow.
 
 On iOS, the plugin also applies the CocoaPods modular-header settings required
 by the Google Sign-In dependency chain (`AppCheckCore`, `GoogleUtilities`, and
@@ -405,8 +415,19 @@ Error codes are `cancelled`, `interaction_required`, `timeout`,
 | Web      | Google, Apple, and Microsoft OAuth through Expo web config. |
 | Expo     | Development builds with the config plugin.                  |
 
-Validated baseline: Expo SDK 57, React Native 0.86.2, React 19.2.3, and Nitro
-Modules 0.36.5. Package peer range: `>=0.36.5 <0.37.0`.
+The package gate uses React Native `0.87.0` and the Strict TypeScript API. The
+Expo example uses Expo SDK `57.0.15`, React Native `0.86.2`, React `19.2.3`,
+and Nitro Modules `0.37.0`, which is the React Native version supported by that
+Expo SDK. Do not override Expo's React Native version.
+
+Package peer range: `>=0.37.0 <0.38.0`.
+
+### Migration from 0.8.0
+
+Version 0.9.0 requires Nitro Modules `>=0.37.0 <0.38.0`. Upgrade
+`react-native-nitro-modules` before installing this package, then regenerate
+native projects with `bunx expo prebuild` for Expo or run `pod install` for a
+bare iOS app.
 
 ## Troubleshooting
 

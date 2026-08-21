@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0 - 2026-08-20
+
+### Breaking changes
+
+- The `react-native-nitro-modules` peer dependency is now
+  `>=0.37.0 <0.38.0`. Consumers using Nitro Modules 0.36.x must upgrade before
+  installing this release.
+
+### Changed
+
+- Updated the validated compatibility baseline to Nitro Modules 0.37.0 while
+  retaining Expo SDK 57's React Native 0.86.2 example baseline and adding
+  standalone package validation with React Native 0.87.0.
+- `SocialButtonProps.onError` now exposes the normalized `AuthError` contract.
+
 ## 0.8.0 - 2026-08-13
 
 ### Breaking changes

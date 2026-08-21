@@ -12,6 +12,7 @@ import type {
   TypedAuth,
   UseAuthReturn,
 } from "../index";
+import type { AuthError } from "../utils/auth-error";
 
 type AssertNever<T extends never> = T;
 type AssertTrue<T extends true> = T;
@@ -79,6 +80,18 @@ type WebProviderOptionsMatchNative = AssertTrue<
 type WebHookUsesProviderLogin = AssertTrue<
   IsAssignable<WebUseAuthReturn["login"], AuthLogin>
 >;
+type NativeSocialButtonError = AssertTrue<
+  IsAssignable<
+    NonNullable<import("../index").SocialButtonProps["onError"]>,
+    (error: AuthError) => void
+  >
+>;
+type WebSocialButtonError = AssertTrue<
+  IsAssignable<
+    NonNullable<import("../index.web").SocialButtonProps["onError"]>,
+    (error: AuthError) => void
+  >
+>;
 
 const googleAndroidOptions = {
   useOneTap: true,
@@ -128,3 +141,5 @@ void (0 as unknown as TypedAuthUsesLoginAndGetUser);
 void (0 as unknown as HookUsesProviderLogin);
 void (0 as unknown as WebProviderOptionsMatchNative);
 void (0 as unknown as WebHookUsesProviderLogin);
+void (0 as unknown as NativeSocialButtonError);
+void (0 as unknown as WebSocialButtonError);

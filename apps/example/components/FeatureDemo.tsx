@@ -21,11 +21,6 @@ import {
   type AuthUser,
   type ProviderLoginOptions,
 } from "react-native-nitro-auth";
-import {
-  createStorageItem,
-  StorageScope,
-  useStorage,
-} from "react-native-nitro-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { SmokeTestCard } from "./SmokeTestCard";
 import { version as packageVersion } from "../../../packages/react-native-nitro-auth/package.json";
@@ -77,12 +72,6 @@ const EMPTY_AUTH_SNAPSHOT: AuthSnapshot = {
   scopes: [],
   updatedAt: undefined,
 };
-
-const authSnapshotItem = createStorageItem<AuthSnapshot>({
-  key: "demo_auth_snapshot",
-  scope: StorageScope.Disk,
-  defaultValue: EMPTY_AUTH_SNAPSHOT,
-});
 
 function dedupeScopes(scopes: readonly string[] | undefined): string[] {
   const seen = new Set<string>();
@@ -233,7 +222,7 @@ export function FeatureDemo() {
   const [hostedDomain, setHostedDomain] = useState("");
   const [openIDRealm, setOpenIDRealm] = useState("");
   const [microsoftTenant, setMicrosoftTenant] = useState("");
-  const [persistSnapshot, setPersistSnapshot] = useState(true);
+  const [keepSnapshotInMemory, setKeepSnapshotInMemory] = useState(true);
   const [loggingEnabled, setLoggingEnabled] = useState(false);
   const [buttonVariant, setButtonVariant] = useState<
     "primary" | "outline" | "white" | "black"
@@ -241,20 +230,20 @@ export function FeatureDemo() {
   const [microsoftPrompt, setMicrosoftPrompt] =
     useState<MicrosoftPrompt>(undefined);
   const [lastTokens, setLastTokens] = useState<AuthTokens | undefined>();
-  const [snapshot, setSnapshot] = useStorage(authSnapshotItem);
+  const [snapshot, setSnapshot] = useState<AuthSnapshot>(EMPTY_AUTH_SNAPSHOT);
 
   const displayUser =
-    auth.user ?? (persistSnapshot ? snapshot.user : undefined);
+    auth.user ?? (keepSnapshotInMemory ? snapshot.user : undefined);
   const displayScopes = useMemo(() => {
     if (auth.scopes.length > 0) {
       return dedupeScopes(auth.scopes);
     }
 
-    return persistSnapshot ? dedupeScopes(snapshot.scopes) : [];
-  }, [auth.scopes, persistSnapshot, snapshot.scopes]);
+    return keepSnapshotInMemory ? dedupeScopes(snapshot.scopes) : [];
+  }, [auth.scopes, keepSnapshotInMemory, snapshot.scopes]);
 
   const isSnapshotOnly =
-    !auth.user && persistSnapshot && Boolean(snapshot.user);
+    !auth.user && keepSnapshotInMemory && Boolean(snapshot.user);
   const hasCalendarScope = auth.scopes.includes(CALENDAR_SCOPE);
   const statusBadgeStyle = getStatusBadgeStyle(statusTone);
   const statusBadgeTextStyle = getStatusBadgeTextStyle(statusTone);
@@ -271,9 +260,9 @@ export function FeatureDemo() {
     setSnapshot(EMPTY_AUTH_SNAPSHOT);
   }, [setSnapshot]);
 
-  const persistLatestAuthState = useCallback(
+  const updateAuthSnapshot = useCallback(
     (tokenPatch?: Partial<AuthTokens>) => {
-      if (!persistSnapshot) {
+      if (!keepSnapshotInMemory) {
         return;
       }
 
@@ -304,7 +293,7 @@ export function FeatureDemo() {
         };
       });
     },
-    [persistSnapshot, setSnapshot],
+    [keepSnapshotInMemory],
   );
 
   const runAuthAction = useCallback(
@@ -346,7 +335,7 @@ export function FeatureDemo() {
         return;
       }
 
-      persistLatestAuthState();
+      updateAuthSnapshot();
       setNotice(
         `Signed in with ${formatProvider(nextUser.provider)}`,
         "success",
@@ -355,7 +344,7 @@ export function FeatureDemo() {
 
     const unsubscribeTokens = AuthService.onTokensRefreshed((tokens) => {
       setLastTokens(tokens);
-      persistLatestAuthState(tokens);
+      updateAuthSnapshot(tokens);
       setNotice("Tokens refreshed", "success");
     });
 
@@ -363,23 +352,23 @@ export function FeatureDemo() {
       unsubscribeAuth();
       unsubscribeTokens();
     };
-  }, [persistLatestAuthState, setNotice]);
+  }, [setNotice, updateAuthSnapshot]);
 
   useEffect(() => {
-    if (!persistSnapshot) {
+    if (!keepSnapshotInMemory) {
       clearSnapshot();
       return;
     }
 
     if (auth.user) {
-      persistLatestAuthState();
+      updateAuthSnapshot();
     }
   }, [
     auth.scopes,
     auth.user,
     clearSnapshot,
-    persistLatestAuthState,
-    persistSnapshot,
+    keepSnapshotInMemory,
+    updateAuthSnapshot,
   ]);
 
   function getProviderDisabled(provider: AuthProvider): boolean {
@@ -492,11 +481,11 @@ export function FeatureDemo() {
         `Signing in with ${formatProvider(provider)}`,
         async () => {
           await runProviderLogin(provider);
-          persistLatestAuthState();
+          updateAuthSnapshot();
         },
       );
     },
-    [persistLatestAuthState, runAuthAction, runProviderLogin, setNotice],
+    [runAuthAction, runProviderLogin, setNotice, updateAuthSnapshot],
   );
 
   const cycleButtonVariant = useCallback(() => {
@@ -526,47 +515,47 @@ export function FeatureDemo() {
       const accessToken = await auth.getAccessToken();
       setLastTokens((tokens) => ({ ...tokens, accessToken }));
       if (accessToken) {
-        persistLatestAuthState({ accessToken });
+        updateAuthSnapshot({ accessToken });
       }
       setNotice(
         accessToken ? "Access token loaded" : "No access token",
         "success",
       );
     });
-  }, [auth, persistLatestAuthState, runAuthAction, setNotice]);
+  }, [auth, runAuthAction, setNotice, updateAuthSnapshot]);
 
   const refreshToken = useCallback(async () => {
     await runAuthAction("Refreshing tokens", async () => {
       const tokens = await auth.refreshToken();
       setLastTokens(tokens);
-      persistLatestAuthState(tokens);
+      updateAuthSnapshot(tokens);
     });
-  }, [auth, persistLatestAuthState, runAuthAction]);
+  }, [auth, runAuthAction, updateAuthSnapshot]);
 
   const silentRestore = useCallback(async () => {
     await runAuthAction("Restoring session", async () => {
       await auth.silentRestore();
-      persistLatestAuthState();
+      updateAuthSnapshot();
       setNotice(
         AuthService.currentUser ? "Session restored" : "No session found",
       );
     });
-  }, [auth, persistLatestAuthState, runAuthAction, setNotice]);
+  }, [auth, runAuthAction, setNotice, updateAuthSnapshot]);
 
   const requestOrRevokeCalendarScope = useCallback(async () => {
     if (hasCalendarScope) {
       await runAuthAction("Revoking calendar scope", async () => {
         await auth.revokeScopes([CALENDAR_SCOPE]);
-        persistLatestAuthState();
+        updateAuthSnapshot();
       });
       return;
     }
 
     await runAuthAction("Requesting calendar scope", async () => {
       await auth.requestScopes([CALENDAR_SCOPE]);
-      persistLatestAuthState();
+      updateAuthSnapshot();
     });
-  }, [auth, hasCalendarScope, persistLatestAuthState, runAuthAction]);
+  }, [auth, hasCalendarScope, runAuthAction, updateAuthSnapshot]);
 
   const revokeAccess = useCallback(async () => {
     await runAuthAction("Revoking provider access", async () => {
@@ -584,9 +573,9 @@ export function FeatureDemo() {
         useLegacyGoogleSignIn:
           Platform.OS === "android" ? useLegacyGoogleSignIn : undefined,
       });
-      persistLatestAuthState();
+      updateAuthSnapshot();
     });
-  }, [auth, persistLatestAuthState, runAuthAction, useLegacyGoogleSignIn]);
+  }, [auth, runAuthAction, updateAuthSnapshot, useLegacyGoogleSignIn]);
 
   const logout = useCallback(() => {
     auth.logout();
@@ -946,9 +935,9 @@ export function FeatureDemo() {
               </View>
               <Text style={styles.optionGroupTitle}>Demo</Text>
               <ToggleRow
-                label="Persist app snapshot"
-                value={persistSnapshot}
-                onChange={setPersistSnapshot}
+                label="Keep demo snapshot in memory"
+                value={keepSnapshotInMemory}
+                onChange={setKeepSnapshotInMemory}
               />
               <ToggleRow
                 label="Native logging"
