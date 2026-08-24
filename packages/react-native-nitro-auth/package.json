@@ -87,7 +87,7 @@
     "access": "public"
   },
   "dependencies": {
-    "expo-build-properties": "~57.0.13"
+    "expo-build-properties": "~57.0.14"
   },
   "devDependencies": {
     "@expo/config-plugins": "^57.0.6",
