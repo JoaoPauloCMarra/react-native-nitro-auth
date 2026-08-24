@@ -1813,6 +1813,17 @@ object AuthAdapter {
             return
         }
         beginGoogleRevoke(generation)
+        val sessionKind = synchronized(this) { googleSessionState.kind }
+        if (sessionKind == GoogleSessionKind.MODERN) {
+            settleGoogleRevoke(
+                context = ctx,
+                generation = generation,
+                code = AuthErrorCode.UNSUPPORTED_PROVIDER,
+                underlyingError = "Modern Google sessions do not expose client-side access revocation",
+                successful = false,
+            )
+            return
+        }
         if (!hasLegacyGoogleAccount(ctx)) {
             settleGoogleRevoke(
                 context = ctx,

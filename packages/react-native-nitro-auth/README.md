@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/react-native-nitro-auth?color=22c55e&label=downloads)](https://www.npmjs.com/package/react-native-nitro-auth)
 [![CI](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/react-native-nitro-auth?color=007ec6)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/LICENSE)
-[![React Native](https://img.shields.io/badge/react--native-0.87.0-61dafb)](https://reactnative.dev/docs/0.87/getting-started-without-a-framework)
+[![React Native](https://img.shields.io/badge/react--native-0.86.2-61dafb)](https://reactnative.dev/docs/0.86/getting-started-without-a-framework)
 [![Expo](https://img.shields.io/badge/expo-SDK%2057%20%28RN%200.86.2%29-000020)](https://docs.expo.dev/versions/v57.0.0/)
 [![Nitro Modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.37.0%20%3C0.38.0-black)](https://nitro.margelo.com/)
 [![TypeScript](https://img.shields.io/badge/typescript-6.0-3178c6)](https://www.typescriptlang.org/)
@@ -43,13 +43,13 @@ bare app.
 
 ## Requirements
 
-| Dependency                 | Supported range or validated baseline                    |
-| -------------------------- | -------------------------------------------------------- |
-| React Native               | `>=0.75.0`; package gate `0.87.0`, Expo example `0.86.2` |
-| React                      | Validated with `19.2.3`                                  |
-| React Native Nitro Modules | `>=0.37.0 <0.38.0`                                       |
-| Expo                       | SDK `57.0.15` development builds; RN `0.86.2`            |
-| iOS                        | `16.4` or later                                          |
+| Dependency                 | Supported range or validated baseline                                              |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| React Native               | `>=0.75.0`; runtime gate `0.86.2`, RN `0.87` Strict TypeScript compatibility check |
+| React                      | Validated with `19.2.3`                                                            |
+| React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                                 |
+| Expo                       | SDK `57.0.16` development builds; RN `0.86.2`                                      |
+| iOS                        | `16.4` or later                                                                    |
 
 ## Expo Config
 
@@ -299,10 +299,15 @@ Supported login options:
 - `revokeAccess()` clears local state only after provider revocation succeeds.
   Client-side revocation supports Google web and iOS sessions, plus Android
   sessions created through legacy Google Sign-In. Unsupported providers reject
-  with `unsupported_provider`. Android Google sessions without an eligible
-  legacy Google Sign-In session, including Credential Manager/One-Tap sessions,
-  reject with `not_signed_in`; those modern sessions do not expose a client-side
-  provider revocation callback.
+  with `unsupported_provider`. Android Google sessions without any active
+  session reject with `not_signed_in`. Signed-in Credential Manager/One-Tap
+  sessions are not eligible for client-side provider revocation and reject with
+  `unsupported_provider`; local session state is unchanged.
+
+`SocialButton` normalizes runtime failures to `AuthError` instances. Its
+`onError` parameter remains typed as `unknown` for compatibility with earlier
+versions; use `error instanceof AuthError` before reading `code` or
+`underlyingMessage`.
 
 ### Token semantics and capabilities
 
@@ -421,19 +426,22 @@ Error codes are `cancelled`, `interaction_required`, `timeout`,
 | Web      | Google, Apple, and Microsoft OAuth through Expo web config. |
 | Expo     | Development builds with the config plugin.                  |
 
-The package gate uses React Native `0.87.0` and the Strict TypeScript API. The
-Expo example uses Expo SDK `57.0.15`, React Native `0.86.2`, React `19.2.3`,
-and Nitro Modules `0.37.0`, which is the React Native version supported by that
-Expo SDK. Do not override Expo's React Native version.
+The native package gate and Expo example use React Native `0.86.2`. The
+`check:ci` workflow also compiles the public source against React Native
+`0.87.0`'s Strict TypeScript API to catch declaration and callback regressions;
+that compatibility check does not change the runtime baseline. Expo SDK
+`57.0.16` selects React Native `0.86.2`; do not override it in an Expo app.
 
 Package peer range: `>=0.37.0 <0.38.0`.
 
-### Migration from 0.8.0
+### Migration from 0.9.x and earlier
 
-Version 0.9.0 requires Nitro Modules `>=0.37.0 <0.38.0`. Upgrade
+Version 0.10.0 requires Nitro Modules `>=0.37.0 <0.38.0`. Upgrade
 `react-native-nitro-modules` before installing this package, then regenerate
 native projects with `bunx expo prebuild` for Expo or run `pod install` for a
-bare iOS app.
+bare iOS app. Android callers that branch on `revokeAccess()` errors should
+keep `unsupported_provider` for active One-Tap sessions and reserve
+`not_signed_in` for an absent session.
 
 ## Troubleshooting
 

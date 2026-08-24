@@ -31,11 +31,10 @@ Breaking changes are always listed first in each release section.
 - `requestScopes` now succeeds for one-tap-only Google sessions on Android and
   resolves with the session user plus the merged scope list, matching iOS.
   Previously it rejected with `not_signed_in`.
-- `revokeAccess()` with no eligible Google session now rejects with
-  `not_signed_in` on Android, matching iOS (was `unsupported_provider`).
-- Modern Android Google sessions created through Credential Manager/One-Tap
-  are not eligible for client-side provider revocation and reject with
-  `not_signed_in`; local session state is unchanged.
+- `revokeAccess()` with no active Google session rejects with `not_signed_in` on
+  Android. Active Credential Manager/One-Tap sessions are not eligible for
+  client-side provider revocation and reject with `unsupported_provider`; local
+  session state is unchanged.
 - iOS now populates `AuthError.underlyingMessage`: native rejections use the
   same `<code>: <detail>` envelope as Android and web.
 - The returned user's `hostedDomain` now reports the requested configuration
@@ -54,10 +53,11 @@ Breaking changes are always listed first in each release section.
 
 ### Changed
 
-- Updated the validated compatibility baseline to Nitro Modules 0.37.0 while
-  retaining Expo SDK 57's React Native 0.86.2 example baseline and adding
-  standalone package validation with React Native 0.87.0.
-- `SocialButtonProps.onError` now exposes the normalized `AuthError` contract.
+- Added a React Native 0.87.0 Strict TypeScript compatibility check while
+  retaining React Native 0.86.2 for the package gate and Expo SDK 57 example.
+- `SocialButton` still delivers normalized `AuthError` instances at runtime;
+  the callback parameter remains `unknown` so existing callback annotations
+  stay source-compatible.
 
 ## [0.8.0] - 2026-08-13
 
