@@ -1,0 +1,16 @@
+{
+  "access_denied": "cancelled",
+  "user_cancelled": "cancelled",
+  "popup_closed_by_user": "cancelled",
+  "interaction_required": "interaction_required",
+  "login_required": "interaction_required",
+  "consent_required": "interaction_required",
+  "invalid_client": "configuration_error",
+  "invalid_scope": "configuration_error",
+  "unauthorized_client": "configuration_error",
+  "invalid_grant": "token_error",
+  "invalid_request": "token_error",
+  "invalid_token": "token_error",
+  "server_error": "network_error",
+  "temporarily_unavailable": "network_error"
+}

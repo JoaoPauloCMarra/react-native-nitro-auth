@@ -6,15 +6,104 @@ import CommonCrypto
 
 @objc
 public class AuthAdapter: NSObject {
-  private static let defaultMicrosoftScopes = ["openid", "email", "profile", "offline_access", "User.Read"]
-  private static var inMemoryMicrosoftRefreshToken: String?
-  private static var inMemoryMicrosoftScopes: [String] = defaultMicrosoftScopes
-  private static var inMemoryGoogleServerAuthCode: String?
-  private static var activeMicrosoftWebAuthSession: ASWebAuthenticationSession?
+  final class OperationInvocationGate {
+    private let lock = NSLock()
+    private var invalidated = false
+    private var claimed = false
+
+    func invalidate() {
+      lock.lock()
+      invalidated = true
+      lock.unlock()
+    }
+
+    func claim() -> Bool {
+      lock.lock()
+      defer { lock.unlock() }
+      guard !invalidated, !claimed else { return false }
+      claimed = true
+      return true
+    }
+  }
+
+  final class AuthOperationToken {
+    let epoch: UInt64
+    let providerInvocation = OperationInvocationGate()
+
+    init(epoch: UInt64) {
+      self.epoch = epoch
+    }
+  }
+
+  private final class CompletionGate {
+    private let lock = NSLock()
+    private var completed = false
+
+    func claim() -> Bool {
+      lock.lock()
+      defer { lock.unlock() }
+      guard !completed else { return false }
+      completed = true
+      return true
+    }
+  }
+
+  static let defaultMicrosoftScopes = ["openid", "email", "profile", "offline_access", "User.Read"]
+  static var inMemoryMicrosoftRefreshToken: String?
+  static var inMemoryMicrosoftScopes: [String] = defaultMicrosoftScopes
+  static var inMemoryGoogleServerAuthCode: String?
+  static var activeMicrosoftWebAuthSession: ASWebAuthenticationSession?
+  static var activeMicrosoftWebAuthSessionEpoch: UInt64?
   private static var activeAppleSignInController: ASAuthorizationController?
-  private static let tokenStoreLock = NSLock()
+  static let tokenStoreLock = NSLock()
   private static let interactiveAuthLock = NSLock()
   private static var interactiveAuthInProgress = false
+  static var authEpoch: UInt64 = 0
+  static var activeOperation: AuthOperationToken?
+
+  static let formUrlEncodedAllowedCharacters = CharacterSet(
+    charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+  )
+
+  static func advanceOperation() -> AuthOperationToken {
+    tokenStoreLock.lock()
+    let invalidatedEpoch = authEpoch
+    let invalidatedOperation = activeOperation
+    authEpoch = authEpoch == UInt64.max ? 1 : authEpoch + 1
+    let operation = AuthOperationToken(epoch: authEpoch)
+    invalidatedOperation?.providerInvocation.invalidate()
+    activeOperation = operation
+    tokenStoreLock.unlock()
+    finishInteractiveAuth()
+    DispatchQueue.main.async {
+      guard activeMicrosoftWebAuthSessionEpoch == invalidatedEpoch else {
+        return
+      }
+      activeMicrosoftWebAuthSession?.cancel()
+      activeMicrosoftWebAuthSession = nil
+      activeMicrosoftWebAuthSessionEpoch = nil
+    }
+    return operation
+  }
+
+  static func beginOperation() -> AuthOperationToken {
+    advanceOperation()
+  }
+
+  static func isCurrentOperation(_ operation: AuthOperationToken) -> Bool {
+    tokenStoreLock.lock()
+    let isCurrent = authEpoch == operation.epoch
+    tokenStoreLock.unlock()
+    return isCurrent
+  }
+
+  static func commitCurrentOperation(_ operation: AuthOperationToken, _ mutation: () -> Void) -> Bool {
+    tokenStoreLock.lock()
+    defer { tokenStoreLock.unlock() }
+    guard authEpoch == operation.epoch, activeOperation === operation else { return false }
+    mutation()
+    return true
+  }
 
   private static func beginInteractiveAuth() -> Bool {
     interactiveAuthLock.lock()
@@ -27,53 +116,80 @@ public class AuthAdapter: NSObject {
   }
 
   private static func finishInteractiveAuth() {
-    activeAppleSignInController = nil
     interactiveAuthLock.lock()
+    activeAppleSignInController = nil
     interactiveAuthInProgress = false
     interactiveAuthLock.unlock()
   }
 
-  private static func completeInteractiveAuth(_ completion: @escaping (NSDictionary?, String?) -> Void) -> (NSDictionary?, String?) -> Void {
-    return { data, error in
+  static func completeInteractiveAuth(_ operation: AuthOperationToken, _ completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) -> (NSDictionary?, NSNumber?, String?) -> Void {
+    let gate = CompletionGate()
+    return { data, code, message in
+      guard gate.claim() else { return }
+      guard isCurrentOperation(operation) else {
+        completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        return
+      }
       finishInteractiveAuth()
-      completion(data, error)
+      completion(data, code, message)
+    }
+  }
+
+  private static func completeOperation(_ operation: AuthOperationToken, _ completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) -> (NSDictionary?, NSNumber?, String?) -> Void {
+    let gate = CompletionGate()
+    return { data, code, message in
+      guard gate.claim() else { return }
+      guard isCurrentOperation(operation) else {
+        completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        return
+      }
+      completion(data, code, message)
     }
   }
 
   @objc
-  public static func login(provider: String, scopes: [String], loginHint: String?, nonce: String?, useSheet: Bool, forceAccountPicker: Bool = false, tenant: String? = nil, prompt: String? = nil, hostedDomain: String? = nil, openIDRealm: String? = nil, completion: @escaping (NSDictionary?, String?) -> Void) {
+  public static func login(provider: String, scopes: [String], loginHint: String?, nonce: String?, useSheet: Bool, forceAccountPicker: Bool = false, tenant: String? = nil, prompt: String? = nil, hostedDomain: String? = nil, openIDRealm: String? = nil, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
+    let operation = beginOperation()
     if provider == "google" {
       guard beginInteractiveAuth() else {
-        completion(nil, "operation_in_progress")
+        completion(nil, NSNumber(value: AuthErrorCode.operationInProgress.rawValue), nil)
         return
       }
-      let complete = completeInteractiveAuth(completion)
+      let complete = completeInteractiveAuth(operation, completion)
       guard let clientId = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String, !clientId.isEmpty else {
-        complete(nil, "configuration_error")
+        complete(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
         return
       }
-      
+
       let serverClientId = Bundle.main.object(forInfoDictionaryKey: "GIDServerClientID") as? String
-      
+
       DispatchQueue.main.async {
+        guard self.isCurrentOperation(operation) else {
+          complete(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          return
+        }
         guard let rootVC = presentingViewController() else {
-          complete(nil, "configuration_error")
+          complete(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
           return
         }
 
         let config = GIDConfiguration(clientID: clientId, serverClientID: serverClientId, hostedDomain: hostedDomain, openIDRealm: openIDRealm)
         GIDSignIn.sharedInstance.configuration = config
-        
+
         let additionalScopes = scopes.isEmpty ? nil : scopes
         let shouldForceAccountPicker = forceAccountPicker || useSheet
         let effectiveHint = shouldForceAccountPicker ? nil : loginHint
-        
+
         let performSignIn = {
+          guard self.isCurrentOperation(operation) else {
+            complete(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+            return
+          }
           GIDSignIn.sharedInstance.signIn(withPresenting: rootVC, hint: effectiveHint, additionalScopes: additionalScopes, nonce: nonce) { result, error in
-            self.handleGoogleResult(result, error: error, completion: complete)
+            self.handleGoogleResult(result, error: error, operation: operation, completion: complete)
           }
         }
-        
+
         if shouldForceAccountPicker {
           GIDSignIn.sharedInstance.disconnect { _ in
             performSignIn()
@@ -84,10 +200,10 @@ public class AuthAdapter: NSObject {
       }
     } else if provider == "apple" {
       guard beginInteractiveAuth() else {
-        completion(nil, "operation_in_progress")
+        completion(nil, NSNumber(value: AuthErrorCode.operationInProgress.rawValue), nil)
         return
       }
-      let complete = completeInteractiveAuth(completion)
+      let complete = completeInteractiveAuth(operation, completion)
       let appleIDProvider = ASAuthorizationAppleIDProvider()
       let request = appleIDProvider.createRequest()
       request.requestedScopes = scopes.isEmpty
@@ -102,16 +218,22 @@ public class AuthAdapter: NSObject {
       if let nonce = nonce {
         request.nonce = nonce
       }
-      
+
       let controller = ASAuthorizationController(authorizationRequests: [request])
       let delegate = AppleSignInDelegate(expectedNonce: nonce, completion: complete)
       controller.delegate = delegate
+      interactiveAuthLock.lock()
       activeAppleSignInController = controller
+      interactiveAuthLock.unlock()
       objc_setAssociatedObject(controller, &delegateHandle, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
       DispatchQueue.main.async {
+        guard self.isCurrentOperation(operation) else {
+          complete(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          return
+        }
         guard let window = activeWindow() else {
-          complete(nil, "configuration_error")
+          complete(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
           return
         }
         let contextProvider = AppleSignInContextProvider(anchor: window)
@@ -120,415 +242,37 @@ public class AuthAdapter: NSObject {
         controller.performRequests()
       }
     } else if provider == "microsoft" {
-      loginMicrosoft(scopes: scopes, loginHint: loginHint, tenant: tenant, prompt: prompt, completion: completion)
+      loginMicrosoft(scopes: scopes, loginHint: loginHint, tenant: tenant, prompt: prompt, operation: operation, completion: completion)
     } else {
-      completion(nil, "unsupported_provider")
+      completion(nil, NSNumber(value: AuthErrorCode.unsupportedProvider.rawValue), nil)
     }
-  }
-
-  private static func loginMicrosoft(scopes: [String], loginHint: String?, tenant: String?, prompt: String?, completion: @escaping (NSDictionary?, String?) -> Void) {
-    guard let clientId = Bundle.main.object(forInfoDictionaryKey: "MSALClientID") as? String, !clientId.isEmpty else {
-      completion(nil, "configuration_error")
-      return
-    }
-    guard beginInteractiveAuth() else {
-      completion(nil, "operation_in_progress")
-      return
-    }
-    let complete = completeInteractiveAuth(completion)
-    
-    let effectiveTenant = tenant ?? Bundle.main.object(forInfoDictionaryKey: "MSALTenant") as? String ?? "common"
-    let bundleId = Bundle.main.bundleIdentifier ?? ""
-    let redirectUri = "msauth.\(bundleId)://auth"
-    let effectiveScopes = scopes.isEmpty ? ["openid", "email", "profile", "offline_access", "User.Read"] : scopes
-    let effectivePrompt = prompt ?? "select_account"
-    
-    guard let codeVerifier = generateCodeVerifier() else {
-      complete(nil, "configuration_error")
-      return
-    }
-    guard let codeChallenge = generateCodeChallenge(codeVerifier) else {
-      complete(nil, "configuration_error")
-      return
-    }
-    let state = UUID().uuidString
-    let nonce = UUID().uuidString
-    
-    let b2cDomain = Bundle.main.object(forInfoDictionaryKey: "MSALB2cDomain") as? String
-    guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: effectiveTenant, b2cDomain: b2cDomain) else {
-      complete(nil, "configuration_error")
-      return
-    }
-
-    guard var urlComponents = URLComponents(string: "\(authBaseUrl)oauth2/v2.0/authorize") else {
-      complete(nil, "configuration_error")
-      return
-    }
-    urlComponents.queryItems = [
-      URLQueryItem(name: "client_id", value: clientId),
-      URLQueryItem(name: "redirect_uri", value: redirectUri),
-      URLQueryItem(name: "response_type", value: "code"),
-      URLQueryItem(name: "response_mode", value: "query"),
-      URLQueryItem(name: "scope", value: effectiveScopes.joined(separator: " ")),
-      URLQueryItem(name: "state", value: state),
-      URLQueryItem(name: "nonce", value: nonce),
-      URLQueryItem(name: "code_challenge", value: codeChallenge),
-      URLQueryItem(name: "code_challenge_method", value: "S256"),
-      URLQueryItem(name: "prompt", value: effectivePrompt)
-    ]
-    
-    if let hint = loginHint {
-      urlComponents.queryItems?.append(URLQueryItem(name: "login_hint", value: hint))
-    }
-    
-    guard let authUrl = urlComponents.url else {
-      complete(nil, "configuration_error")
-      return
-    }
-    
-    let callbackScheme = "msauth.\(bundleId)"
-    
-    DispatchQueue.main.async {
-      guard self.activeMicrosoftWebAuthSession == nil else {
-        complete(nil, "operation_in_progress")
-        return
-      }
-
-      let completeAndClearSession = { (data: NSDictionary?, error: String?) in
-        self.activeMicrosoftWebAuthSession = nil
-        complete(data, error)
-      }
-
-      let session = ASWebAuthenticationSession(url: authUrl, callbackURLScheme: callbackScheme) { callbackURL, error in
-        if let error = error {
-          let nsError = error as NSError
-          if nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
-            completeAndClearSession(nil, "cancelled")
-          } else if nsError.domain.lowercased().contains("network") || nsError.code == NSURLErrorNotConnectedToInternet {
-            completeAndClearSession(nil, "network_error")
-          } else {
-            completeAndClearSession(nil, "unknown")
-          }
-          return
-        }
-
-        guard let callbackURL = callbackURL,
-              let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
-          completeAndClearSession(nil, "unknown")
-          return
-        }
-
-        var params: [String: String] = [:]
-        for item in components.queryItems ?? [] {
-          params[item.name] = item.value
-        }
-
-        if let errorCode = params["error"] {
-          // OAuth error codes are already structured (e.g. "access_denied").
-          // Map well-known ones; fall back to "unknown".
-          let mapped = mapOAuthError(errorCode, context: "authorize")
-          completeAndClearSession(nil, mapped)
-          return
-        }
-
-        guard let returnedState = params["state"], returnedState == state else {
-          completeAndClearSession(nil, "invalid_state")
-          return
-        }
-
-        guard let code = params["code"] else {
-          completeAndClearSession(nil, "token_error")
-          return
-        }
-        
-        self.activeMicrosoftWebAuthSession = nil
-        exchangeCodeForTokens(
-          code: code,
-          codeVerifier: codeVerifier,
-          clientId: clientId,
-          redirectUri: redirectUri,
-          tenant: effectiveTenant,
-          b2cDomain: b2cDomain,
-          expectedNonce: nonce,
-          scopes: effectiveScopes,
-          completion: complete
-        )
-      }
-
-      guard let window = activeWindow() else {
-        completeAndClearSession(nil, "configuration_error")
-        return
-      }
-      let contextProvider = WebAuthContextProvider(anchor: window)
-      session.presentationContextProvider = contextProvider
-      objc_setAssociatedObject(session, &contextProviderHandle, contextProvider, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-      session.prefersEphemeralWebBrowserSession = false
-      self.activeMicrosoftWebAuthSession = session
-      if !session.start() {
-        completeAndClearSession(nil, "unknown")
-      }
-    }
-  }
-  
-  private static func generateCodeVerifier() -> String? {
-    var bytes = [UInt8](repeating: 0, count: 32)
-    guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-      return nil
-    }
-    return Data(bytes).base64EncodedString()
-      .replacingOccurrences(of: "+", with: "-")
-      .replacingOccurrences(of: "/", with: "_")
-      .replacingOccurrences(of: "=", with: "")
-  }
-  
-  private static func generateCodeChallenge(_ verifier: String) -> String? {
-    guard let data = verifier.data(using: .ascii) else { return nil }
-    var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-    data.withUnsafeBytes {
-      _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &hash)
-    }
-    return Data(hash).base64EncodedString()
-      .replacingOccurrences(of: "+", with: "-")
-      .replacingOccurrences(of: "/", with: "_")
-      .replacingOccurrences(of: "=", with: "")
-  }
-
-  private static let formUrlEncodedAllowedCharacters = CharacterSet(
-    charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
-  )
-
-  private static func formUrlEncodedBody(_ params: [String: String]) -> Data? {
-    params
-      .map { key, value in
-        let encodedKey = key.addingPercentEncoding(withAllowedCharacters: formUrlEncodedAllowedCharacters) ?? key
-        let encodedValue = value.addingPercentEncoding(withAllowedCharacters: formUrlEncodedAllowedCharacters) ?? value
-        return "\(encodedKey)=\(encodedValue)"
-      }
-      .joined(separator: "&")
-      .data(using: .utf8)
-  }
-  
-  private static func exchangeCodeForTokens(
-    code: String,
-    codeVerifier: String,
-    clientId: String,
-    redirectUri: String,
-    tenant: String,
-    b2cDomain: String?,
-    expectedNonce: String,
-    scopes: [String],
-    completion: @escaping (NSDictionary?, String?) -> Void
-  ) {
-    guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
-          let tokenUrl = URL(string: "\(authBaseUrl)oauth2/v2.0/token") else {
-      DispatchQueue.main.async { completion(nil, "configuration_error") }
-      return
-    }
-
-    var request = URLRequest(url: tokenUrl)
-    request.httpMethod = "POST"
-    request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-
-    let bodyParams = [
-      "client_id": clientId,
-      "code": code,
-      "redirect_uri": redirectUri,
-      "grant_type": "authorization_code",
-      "code_verifier": codeVerifier
-    ]
-    
-    request.httpBody = formUrlEncodedBody(bodyParams)
-    
-    URLSession.shared.dataTask(with: request) { data, response, error in
-      DispatchQueue.main.async {
-        if error != nil {
-          completion(nil, "network_error")
-          return
-        }
-
-        guard let data = data,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-          if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-            completion(nil, "network_error")
-          } else {
-            completion(nil, "parse_error")
-          }
-          return
-        }
-
-        if let errorCode = json["error"] as? String {
-          completion(nil, mapOAuthError(errorCode, context: "token"))
-          return
-        }
-
-        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-          completion(nil, "network_error")
-          return
-        }
-
-        guard let idToken = json["id_token"] as? String else {
-          completion(nil, "no_id_token")
-          return
-        }
-
-        let claims = decodeJwt(idToken)
-        guard claims["nonce"] == expectedNonce else {
-          completion(nil, "invalid_nonce")
-          return
-        }
-        
-        let accessToken = json["access_token"] as? String ?? ""
-        let refreshToken = json["refresh_token"] as? String ?? ""
-        let expiresIn = (json["expires_in"] as? Double).flatMap { $0 > 0 ? $0 : nil } ?? 3600.0
-        let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
-        
-        tokenStoreLock.lock()
-        if !refreshToken.isEmpty {
-          inMemoryMicrosoftRefreshToken = refreshToken
-        }
-        inMemoryMicrosoftScopes = scopes.isEmpty ? defaultMicrosoftScopes : scopes
-        tokenStoreLock.unlock()
-        
-        let resultData: [String: Any] = [
-          "provider": "microsoft",
-          "email": claims["preferred_username"] ?? claims["email"] ?? "",
-          "name": claims["name"] ?? "",
-          "photo": "",
-          "idToken": idToken,
-          "accessToken": accessToken,
-          "serverAuthCode": "",
-          "scopes": scopes,
-          "expirationTime": expirationTime,
-        ]
-        completion(resultData as NSDictionary, nil)
-      }
-    }.resume()
-  }
-  
-  fileprivate static func decodeJwt(_ token: String) -> [String: String] {
-    let parts = token.components(separatedBy: ".")
-    guard parts.count >= 2 else { return [:] }
-    
-    var base64 = parts[1]
-      .replacingOccurrences(of: "-", with: "+")
-      .replacingOccurrences(of: "_", with: "/")
-    let remainder = base64.count % 4
-    if remainder > 0 {
-      base64 += String(repeating: "=", count: 4 - remainder)
-    }
-    
-    guard let data = Data(base64Encoded: base64),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      return [:]
-    }
-    
-    var result: [String: String] = [:]
-    for (key, value) in json {
-      if let str = value as? String {
-        result[key] = str
-      }
-    }
-    return result
-  }
-
-  private static func handleGoogleResult(_ result: GIDSignInResult?, error: Error?, completion: @escaping (NSDictionary?, String?) -> Void) {
-    if let error = error {
-      completion(nil, mapError(error))
-      return
-    }
-    
-    guard let user = result?.user else {
-      completion(nil, "unknown")
-      return
-    }
-    
-    let serverAuthCode = result?.serverAuthCode ?? ""
-    tokenStoreLock.lock()
-    inMemoryGoogleServerAuthCode = serverAuthCode.isEmpty ? nil : serverAuthCode
-    tokenStoreLock.unlock()
-
-    let data: [String: Any] = [
-      "provider": "google",
-      "email": user.profile?.email ?? "",
-      "name": user.profile?.name ?? "",
-      "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
-      "idToken": user.idToken?.tokenString ?? "",
-      "accessToken": user.accessToken.tokenString,
-      "serverAuthCode": serverAuthCode,
-      "userId": user.userID ?? "",
-      "hostedDomain": user.configuration.hostedDomain ?? "",
-      "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000,
-    ]
-    completion(data as NSDictionary, nil)
-  }
-
-  static func mapError(_ error: Error) -> String {
-    let nsError = error as NSError
-    if nsError.domain == NSURLErrorDomain {
-      return "network_error"
-    }
-    // GIDSignIn error codes
-    if nsError.domain == "com.google.GIDSignIn" {
-      switch nsError.code {
-      case -5: return "cancelled"   // GIDSignInErrorCodeCanceled
-      case -4: return "not_signed_in"  // GIDSignInErrorCodeNoCurrentUser
-      default: break
-      }
-    }
-    // ASAuthorizationError codes (Apple Sign-In / ASWebAuthenticationSession)
-    if nsError.domain == ASAuthorizationError.errorDomain {
-      switch nsError.code {
-      case ASAuthorizationError.canceled.rawValue: return "cancelled"
-      case ASAuthorizationError.invalidResponse.rawValue: return "configuration_error"
-      default: return "unknown"
-      }
-    }
-    let msg = error.localizedDescription.lowercased()
-    if msg.contains("cancel") { return "cancelled" }
-    if msg.contains("network") || msg.contains("internet") || msg.contains("offline") { return "network_error" }
-    return "unknown"
-  }
-
-  /// Maps OAuth 2.0 error codes (returned in query params or JSON) to
-  /// AuthErrorCode values. This table mirrors `src/utils/oauth-error.ts` and
-  /// `AuthAdapter.kt`; `docs/error-contract.md` is the single source of truth.
-  ///
-  /// `context` selects the operation bucket: "authorize"/"token" surface
-  /// token/grant failures as `token_error`; "refresh" surfaces them as
-  /// `refresh_failed`.
-  private static func mapOAuthError(_ oauthCode: String, context: String = "authorize") -> String {
-    let normalized = oauthCode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let code: String
-    switch normalized {
-    case "access_denied", "user_cancelled", "popup_closed_by_user":
-      code = "cancelled"
-    case "interaction_required", "login_required", "consent_required":
-      code = "interaction_required"
-    case "invalid_client", "invalid_scope", "unauthorized_client":
-      code = "configuration_error"
-    case "invalid_grant", "invalid_request", "invalid_token":
-      code = "token_error"
-    case "server_error", "temporarily_unavailable":
-      code = "network_error"
-    default:
-      code = "unknown"
-    }
-    if context == "refresh" && code == "token_error" {
-      return "refresh_failed"
-    }
-    return code
   }
 
   @objc
-  public static func addScopes(scopes: [String], completion: @escaping (NSDictionary?, String?) -> Void) {
+  public static func addScopes(scopes: [String], completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
+    let operation = beginOperation()
     if let currentUser = GIDSignIn.sharedInstance.currentUser {
+      let complete = completeOperation(operation, completion)
       DispatchQueue.main.async {
-        guard let rootVC = presentingViewController() else {
-          completion(nil, "configuration_error")
+        guard self.isCurrentOperation(operation) else {
+          complete(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
           return
         }
-        currentUser.addScopes(scopes, presenting: rootVC) { result, error in
-          self.handleGoogleResult(result, error: error, completion: completion)
+        guard let rootVC = presentingViewController() else {
+          complete(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+          return
+        }
+        guard self.invokeGoogleAddScopes(
+          currentUser,
+          scopes: scopes,
+          presenting: rootVC,
+          operation: operation,
+          completion: { result, error in
+            self.handleGoogleResult(result, error: error, operation: operation, completion: complete)
+          }
+        ) else {
+          complete(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          return
         }
       }
       return
@@ -538,25 +282,30 @@ public class AuthAdapter: NSObject {
     let currentScopes = inMemoryMicrosoftScopes
     tokenStoreLock.unlock()
     guard hasRefreshToken else {
-      completion(nil, "not_signed_in")
+      completion(nil, NSNumber(value: AuthErrorCode.notSignedIn.rawValue), nil)
       return
     }
     let mergedScopes = (currentScopes + scopes).reduce(into: [String]()) { acc, s in
       if !acc.contains(s) { acc.append(s) }
     }
-    loginMicrosoft(scopes: mergedScopes, loginHint: nil, tenant: nil, prompt: nil, completion: completion)
+    loginMicrosoft(scopes: mergedScopes, loginHint: nil, tenant: nil, prompt: nil, operation: operation, completion: completion)
   }
 
   @objc
-  public static func refreshToken(completion: @escaping (NSDictionary?, String?) -> Void) {
+  public static func refreshToken(completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
+    let operation = beginOperation()
     if let currentUser = GIDSignIn.sharedInstance.currentUser {
       currentUser.refreshTokensIfNeeded { user, error in
+        guard self.isCurrentOperation(operation) else {
+          completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          return
+        }
         if let error = error {
-          completion(nil, mapError(error))
+          completion(nil, NSNumber(value: mapError(error).rawValue), error.localizedDescription)
           return
         }
         guard let user = user else {
-          completion(nil, "unknown")
+          completion(nil, NSNumber(value: AuthErrorCode.unknown.rawValue), nil)
           return
         }
         let data: [String: Any] = [
@@ -564,21 +313,26 @@ public class AuthAdapter: NSObject {
           "idToken": user.idToken?.tokenString ?? "",
           "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000,
         ]
-        completion(data as NSDictionary, nil)
+        completion(data as NSDictionary, nil, nil)
       }
       return
     }
-    tryMicrosoftRefreshForTokenRefresh(completion: completion)
+    tryMicrosoftRefreshForTokenRefresh(completion: completion, operation: operation)
   }
 
   @objc
-  public static func initialize(completion: @escaping (NSDictionary?, String?) -> Void) {
+  public static func initialize(completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
+    let operation = beginOperation()
     if Bundle.main.object(forInfoDictionaryKey: "GIDClientID") != nil {
       GIDSignIn.sharedInstance.restorePreviousSignIn { user, error in
+        guard self.isCurrentOperation(operation) else {
+          completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          return
+        }
         if let error = error {
           let mappedError = mapError(error)
-          if mappedError != "not_signed_in" {
-            completion(nil, mappedError)
+          if mappedError != .notSignedIn {
+            completion(nil, NSNumber(value: mappedError.rawValue), error.localizedDescription)
             return
           }
         }
@@ -598,381 +352,29 @@ public class AuthAdapter: NSObject {
           "hostedDomain": user.configuration.hostedDomain ?? "",
           "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000
           ]
-          completion(data as NSDictionary, nil)
+          completion(data as NSDictionary, nil, nil)
           return
         }
-        self.tryMicrosoftSilentRefresh(completion: completion)
+        self.tryMicrosoftSilentRefresh(completion: completion, operation: operation)
       }
     } else {
-      self.tryMicrosoftSilentRefresh(completion: completion)
+      self.tryMicrosoftSilentRefresh(completion: completion, operation: operation)
     }
   }
 
-  private static func tryMicrosoftSilentRefresh(
-    completion: @escaping (NSDictionary?, String?) -> Void
-  ) {
-    tokenStoreLock.lock()
-    let refreshToken = inMemoryMicrosoftRefreshToken
-    let currentScopes = inMemoryMicrosoftScopes
-    tokenStoreLock.unlock()
-    guard let refreshToken = refreshToken else {
-      completion(nil, "not_signed_in")
-      return
-    }
-    
-    guard let clientId = Bundle.main.object(forInfoDictionaryKey: "MSALClientID") as? String, !clientId.isEmpty else {
-      completion(nil, "configuration_error")
-      return
-    }
-    
-    let tenant = Bundle.main.object(forInfoDictionaryKey: "MSALTenant") as? String ?? "common"
-    let b2cDomain = Bundle.main.object(forInfoDictionaryKey: "MSALB2cDomain") as? String
-    guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
-          let tokenUrl = URL(string: "\(authBaseUrl)oauth2/v2.0/token") else {
-      completion(nil, "configuration_error")
-      return
-    }
-
-    var request = URLRequest(url: tokenUrl)
-    request.httpMethod = "POST"
-    request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-
-    let bodyParams = [
-      "client_id": clientId,
-      "grant_type": "refresh_token",
-      "refresh_token": refreshToken
-    ]
-    
-    request.httpBody = formUrlEncodedBody(bodyParams)
-    
-    URLSession.shared.dataTask(with: request) { data, response, error in
-      DispatchQueue.main.async {
-        if error != nil {
-          completion(nil, "network_error")
-          return
-        }
-        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-          if let data = data,
-             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-             let errorCode = json["error"] as? String {
-            completion(nil, mapOAuthError(errorCode, context: "refresh"))
-          } else {
-            completion(nil, "network_error")
-          }
-          return
-        }
-        guard let data = data,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let idToken = json["id_token"] as? String else {
-          completion(nil, "parse_error")
-          return
-        }
-
-        let claims = decodeJwt(idToken)
-        let accessToken = json["access_token"] as? String ?? ""
-        let newRefreshToken = json["refresh_token"] as? String ?? ""
-        let expiresIn = (json["expires_in"] as? Double).flatMap { $0 > 0 ? $0 : nil } ?? 3600.0
-        let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
-
-        tokenStoreLock.lock()
-        if !newRefreshToken.isEmpty {
-          inMemoryMicrosoftRefreshToken = newRefreshToken
-        }
-        tokenStoreLock.unlock()
-
-        let resultData: [String: Any] = [
-          "provider": "microsoft",
-          "email": claims["preferred_username"] ?? claims["email"] ?? "",
-          "name": claims["name"] ?? "",
-          "photo": "",
-          "idToken": idToken,
-          "accessToken": accessToken,
-          "serverAuthCode": "",
-          "scopes": currentScopes,
-          "expirationTime": expirationTime
-        ]
-        completion(resultData as NSDictionary, nil)
-      }
-    }.resume()
-  }
-
-  private static func tryMicrosoftRefreshForTokenRefresh(completion: @escaping (NSDictionary?, String?) -> Void) {
-    tokenStoreLock.lock()
-    let refreshToken = inMemoryMicrosoftRefreshToken
-    tokenStoreLock.unlock()
-    guard let refreshToken = refreshToken else {
-      completion(nil, "not_signed_in")
-      return
-    }
-    guard let clientId = Bundle.main.object(forInfoDictionaryKey: "MSALClientID") as? String, !clientId.isEmpty else {
-      completion(nil, "configuration_error")
-      return
-    }
-    let tenant = Bundle.main.object(forInfoDictionaryKey: "MSALTenant") as? String ?? "common"
-    let b2cDomain = Bundle.main.object(forInfoDictionaryKey: "MSALB2cDomain") as? String
-    guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
-          let tokenUrl = URL(string: "\(authBaseUrl)oauth2/v2.0/token") else {
-      completion(nil, "configuration_error")
-      return
-    }
-    var request = URLRequest(url: tokenUrl)
-    request.httpMethod = "POST"
-    request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-    let bodyParams = [
-      "client_id": clientId,
-      "grant_type": "refresh_token",
-      "refresh_token": refreshToken
-    ]
-    request.httpBody = formUrlEncodedBody(bodyParams)
-    URLSession.shared.dataTask(with: request) { data, response, error in
-      DispatchQueue.main.async {
-        if error != nil {
-          completion(nil, "network_error")
-          return
-        }
-        guard let data = data,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-          if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-            completion(nil, "network_error")
-          } else {
-            completion(nil, "parse_error")
-          }
-          return
-        }
-        if let errorCode = json["error"] as? String {
-          completion(nil, AuthAdapter.mapOAuthError(errorCode, context: "refresh"))
-          return
-        }
-        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-          completion(nil, "network_error")
-          return
-        }
-        let idToken = json["id_token"] as? String ?? ""
-        let accessToken = json["access_token"] as? String ?? ""
-        let newRefreshToken = json["refresh_token"] as? String ?? ""
-        let expiresIn = (json["expires_in"] as? Double).flatMap { $0 > 0 ? $0 : nil } ?? 3600.0
-        let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
-        tokenStoreLock.lock()
-        if !newRefreshToken.isEmpty {
-          inMemoryMicrosoftRefreshToken = newRefreshToken
-        }
-        tokenStoreLock.unlock()
-        let tokensData: [String: Any] = [
-          "accessToken": accessToken,
-          "idToken": idToken,
-          "expirationTime": expirationTime,
-        ]
-        completion(tokensData as NSDictionary, nil)
-      }
-    }.resume()
-  }
-  
-  private static func getMicrosoftAuthBaseUrl(tenant: String, b2cDomain: String?) -> String? {
-    let trimmedTenant = tenant.trimmingCharacters(in: .whitespacesAndNewlines)
-
-    if let domain = b2cDomain?.trimmingCharacters(in: .whitespacesAndNewlines), !domain.isEmpty {
-      let normalizedDomain = domain.lowercased()
-      guard isValidMicrosoftDomain(normalizedDomain) else { return nil }
-      guard let b2cTenantPath = getMicrosoftB2cTenantPath(trimmedTenant, domain: normalizedDomain) else { return nil }
-      return "https://\(normalizedDomain)/\(b2cTenantPath)/"
-    }
-    guard isValidMicrosoftTenant(trimmedTenant) else { return nil }
-    return "https://login.microsoftonline.com/\(trimmedTenant)/"
-  }
-
-  private static func isValidMicrosoftTenant(_ value: String) -> Bool {
-    return value.range(
-      of: #"^(common|organizations|consumers|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})$"#,
-      options: .regularExpression
-    ) != nil
-  }
-
-  private static func getMicrosoftB2cTenantPath(_ value: String, domain: String) -> String? {
-    if isValidMicrosoftB2cTenantPath(value) {
-      return value
-    }
-    guard isValidMicrosoftB2cPolicy(value),
-          let tenantName = getMicrosoftB2cTenantName(domain) else { return nil }
-    return "\(tenantName).onmicrosoft.com/\(value)"
-  }
-
-  private static func getMicrosoftB2cTenantName(_ domain: String) -> String? {
-    let suffix = ".b2clogin.com"
-    guard domain.hasSuffix(suffix) else { return nil }
-    let tenantName = String(domain.dropLast(suffix.count))
-    return tenantName.range(
-      of: #"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"#,
-      options: .regularExpression
-    ) != nil ? tenantName : nil
-  }
-
-  private static func isValidMicrosoftB2cTenantPath(_ value: String) -> Bool {
-    return value.range(
-      of: #"^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"#,
-      options: .regularExpression
-    ) != nil
-  }
-
-  private static func isValidMicrosoftB2cPolicy(_ value: String) -> Bool {
-    return value.range(
-      of: #"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"#,
-      options: .regularExpression
-    ) != nil
-  }
-
-  private static func isValidMicrosoftDomain(_ value: String) -> Bool {
-    return value.range(
-      of: #"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$"#,
-      options: .regularExpression
-    ) != nil
+  @objc
+  public static func cancelPendingOperations() {
+    _ = advanceOperation()
   }
 
   @objc
   public static func logout() {
+    _ = beginOperation()
     GIDSignIn.sharedInstance.signOut()
-    DispatchQueue.main.async {
-      self.activeMicrosoftWebAuthSession?.cancel()
-      self.activeMicrosoftWebAuthSession = nil
-    }
-    finishInteractiveAuth()
     tokenStoreLock.lock()
     inMemoryMicrosoftRefreshToken = nil
     inMemoryMicrosoftScopes = defaultMicrosoftScopes
     inMemoryGoogleServerAuthCode = nil
     tokenStoreLock.unlock()
-  }
-
-  @objc
-  public static func revokeAccess(
-    provider: String,
-    completion: @escaping (String?) -> Void
-  ) {
-    guard provider == "google" else {
-      completion("unsupported_provider")
-      return
-    }
-    guard GIDSignIn.sharedInstance.currentUser != nil else {
-      completion("not_signed_in")
-      return
-    }
-
-    GIDSignIn.sharedInstance.disconnect { error in
-      if let error = error {
-        completion(mapError(error))
-        return
-      }
-      tokenStoreLock.lock()
-      inMemoryGoogleServerAuthCode = nil
-      tokenStoreLock.unlock()
-      completion(nil)
-    }
-  }
-
-  private static func activeWindow() -> UIWindow? {
-    let windowScenes = UIApplication.shared.connectedScenes
-      .compactMap { $0 as? UIWindowScene }
-      .filter {
-        $0.activationState == .foregroundActive ||
-          $0.activationState == .foregroundInactive
-      }
-
-    for scene in windowScenes {
-      if let keyWindow = scene.windows.first(where: { $0.isKeyWindow }) {
-        return keyWindow
-      }
-    }
-
-    return windowScenes.lazy.compactMap { $0.windows.first }.first
-  }
-
-  private static func presentingViewController() -> UIViewController? {
-    guard let rootViewController = activeWindow()?.rootViewController else {
-      return nil
-    }
-
-    var current = rootViewController
-    while let presented = current.presentedViewController {
-      current = presented
-    }
-    if let navigationController = current as? UINavigationController {
-      return navigationController.visibleViewController ?? navigationController
-    }
-    if let tabBarController = current as? UITabBarController {
-      return tabBarController.selectedViewController ?? tabBarController
-    }
-    return current
-  }
-}
-
-private var delegateHandle: UInt8 = 0
-private var contextProviderHandle: UInt8 = 0
-
-class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
-  let expectedNonce: String?
-  let completion: (NSDictionary?, String?) -> Void
-
-  init(expectedNonce: String?, completion: @escaping (NSDictionary?, String?) -> Void) {
-    self.expectedNonce = expectedNonce
-    self.completion = completion
-  }
-
-  func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
-    if let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential {
-      let email = appleIDCredential.email
-      let fullName = appleIDCredential.fullName
-      let name = [fullName?.givenName, fullName?.familyName].compactMap { $0 }.joined(separator: " ")
-      let idToken = appleIDCredential.identityToken.flatMap { String(data: $0, encoding: .utf8) }
-
-      // When a nonce was requested, verify the identity token carries it.
-      // Apple SDKs bind the nonce into the token; the claim check prevents a
-      // replayed or swapped token from being accepted.
-      if let expectedNonce = expectedNonce, let idToken = idToken {
-        let claims = AuthAdapter.decodeJwt(idToken)
-        guard claims["nonce"] == expectedNonce else {
-          completion(nil, "invalid_nonce")
-          return
-        }
-      }
-
-      let data: [String: Any] = [
-        "provider": "apple",
-        "email": email ?? "",
-        "name": name,
-        "idToken": idToken ?? "",
-        "authorizationCode": appleIDCredential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) } ?? "",
-        "userId": appleIDCredential.user,
-      ]
-      completion(data as NSDictionary, nil)
-    } else {
-      completion(nil, "unknown")
-    }
-  }
-
-  func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
-    completion(nil, AuthAdapter.mapError(error))
-  }
-}
-
-class AppleSignInContextProvider: NSObject, ASAuthorizationControllerPresentationContextProviding {
-  let anchor: ASPresentationAnchor
-
-  init(anchor: ASPresentationAnchor) {
-    self.anchor = anchor
-  }
-
-  func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-    return anchor
-  }
-}
-
-class WebAuthContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
-  let anchor: ASPresentationAnchor
-  
-  init(anchor: ASPresentationAnchor) {
-    self.anchor = anchor
-  }
-  
-  func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-    return anchor
   }
 }

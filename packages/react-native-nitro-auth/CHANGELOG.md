@@ -1,5 +1,43 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking changes
+
+- None.
+
+### Fixed
+
+- Android: a completed `msauth://` Microsoft redirect no longer reports
+  `cancelled` (and no longer clears PKCE state before the token exchange
+  finishes). The redirect handler resuming no longer cancels the flow.
+- Android: an abandoned interactive Google sign-in (sign-in activity finished
+  without a result) now rejects with `cancelled` instead of leaving the login
+  promise pending and rejecting later logins with `operation_in_progress`.
+  The sign-in activity no longer relaunches the Google flow after a
+  configuration change.
+- Android: cancelling the One-Tap (Credential Manager) sheet now resolves the
+  login with `cancelled` instead of silently launching the legacy sign-in
+  activity.
+
+### Changed
+
+- `requestScopes` now succeeds for one-tap-only Google sessions on Android and
+  resolves with the session user plus the merged scope list, matching iOS.
+  Previously it rejected with `not_signed_in`.
+- `revokeAccess()` with no eligible Google session now rejects with
+  `not_signed_in` on Android, matching iOS (was `unsupported_provider`).
+- Modern Android Google sessions created through Credential Manager/One-Tap
+  are not eligible for client-side provider revocation and reject with
+  `not_signed_in`; local session state is unchanged.
+- iOS now populates `AuthError.underlyingMessage`: native rejections use the
+  same `<code>: <detail>` envelope as Android and web.
+- The returned user's `hostedDomain` now reports the requested configuration
+  value on Android, matching iOS; it is never derived from the account email.
+- Unknown provider strings from platform callbacks now reject with
+  `unsupported_provider` instead of defaulting to Apple (iOS silent restore,
+  Android login callbacks).
+
 ## 0.9.0 - 2026-08-20
 
 ### Breaking changes
@@ -57,7 +95,9 @@
 - Added `nitroAuthPersistProfileOnWeb` to keep web profile PII (email, name,
   photo) out of storage, and declared `expo-constants` as an optional peer for
   the web provider-config read.
+
 ### Changed
+
 - `AuthError` now carries the failed `operation` phase and preserves
   `underlyingMessage` from native `<code>: <detail>` envelopes; message text is
   never used as control flow.

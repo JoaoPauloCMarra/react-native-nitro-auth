@@ -20,7 +20,9 @@ Every public failure is an `AuthError` with:
   the code.
 
 Native boundaries reject with `<code>` or `<code>: <detail>` envelopes; the
-code prefix is the contract and message text is never control flow. Web throws
+code prefix is the contract and message text is never control flow. iOS,
+Android, and web all populate `AuthError.underlyingMessage` from the `<detail>`
+part when a platform message is available. Web throws
 `AuthWebError(code, underlyingError)`, which the service converts into the
 public `AuthError` envelope. `AuthUser.underlyingError` is deprecated and
 reserved for compatibility; structured details live on `AuthError`.
@@ -31,28 +33,37 @@ Identical provider error strings produce identical codes on every platform.
 `context` selects the operation bucket: `authorize`/`token` surface token
 failures as `token_error`; `refresh` surfaces them as `refresh_failed`.
 
-| Provider error                  | Code                        |
-| ------------------------------- | --------------------------- |
-| `access_denied`                 | `cancelled`                 |
-| `user_cancelled`                | `cancelled`                 |
-| `popup_closed_by_user`          | `cancelled`                 |
-| `interaction_required`          | `interaction_required`      |
-| `login_required`                | `interaction_required`      |
-| `consent_required`              | `interaction_required`      |
-| `invalid_client`                | `configuration_error`       |
-| `invalid_scope`                 | `configuration_error`       |
-| `unauthorized_client`           | `configuration_error`       |
-| `invalid_grant`                 | `token_error` / `refresh_failed` |
-| `invalid_request`               | `token_error` / `refresh_failed` |
-| `invalid_token`                 | `token_error` / `refresh_failed` |
-| `server_error`                  | `network_error`             |
-| `temporarily_unavailable`       | `network_error`             |
-| anything else                   | `unknown`                   |
+| Provider error            | Code                             |
+| ------------------------- | -------------------------------- |
+| `access_denied`           | `cancelled`                      |
+| `user_cancelled`          | `cancelled`                      |
+| `popup_closed_by_user`    | `cancelled`                      |
+| `interaction_required`    | `interaction_required`           |
+| `login_required`          | `interaction_required`           |
+| `consent_required`        | `interaction_required`           |
+| `invalid_client`          | `configuration_error`            |
+| `invalid_scope`           | `configuration_error`            |
+| `unauthorized_client`     | `configuration_error`            |
+| `invalid_grant`           | `token_error` / `refresh_failed` |
+| `invalid_request`         | `token_error` / `refresh_failed` |
+| `invalid_token`           | `token_error` / `refresh_failed` |
+| `server_error`            | `network_error`                  |
+| `temporarily_unavailable` | `network_error`                  |
+| anything else             | `unknown`                        |
 
 ## 2. Token semantics (U2, X6)
 
 - `expirationTime` is the **access-token expiry** in epoch milliseconds on
   every platform.
+- The returned user's Google `hostedDomain` reports the requested
+  configuration. Android retains this non-secret value across module/process
+  recreation only for the matching restored account identity; logout and
+  account replacement clear it. iOS uses the restored Google account
+  configuration, while web reports the provider token claim when present.
+- `requestScopes` resolves for every stored session type on every platform:
+  legacy Google, Credential Manager/One-Tap Google (Android keeps the
+  one-tap session in memory and resolves with the merged scope list), GID
+  Google (iOS re-prompts), and Microsoft (re-consent via the browser flow).
 - Android Google never returns an OAuth access token; its `expirationTime`
   uses the documented ID-token `exp` fallback
   (`AuthAdapter.getGoogleExpirationTimeMs`).
@@ -68,17 +79,17 @@ failures as `token_error`; `refresh` surfaces them as `refresh_failed`.
 The scenario corpus `SC-01…SC-09` runs against the web module, the native
 service boundary, and the C++ coordinator:
 
-| Scenario | Contract |
-| -------- | -------- |
-| SC-01    | Login success exposes the user and notifies state listeners. |
-| SC-02    | Login failure leaves no user and a typed code. |
-| SC-03    | Logout cancels an in-flight refresh; it settles with `not_signed_in`. |
-| SC-04    | Logout clears user and scopes and notifies listeners. |
-| SC-05    | Dispose rejects a pending login with `cancelled`. |
-| SC-06    | Concurrent refresh calls share one in-flight operation. |
-| SC-07    | Silent restore without a session resolves without a user. |
+| Scenario | Contract                                                                |
+| -------- | ----------------------------------------------------------------------- |
+| SC-01    | Login success exposes the user and notifies state listeners.            |
+| SC-02    | Login failure leaves no user and a typed code.                          |
+| SC-03    | Logout cancels an in-flight refresh; it settles with `not_signed_in`.   |
+| SC-04    | Logout clears user and scopes and notifies listeners.                   |
+| SC-05    | Dispose rejects a pending login with `cancelled`.                       |
+| SC-06    | Concurrent refresh calls share one in-flight operation.                 |
+| SC-07    | Silent restore without a session resolves without a user.               |
 | SC-08    | Refresh failure settles with a typed code and the `refreshToken` phase. |
-| SC-09    | Concurrent login settles every promise with a typed result. |
+| SC-09    | Concurrent login settles every promise with a typed result.             |
 
 SC-09 divergence (documented, not a parity defect): native cancels the first
 login (generation advance) and the platform rejects the duplicate with
@@ -136,9 +147,17 @@ parse identical responses; the fixture corpus in
 
 - `revokeScopes` is local-only on every platform and returns
   `ScopeRevocationResult { revokedAtProvider: false, revokedScopes }`.
-- `revokeAccess` performs provider revocation where supported (Google web/iOS,
+- `revokeAccess()` performs provider revocation where supported (Google web/iOS,
   Android legacy Google) and only clears local state after provider
-  revocation succeeds.
+  revocation succeeds. When no eligible Google session exists, every platform
+  rejects with `not_signed_in`; providers without client-side revocation
+  reject with `unsupported_provider`.
+- Modern Android Google sessions created through Credential Manager/One-Tap are
+  not eligible for client-side provider revocation and reject with
+  `not_signed_in`.
+- Web Google revocation can also reject with `token_error` when the current
+  Google session has no access token; this is a web-provider contract, not a
+  claim that every platform exposes the same token.
 
 ## 9. Apple nonce (U6, item 21)
 

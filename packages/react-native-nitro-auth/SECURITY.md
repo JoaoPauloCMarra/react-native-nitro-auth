@@ -6,10 +6,10 @@
 released `0.x` line receives security fixes; earlier lines are supported only
 while the release train is actively publishing them.
 
-| Version    | Supported          |
-| ---------- | ------------------ |
-| latest     | :white_check_mark: |
-| older 0.x  | :x:                |
+| Version   | Supported          |
+| --------- | ------------------ |
+| latest    | :white_check_mark: |
+| older 0.x | :x:                |
 
 ## Credential And PII Rules
 

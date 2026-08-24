@@ -43,13 +43,13 @@ bare app.
 
 ## Requirements
 
-| Dependency                   | Supported range or validated baseline |
-| ---------------------------- | ------------------------------------- |
-| React Native                 | `>=0.75.0`; package gate `0.87.0`, Expo example `0.86.2` |
-| React                        | Validated with `19.2.3`               |
-| React Native Nitro Modules   | `>=0.37.0 <0.38.0`                    |
-| Expo                         | SDK `57.0.15` development builds; RN `0.86.2` |
-| iOS                          | `16.4` or later                       |
+| Dependency                 | Supported range or validated baseline                    |
+| -------------------------- | -------------------------------------------------------- |
+| React Native               | `>=0.75.0`; package gate `0.87.0`, Expo example `0.86.2` |
+| React                      | Validated with `19.2.3`                                  |
+| React Native Nitro Modules | `>=0.37.0 <0.38.0`                                       |
+| Expo                       | SDK `57.0.15` development builds; RN `0.86.2`            |
+| iOS                        | `16.4` or later                                          |
 
 ## Expo Config
 
@@ -100,19 +100,19 @@ export default {
 
 Plugin options:
 
-| Option                       | Platform | Required for                     |
-| ---------------------------- | -------- | -------------------------------- |
-| `ios.googleClientId`         | iOS      | Google Sign-In on iOS.           |
-| `ios.googleServerClientId`   | iOS      | Google server auth code flow.    |
+| Option                       | Platform | Required for                                                                     |
+| ---------------------------- | -------- | -------------------------------------------------------------------------------- |
+| `ios.googleClientId`         | iOS      | Google Sign-In on iOS.                                                           |
+| `ios.googleServerClientId`   | iOS      | Google server auth code flow.                                                    |
 | `ios.googleUrlScheme`        | iOS      | Optional Google redirect scheme. Derived from `ios.googleClientId` when omitted. |
-| `ios.appleSignIn`            | iOS      | Apple Sign-In entitlement.       |
-| `ios.microsoftClientId`      | iOS      | Microsoft Entra ID native login. |
-| `ios.microsoftTenant`        | iOS      | Microsoft tenant override.       |
-| `ios.microsoftB2cDomain`     | iOS      | Microsoft B2C hostname.          |
-| `android.googleClientId`     | Android  | Google Sign-In on Android.       |
-| `android.microsoftClientId`  | Android  | Microsoft Entra ID native login. |
-| `android.microsoftTenant`    | Android  | Microsoft tenant override.       |
-| `android.microsoftB2cDomain` | Android  | Microsoft B2C hostname.          |
+| `ios.appleSignIn`            | iOS      | Apple Sign-In entitlement.                                                       |
+| `ios.microsoftClientId`      | iOS      | Microsoft Entra ID native login.                                                 |
+| `ios.microsoftTenant`        | iOS      | Microsoft tenant override.                                                       |
+| `ios.microsoftB2cDomain`     | iOS      | Microsoft B2C hostname.                                                          |
+| `android.googleClientId`     | Android  | Google Sign-In on Android.                                                       |
+| `android.microsoftClientId`  | Android  | Microsoft Entra ID native login.                                                 |
+| `android.microsoftTenant`    | Android  | Microsoft tenant override.                                                       |
+| `android.microsoftB2cDomain` | Android  | Microsoft B2C hostname.                                                          |
 
 When `ios.googleUrlScheme` is omitted, the plugin derives
 `com.googleusercontent.apps.<id>` from an iOS client ID that ends in
@@ -124,16 +124,16 @@ written by the plugin during prebuild.
 
 Web options in `expo.extra`:
 
-| Option                        | Default     | Purpose                                      |
-| ----------------------------- | ----------- | -------------------------------------------- |
-| `googleWebClientId`           | —           | Google OAuth client ID.                      |
-| `appleWebClientId`            | —           | Apple Services ID.                           |
-| `microsoftClientId`           | —           | Microsoft Entra ID application ID.           |
-| `microsoftTenant`             | `common`    | Microsoft tenant, domain, or B2C policy.     |
-| `microsoftB2cDomain`          | —           | Microsoft B2C hostname.                      |
-| `nitroAuthWebStorage`         | `session`   | `session`, `local`, or `memory`.              |
-| `nitroAuthPersistTokensOnWeb` | adapter-dependent | Persist token fields in configured storage. Set explicitly in new integrations. |
-| `nitroAuthPersistProfileOnWeb`| `true`      | Persist email/name/photo in configured storage. |
+| Option                         | Default           | Purpose                                                                         |
+| ------------------------------ | ----------------- | ------------------------------------------------------------------------------- |
+| `googleWebClientId`            | —                 | Google OAuth client ID.                                                         |
+| `appleWebClientId`             | —                 | Apple Services ID.                                                              |
+| `microsoftClientId`            | —                 | Microsoft Entra ID application ID.                                              |
+| `microsoftTenant`              | `common`          | Microsoft tenant, domain, or B2C policy.                                        |
+| `microsoftB2cDomain`           | —                 | Microsoft B2C hostname.                                                         |
+| `nitroAuthWebStorage`          | `session`         | `session`, `local`, or `memory`.                                                |
+| `nitroAuthPersistTokensOnWeb`  | adapter-dependent | Persist token fields in configured storage. Set explicitly in new integrations. |
+| `nitroAuthPersistProfileOnWeb` | `true`            | Persist email/name/photo in configured storage.                                 |
 
 Web reads `expo-constants` for these options. `expo-constants` is an optional
 peer dependency: without it, web falls back to defaults and provider client
@@ -165,10 +165,7 @@ path such as `contoso.onmicrosoft.com/B2C_1_signin`.
 
 ```tsx
 import { Button } from "react-native";
-import {
-  useAuth,
-  type ProviderLoginOptions,
-} from "react-native-nitro-auth";
+import { useAuth, type ProviderLoginOptions } from "react-native-nitro-auth";
 
 export function SignInButton() {
   const { user, login, logout } = useAuth();
@@ -273,11 +270,11 @@ const microsoftOptions: MicrosoftLoginOptions = {
 
 Supported login options:
 
-| Provider  | Options                                                                                                                                                                                                 |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Provider  | Options                                                                                                                                                                                                                       |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Google    | `scopes`, `loginHint`, `nonce`, `forceAccountPicker`, `hostedDomain`, `useSheet`, `openIDRealm`, `useOneTap`, `filterByAuthorizedAccounts`, `useLegacyGoogleSignIn`, `forceCodeForRefreshToken`, `requestVerifiedPhoneNumber` |
-| Apple     | `scopes`, `nonce`                                                                                                                                                                                       |
-| Microsoft | `scopes`, `loginHint`, `tenant`, `prompt`                                                                                                                                                               |
+| Apple     | `scopes`, `nonce`                                                                                                                                                                                                             |
+| Microsoft | `scopes`, `loginHint`, `tenant`, `prompt`                                                                                                                                                                                     |
 
 `prompt` is typed as `"login"`, `"consent"`, `"select_account"`, or `"none"`.
 
@@ -301,8 +298,11 @@ Supported login options:
   refresh belong on your backend.
 - `revokeAccess()` clears local state only after provider revocation succeeds.
   Client-side revocation supports Google web and iOS sessions, plus Android
-  sessions created through legacy Google Sign-In. Unsupported providers and
-  modern Android Google sessions reject with `unsupported_provider`.
+  sessions created through legacy Google Sign-In. Unsupported providers reject
+  with `unsupported_provider`. Android Google sessions without an eligible
+  legacy Google Sign-In session, including Credential Manager/One-Tap sessions,
+  reject with `not_signed_in`; those modern sessions do not expose a client-side
+  provider revocation callback.
 
 ### Token semantics and capabilities
 
@@ -310,6 +310,12 @@ Supported login options:
 platform. Android Google never returns an OAuth access token, so its
 `expirationTime` uses the ID-token `exp` claim as a documented fallback and
 `getAccessToken()` stays `undefined`.
+
+Google `hostedDomain` is returned from the requested configuration. Android
+keeps that non-secret value across module/process recreation only when the
+restored Google account identity matches; logout or account replacement clears
+it. iOS uses the restored Google account configuration, and web reports the
+provider token claim when present.
 
 Typed platform capabilities are exported so consumers never assume tokens the
 provider cannot produce:
@@ -321,13 +327,13 @@ const androidGoogle = getProviderTokenCapabilities("google", "android");
 // { supportsAccessToken: false, accessTokenExpirySource: "id_token", ... }
 ```
 
-| Provider  | Platform | Access token | Client-side refresh | Server auth code | Expiry source |
-| --------- | -------- | ------------ | ------------------- | ---------------- | ------------- |
-| Google    | iOS      | yes          | yes                 | yes              | access token  |
+| Provider  | Platform | Access token | Client-side refresh | Server auth code | Expiry source  |
+| --------- | -------- | ------------ | ------------------- | ---------------- | -------------- |
+| Google    | iOS      | yes          | yes                 | yes              | access token   |
 | Google    | Android  | no           | yes (silent)        | yes (legacy)     | ID-token `exp` |
-| Google    | Web      | yes          | yes                 | yes              | access token  |
-| Apple     | iOS/Web  | no           | no                  | no               | —             |
-| Microsoft | all      | yes          | yes                 | no               | access token  |
+| Google    | Web      | yes          | yes                 | yes              | access token   |
+| Apple     | iOS/Web  | no           | no                  | no               | —              |
+| Microsoft | all      | yes          | yes                 | no               | access token   |
 
 ## Events
 
@@ -375,7 +381,7 @@ an application session.
 `underlyingMessage`. `message` equals `code`; `operation` names the failed
 phase; `underlyingMessage` preserves a differing raw platform message. The
 full canonical OAuth error table and lifecycle contracts live in
-`docs/error-contract.md`.
+[docs/error-contract.md](docs/error-contract.md).
 
 ```ts
 import {

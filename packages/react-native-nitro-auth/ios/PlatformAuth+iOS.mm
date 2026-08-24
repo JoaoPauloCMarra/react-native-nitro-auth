@@ -3,6 +3,7 @@
 #import "AuthUser.hpp"
 #import "AuthProvider.hpp"
 #import "AuthTokens.hpp"
+#import "AuthError.hpp"
 #import "PlatformAuth.hpp"
 
 #if __has_include(<react_native_nitro_auth/react_native_nitro_auth-Swift.h>)
@@ -13,8 +14,28 @@
 
 #include "LoginOptions.hpp"
 #include "MicrosoftPrompt.hpp"
+#include <cstdint>
+#include <mutex>
+#include <stdexcept>
 
 namespace margelo::nitro::NitroAuth {
+
+namespace {
+
+std::mutex gRevokeMutex;
+std::shared_ptr<Promise<void>> gRevokePromise;
+uint64_t gRevokeGeneration = 0;
+uint64_t gGenerationCounter = 0;
+
+uint64_t nextGeneration() {
+    ++gGenerationCounter;
+    if (gGenerationCounter == 0) {
+        ++gGenerationCounter;
+    }
+    return gGenerationCounter;
+}
+
+} // namespace
  
  inline std::optional<std::string> nsToStd(NSString* _Nullable ns) {
      if (ns == nil) return std::nullopt;
@@ -35,6 +56,32 @@ namespace margelo::nitro::NitroAuth {
 
      if (values.empty()) return std::nullopt;
      return values;
+ }
+
+ inline std::optional<AuthProvider> authProviderFromString(NSString* _Nullable providerStr) {
+     if ([providerStr isEqualToString:@"google"]) return AuthProvider::GOOGLE;
+     if ([providerStr isEqualToString:@"microsoft"]) return AuthProvider::MICROSOFT;
+     if ([providerStr isEqualToString:@"apple"]) return AuthProvider::APPLE;
+     return std::nullopt;
+ }
+
+ inline AuthUser userFromNSDictionary(NSDictionary* data, AuthProvider provider) {
+     AuthUser user;
+     user.provider = provider;
+     user.email = nsToStd([data objectForKey:@"email"]);
+     user.name = nsToStd([data objectForKey:@"name"]);
+     user.photo = nsToStd([data objectForKey:@"photo"]);
+     user.idToken = nsToStd([data objectForKey:@"idToken"]);
+     if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
+     if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
+     if ([data objectForKey:@"authorizationCode"]) user.authorizationCode = nsToStd([data objectForKey:@"authorizationCode"]);
+     if ([data objectForKey:@"userId"]) user.userId = nsToStd([data objectForKey:@"userId"]);
+     if ([data objectForKey:@"phoneNumber"]) user.phoneNumber = nsToStd([data objectForKey:@"phoneNumber"]);
+     if ([data objectForKey:@"hostedDomain"]) user.hostedDomain = nsToStd([data objectForKey:@"hostedDomain"]);
+     if ([data objectForKey:@"scopes"]) user.scopes = nsArrayToStd([data objectForKey:@"scopes"]);
+     if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
+     if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
+     return user;
  }
 
 std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, const std::optional<LoginOptions>& options) {
@@ -95,32 +142,17 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         forceAccountPicker = options->forceAccountPicker.value();
     }
     
-    [AuthAdapter loginWithProvider:providerStr scopes:scopesArray loginHint:hintStr nonce:nonceStr useSheet:useSheet forceAccountPicker:forceAccountPicker tenant:tenantStr prompt:promptStr hostedDomain:hostedDomainStr openIDRealm:openIDRealmStr completion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
-        if (error != nil) {
-            promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
+    [AuthAdapter loginWithProvider:providerStr scopes:scopesArray loginHint:hintStr nonce:nonceStr useSheet:useSheet forceAccountPicker:forceAccountPicker tenant:tenantStr prompt:promptStr hostedDomain:hostedDomainStr openIDRealm:openIDRealmStr completion:^(NSDictionary* _Nullable data, NSNumber* _Nullable code, NSString* _Nullable message) {
+        if (code != nil) {
+            promise->reject(makeAuthError(authErrorCodeFromInt((int)code.integerValue), nsToStd(message)));
             return;
         }
         if (data == nil) {
-            promise->reject(std::make_exception_ptr(std::runtime_error("Login cancelled or failed")));
+            promise->reject(std::make_exception_ptr(AuthException(AuthErrorCode::UNKNOWN, "Login cancelled or failed")));
             return;
         }
-        
-        AuthUser user;
-        user.provider = provider;
-        user.email = nsToStd([data objectForKey:@"email"]);
-        user.name = nsToStd([data objectForKey:@"name"]);
-        user.photo = nsToStd([data objectForKey:@"photo"]);
-        user.idToken = nsToStd([data objectForKey:@"idToken"]);
-        if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
-        if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
-        if ([data objectForKey:@"authorizationCode"]) user.authorizationCode = nsToStd([data objectForKey:@"authorizationCode"]);
-        if ([data objectForKey:@"userId"]) user.userId = nsToStd([data objectForKey:@"userId"]);
-        if ([data objectForKey:@"phoneNumber"]) user.phoneNumber = nsToStd([data objectForKey:@"phoneNumber"]);
-        if ([data objectForKey:@"hostedDomain"]) user.hostedDomain = nsToStd([data objectForKey:@"hostedDomain"]);
-        if ([data objectForKey:@"scopes"]) user.scopes = nsArrayToStd([data objectForKey:@"scopes"]);
-        if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
-        if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
-        
+
+        AuthUser user = userFromNSDictionary(data, provider);
         promise->resolve(user);
     }];
     return promise;
@@ -131,38 +163,22 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector
     NSMutableArray* scopesArray = [NSMutableArray arrayWithCapacity:scopes.size()];
     for (const auto& scope : scopes) [scopesArray addObject:[NSString stringWithUTF8String:scope.c_str()]];
     
-    [AuthAdapter addScopesWithScopes:scopesArray completion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
-        if (error != nil) {
-            promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
+    [AuthAdapter addScopesWithScopes:scopesArray completion:^(NSDictionary* _Nullable data, NSNumber* _Nullable code, NSString* _Nullable message) {
+        if (code != nil) {
+            promise->reject(makeAuthError(authErrorCodeFromInt((int)code.integerValue), nsToStd(message)));
             return;
         }
         if (data == nil) {
-            promise->reject(std::make_exception_ptr(std::runtime_error("Request scopes failed")));
+            promise->reject(std::make_exception_ptr(AuthException(AuthErrorCode::UNKNOWN, "Request scopes failed")));
             return;
         }
-        
-        AuthUser user;
-        NSString *providerStr = [data objectForKey:@"provider"];
-        if ([providerStr isEqualToString:@"microsoft"]) {
-            user.provider = AuthProvider::MICROSOFT;
-        } else if ([providerStr isEqualToString:@"apple"]) {
-            user.provider = AuthProvider::APPLE;
-        } else {
-            user.provider = AuthProvider::GOOGLE;
+
+        std::optional<AuthProvider> provider = authProviderFromString([data objectForKey:@"provider"]);
+        if (!provider.has_value()) {
+            promise->reject(makeAuthError(AuthErrorCode::UNSUPPORTED_PROVIDER));
+            return;
         }
-        user.email = nsToStd([data objectForKey:@"email"]);
-        user.name = nsToStd([data objectForKey:@"name"]);
-        user.photo = nsToStd([data objectForKey:@"photo"]);
-        user.idToken = nsToStd([data objectForKey:@"idToken"]);
-        if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
-        if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
-        if ([data objectForKey:@"authorizationCode"]) user.authorizationCode = nsToStd([data objectForKey:@"authorizationCode"]);
-        if ([data objectForKey:@"userId"]) user.userId = nsToStd([data objectForKey:@"userId"]);
-        if ([data objectForKey:@"phoneNumber"]) user.phoneNumber = nsToStd([data objectForKey:@"phoneNumber"]);
-        if ([data objectForKey:@"hostedDomain"]) user.hostedDomain = nsToStd([data objectForKey:@"hostedDomain"]);
-        if ([data objectForKey:@"scopes"]) user.scopes = nsArrayToStd([data objectForKey:@"scopes"]);
-        if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
-        if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
+        AuthUser user = userFromNSDictionary(data, provider.value());
         promise->resolve(user);
     }];
     return promise;
@@ -170,9 +186,9 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector
 
 std::shared_ptr<Promise<AuthTokens>> PlatformAuth::refreshToken() {
     auto promise = Promise<AuthTokens>::create();
-    [AuthAdapter refreshTokenWithCompletion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
-        if (error != nil) {
-            promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
+    [AuthAdapter refreshTokenWithCompletion:^(NSDictionary* _Nullable data, NSNumber* _Nullable code, NSString* _Nullable message) {
+        if (code != nil) {
+            promise->reject(makeAuthError(authErrorCodeFromInt((int)code.integerValue), nsToStd(message)));
             return;
         }
         AuthTokens tokens;
@@ -186,41 +202,25 @@ std::shared_ptr<Promise<AuthTokens>> PlatformAuth::refreshToken() {
 
 std::shared_ptr<Promise<std::optional<AuthUser>>> PlatformAuth::silentRestore() {
     auto promise = Promise<std::optional<AuthUser>>::create();
-    [AuthAdapter initializeWithCompletion:^(NSDictionary* _Nullable data, NSString* _Nullable error) {
-        if (error != nil) {
-            if ([error isEqualToString:@"not_signed_in"]) {
+    [AuthAdapter initializeWithCompletion:^(NSDictionary* _Nullable data, NSNumber* _Nullable code, NSString* _Nullable message) {
+        if (code != nil) {
+            if (code.integerValue == static_cast<NSInteger>(AuthErrorCode::NOT_SIGNED_IN)) {
                 promise->resolve(std::nullopt);
             } else {
-                promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
+                promise->reject(makeAuthError(authErrorCodeFromInt((int)code.integerValue), nsToStd(message)));
             }
             return;
         }
         if (data == nil) {
-            promise->reject(std::make_exception_ptr(std::runtime_error("unknown")));
+            promise->reject(makeAuthError(AuthErrorCode::UNKNOWN));
             return;
         }
-        AuthUser user;
-        NSString* providerStr = [data objectForKey:@"provider"];
-        if ([providerStr isEqualToString:@"google"]) {
-            user.provider = AuthProvider::GOOGLE;
-        } else if ([providerStr isEqualToString:@"microsoft"]) {
-            user.provider = AuthProvider::MICROSOFT;
-        } else {
-            user.provider = AuthProvider::APPLE;
+        std::optional<AuthProvider> provider = authProviderFromString([data objectForKey:@"provider"]);
+        if (!provider.has_value()) {
+            promise->reject(makeAuthError(AuthErrorCode::UNSUPPORTED_PROVIDER));
+            return;
         }
-        user.email = nsToStd([data objectForKey:@"email"]);
-        user.name = nsToStd([data objectForKey:@"name"]);
-        user.photo = nsToStd([data objectForKey:@"photo"]);
-        user.idToken = nsToStd([data objectForKey:@"idToken"]);
-        if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
-        if ([data objectForKey:@"serverAuthCode"]) user.serverAuthCode = nsToStd([data objectForKey:@"serverAuthCode"]);
-        if ([data objectForKey:@"authorizationCode"]) user.authorizationCode = nsToStd([data objectForKey:@"authorizationCode"]);
-        if ([data objectForKey:@"userId"]) user.userId = nsToStd([data objectForKey:@"userId"]);
-        if ([data objectForKey:@"phoneNumber"]) user.phoneNumber = nsToStd([data objectForKey:@"phoneNumber"]);
-        if ([data objectForKey:@"hostedDomain"]) user.hostedDomain = nsToStd([data objectForKey:@"hostedDomain"]);
-        if ([data objectForKey:@"scopes"]) user.scopes = nsArrayToStd([data objectForKey:@"scopes"]);
-        if ([data objectForKey:@"expirationTime"]) user.expirationTime = [[data objectForKey:@"expirationTime"] doubleValue];
-        if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
+        AuthUser user = userFromNSDictionary(data, provider.value());
         promise->resolve(user);
     }];
     return promise;
@@ -230,12 +230,40 @@ bool PlatformAuth::hasPlayServices() {
     return true;
 }
 
+void PlatformAuth::invalidatePendingOperations() {
+    [AuthAdapter cancelPendingOperations];
+}
+
+void PlatformAuth::cancelPendingOperations(AuthErrorCode reason) {
+    std::shared_ptr<Promise<void>> revokePromise;
+    {
+        std::lock_guard<std::mutex> lock(gRevokeMutex);
+        revokePromise = std::move(gRevokePromise);
+        gRevokeGeneration = nextGeneration();
+    }
+    if (revokePromise) {
+        revokePromise->reject(makeAuthError(reason));
+    }
+    [AuthAdapter cancelPendingOperations];
+}
+
 void PlatformAuth::logout() {
     [AuthAdapter logout];
 }
 
 std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess(AuthProvider provider) {
     auto promise = Promise<void>::create();
+    uint64_t generation;
+    {
+        std::lock_guard<std::mutex> lock(gRevokeMutex);
+        if (gRevokePromise) {
+            promise->reject(makeAuthError(AuthErrorCode::OPERATION_IN_PROGRESS));
+            return promise;
+        }
+        generation = nextGeneration();
+        gRevokeGeneration = generation;
+        gRevokePromise = promise;
+    }
     NSString* providerName;
     switch (provider) {
         case AuthProvider::GOOGLE:
@@ -248,12 +276,22 @@ std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess(AuthProvider provider)
             providerName = @"microsoft";
             break;
     }
-    [AuthAdapter revokeAccessWithProvider:providerName completion:^(NSString* _Nullable error) {
-        if (error != nil) {
-            promise->reject(std::make_exception_ptr(std::runtime_error([error UTF8String])));
+    [AuthAdapter revokeAccessWithProvider:providerName completion:^(NSNumber* _Nullable code, NSString* _Nullable message) {
+        std::shared_ptr<Promise<void>> revokePromise;
+        {
+            std::lock_guard<std::mutex> lock(gRevokeMutex);
+            if (gRevokePromise && gRevokeGeneration == generation) {
+                revokePromise = std::move(gRevokePromise);
+            }
+        }
+        if (!revokePromise) {
             return;
         }
-        promise->resolve();
+        if (code != nil) {
+            revokePromise->reject(makeAuthError(authErrorCodeFromInt((int)code.integerValue), nsToStd(message)));
+            return;
+        }
+        revokePromise->resolve();
     }];
     return promise;
 }

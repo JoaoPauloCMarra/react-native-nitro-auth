@@ -14,6 +14,8 @@ const fs = require("fs");
 const path = require("path");
 
 const packageDir = path.resolve(__dirname, "../packages/react-native-nitro-auth");
+const projectRoot = path.resolve(__dirname, "..");
+const docsSyncScript = path.join(projectRoot, "scripts/sync-package-docs.ts");
 
 const requiredFiles = [
   "lib/typescript/commonjs/index.d.ts",
@@ -27,15 +29,28 @@ const requiredFiles = [
   "nitrogen/generated/shared/c++/AuthEventType.hpp",
   "cpp/HybridAuth.cpp",
   "cpp/HybridAuth.hpp",
+  "cpp/AuthError.hpp",
   "cpp/PlatformAuth.hpp",
   "ios/AuthAdapter.swift",
+  "ios/AuthAdapter+Google.swift",
+  "ios/AuthAdapter+Microsoft.swift",
+  "ios/AuthAdapter+Helpers.swift",
+  "ios/AuthErrorCode.swift",
+  "ios/GeneratedOAuthErrorCodes.swift",
   "ios/PlatformAuth+iOS.mm",
   "android/src/main/java/com/auth/AuthAdapter.kt",
+  "android/src/main/java/com/auth/AuthErrorCode.kt",
+  "android/src/main/java/com/auth/MicrosoftAuthConfig.kt",
+  "android/src/main/java/com/auth/MicrosoftAuthTypes.kt",
+  "android/src/main/java/com/auth/GoogleSessionStore.kt",
+  "android/src/main/java/com/auth/OAuthErrorCodes.kt",
   "android/src/main/cpp/PlatformAuth+Android.cpp",
+  "src/generated/oauth-error-codes.ts",
   "android/src/main/java/com/auth/NitroAuthModule.kt",
   "app.plugin.js",
   "react-native-nitro-auth.podspec",
   "nitro.json",
+  "docs/error-contract.md",
   "README.md",
   "CHANGELOG.md",
   "SECURITY.md",
@@ -65,19 +80,47 @@ function parsePackedFiles(stdout) {
   return files;
 }
 
-function main() {
-  const pack = spawnSync("bun", ["pm", "pack", "--dry-run", "--ignore-scripts"], {
-    cwd: packageDir,
+function runDocsSync(mode) {
+  const result = spawnSync("bun", [docsSyncScript, mode], {
+    cwd: projectRoot,
     encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
   });
-  if (pack.status !== 0) {
-    process.stderr.write(pack.stderr || pack.stdout || "pack dry run failed\n");
-    process.exit(1);
+  if (result.status !== 0) {
+    throw new Error(
+      `${mode} docs sync failed: ${result.stderr || result.stdout || "unknown error"}`,
+    );
   }
+}
 
-  const files = parsePackedFiles(pack.stdout);
-  if (files.size === 0) {
-    process.stderr.write(`Unable to parse pack output:\n${pack.stdout}\n`);
+function main() {
+  let files;
+  try {
+    try {
+      runDocsSync("prepare");
+      const pack = spawnSync(
+        "bun",
+        ["pm", "pack", "--dry-run", "--ignore-scripts"],
+        {
+          cwd: packageDir,
+          encoding: "utf8",
+        },
+      );
+      if (pack.status !== 0) {
+        throw new Error(pack.stderr || pack.stdout || "pack dry run failed");
+      }
+
+      files = parsePackedFiles(pack.stdout);
+      if (files.size === 0) {
+        throw new Error(`Unable to parse pack output:\n${pack.stdout}`);
+      }
+    } finally {
+      runDocsSync("cleanup");
+    }
+  } catch (error) {
+    process.stderr.write(
+      `${error instanceof Error ? error.message : String(error)}\n`,
+    );
     process.exit(1);
   }
 
