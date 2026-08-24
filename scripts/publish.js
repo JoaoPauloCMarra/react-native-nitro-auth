@@ -18,6 +18,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const packageDir = path.join(projectRoot, "packages/react-native-nitro-auth");
 const exampleDir = path.join(projectRoot, "apps/example");
 const packageJsonPath = path.join(packageDir, "package.json");
+const docsSyncScript = path.join(projectRoot, "scripts/sync-package-docs.ts");
 const startedAt = Date.now();
 
 const args = process.argv.slice(2);
@@ -100,6 +101,19 @@ function must(command, options = {}) {
 
   console.log(colors.dim(`    done in ${formatDuration(result.durationMs)}`));
   return result;
+}
+
+function runPackWithDocs(command, label) {
+  try {
+    must(`bun ${docsSyncScript} prepare`, {
+      label: "Prepare package documents",
+    });
+    return must(command, { cwd: packageDir, label });
+  } finally {
+    must(`bun ${docsSyncScript} cleanup`, {
+      label: "Restore package documents",
+    });
+  }
 }
 
 function readPackageJson() {
@@ -239,7 +253,7 @@ function assertReleaseTag(version) {
 function assertChangelogCovers(version) {
   const changelogPath = path.join(packageDir, "CHANGELOG.md");
   const changelog = fs.readFileSync(changelogPath, "utf8");
-  const topEntry = changelog.match(/^##\s+([^\s]+)/m)?.[1];
+  const topEntry = changelog.match(/^##\s+([^\s]+)/m)?.[1]?.replace(/^[[]|]$/g, "");
 
   if (topEntry === version) {
     console.log(`  ✓ CHANGELOG.md top entry covers ${version}`);
@@ -398,10 +412,10 @@ async function main() {
   }
 
   log(dryRun ? "Running publish dry run..." : "Publishing to npm...", "cyan");
-  must(buildPublishCommand(publishArgs), {
-    cwd: packageDir,
-    label: dryRun ? "Publish dry run" : "Publish package",
-  });
+  runPackWithDocs(
+    buildPublishCommand(publishArgs),
+    dryRun ? "Publish dry run" : "Publish package",
+  );
 
   log(
     dryRun

@@ -8,6 +8,7 @@
 #include <vector>
 #include "../HybridAuth.hpp"
 #include "../PlatformAuth.hpp"
+#include "../AuthError.hpp"
 
 using namespace margelo::nitro::NitroAuth;
 
@@ -25,6 +26,8 @@ std::shared_ptr<Promise<void>> lastRevokeAccessPromise;
 std::optional<AuthProvider> lastRevokedProvider;
 bool didLogout = false;
 bool didRevokeAccess = false;
+int platformCancellationCount = 0;
+int platformInvalidationCount = 0;
 
 AuthUser makeUser(
   const std::optional<std::vector<std::string>>& scopes = std::nullopt,
@@ -73,6 +76,8 @@ void resetPlatformMocks() {
   lastRevokedProvider = std::nullopt;
   didLogout = false;
   didRevokeAccess = false;
+  platformCancellationCount = 0;
+  platformInvalidationCount = 0;
 }
 
 } // namespace
@@ -99,6 +104,20 @@ std::shared_ptr<Promise<std::optional<AuthUser>>> PlatformAuth::silentRestore() 
 
 bool PlatformAuth::hasPlayServices() {
   return true;
+}
+
+void PlatformAuth::invalidatePendingOperations() {
+  platformInvalidationCount++;
+}
+
+void PlatformAuth::cancelPendingOperations(AuthErrorCode reason) {
+  platformCancellationCount++;
+  const auto cancellation = makeAuthError(reason);
+  if (lastLoginPromise && lastLoginPromise->isPending()) lastLoginPromise->reject(cancellation);
+  if (lastRequestScopesPromise && lastRequestScopesPromise->isPending()) lastRequestScopesPromise->reject(cancellation);
+  if (lastRefreshPromise && lastRefreshPromise->isPending()) lastRefreshPromise->reject(cancellation);
+  if (lastSilentRestorePromise && lastSilentRestorePromise->isPending()) lastSilentRestorePromise->reject(cancellation);
+  if (lastRevokeAccessPromise && lastRevokeAccessPromise->isPending()) lastRevokeAccessPromise->reject(cancellation);
 }
 
 void PlatformAuth::logout() {
@@ -169,18 +188,41 @@ void testRefreshCancelledWhenSessionChanges() {
   assert(loginPromise->isResolved());
 
   auto refreshPromise = auth->refreshToken();
+  auto stalePlatformRefresh = lastRefreshPromise;
   auto duplicateRefreshPromise = auth->refreshToken();
   assert(refreshPromise == duplicateRefreshPromise);
 
   auto replacementLoginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
   assert(refreshPromise->isRejected());
+  assert(stalePlatformRefresh->isRejected());
+  assert(platformCancellationCount == 3);
+  assert(platformInvalidationCount == 2);
 
   lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "new"));
   assert(replacementLoginPromise->isResolved());
 
-  lastRefreshPromise->resolve(makeTokens("stale"));
-
   assert(auth->getCurrentUser()->accessToken == "new");
+}
+
+void testNewLoginReleasesStalePlatformSlotBeforeReplacementStarts() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+
+  auto firstRestore = auth->silentRestore();
+  auto stalePlatformRestore = lastSilentRestorePromise;
+  auto secondLogin = auth->login(AuthProvider::GOOGLE, std::nullopt);
+
+  assert(firstRestore->isRejected());
+  assert(stalePlatformRestore->isRejected());
+  assert(platformCancellationCount == 2);
+  assert(platformInvalidationCount == 2);
+  assert(lastLoginPromise != nullptr);
+
+  assert(!auth->getCurrentUser().has_value());
+
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "fresh"));
+  assert(secondLogin->isResolved());
+  assert(auth->getCurrentUser()->accessToken == "fresh");
 }
 
 void testLoginStartInvalidatesSilentRestore() {
@@ -191,7 +233,6 @@ void testLoginStartInvalidatesSilentRestore() {
   auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
 
   assert(restorePromise->isRejected());
-  lastSilentRestorePromise->resolve(makeUser(std::vector<std::string>{"profile"}, "restored"));
   assert(!auth->getCurrentUser().has_value());
 
   lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "interactive"));
@@ -235,7 +276,7 @@ void testRevokeAccessClearsSessionOnlyAfterProviderRevocation() {
   assert(didRevokeAccess);
   assert(lastRevokedProvider == AuthProvider::GOOGLE);
   assert(auth->getCurrentUser().has_value());
-  lastRevokeAccessPromise->reject(std::make_exception_ptr(std::runtime_error("network_error")));
+  lastRevokeAccessPromise->reject(makeAuthError(AuthErrorCode::NETWORK_ERROR));
   assert(failedRevoke->isRejected());
   assert(auth->getCurrentUser().has_value());
 
@@ -244,6 +285,50 @@ void testRevokeAccessClearsSessionOnlyAfterProviderRevocation() {
   assert(successfulRevoke->isResolved());
   assert(!auth->getCurrentUser().has_value());
   assert(auth->getGrantedScopes().empty());
+}
+
+void testLogoutCancelsPendingRevokeAccess() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+
+  auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "active"));
+  assert(loginPromise->isResolved());
+
+  auto revokePromise = auth->revokeAccess();
+  assert(revokePromise->isPending());
+
+  auth->logout();
+
+  assert(revokePromise->isRejected());
+  assert(!auth->getCurrentUser().has_value());
+}
+
+void testNewLoginReleasesPendingRevokeBeforeReplacementStarts() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+
+  auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "active"));
+  assert(loginPromise->isResolved());
+
+  auto revokePromise = auth->revokeAccess();
+  auto stalePlatformRevoke = lastRevokeAccessPromise;
+  auto replacementLogin = auth->login(AuthProvider::GOOGLE, std::nullopt);
+
+  assert(revokePromise->isRejected());
+  assert(stalePlatformRevoke->isRejected());
+  assert(lastLoginPromise != nullptr);
+
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "replacement"));
+  assert(replacementLogin->isResolved());
+  assert(auth->getCurrentUser()->accessToken == "replacement");
+
+  auto laterRevoke = auth->revokeAccess();
+  assert(laterRevoke->isPending());
+  assert(lastRevokeAccessPromise != stalePlatformRevoke);
+  lastRevokeAccessPromise->resolve();
+  assert(laterRevoke->isResolved());
 }
 
 void testLogoutCancelsRefreshAndClearsSession() {
@@ -262,7 +347,9 @@ void testLogoutCancelsRefreshAndClearsSession() {
   assert(!auth->getCurrentUser().has_value());
   assert(auth->getGrantedScopes().empty());
 
-  lastRefreshPromise->resolve(makeTokens("stale"));
+  if (lastRefreshPromise->isPending()) {
+    lastRefreshPromise->resolve(makeTokens("stale"));
+  }
   assert(!auth->getCurrentUser().has_value());
 }
 
@@ -334,7 +421,7 @@ void testLoginScopeFallbackAndRejectionPaths() {
   assert(!auth->getCurrentUser()->scopes.has_value());
 
   auto rejectedLogin = auth->login(AuthProvider::GOOGLE, std::nullopt);
-  lastLoginPromise->reject(std::make_exception_ptr(std::runtime_error("cancelled")));
+  lastLoginPromise->reject(makeAuthError(AuthErrorCode::CANCELLED));
   assert(rejectedLogin->isRejected());
 }
 
@@ -474,13 +561,13 @@ void testLoginFailedEventCarriesTypedErrorCode() {
   });
 
   auto loginPromise = auth->login(AuthProvider::MICROSOFT, std::nullopt);
-  lastLoginPromise->reject(std::make_exception_ptr(std::runtime_error("cancelled: user closed the browser")));
+  lastLoginPromise->reject(makeAuthError(AuthErrorCode::CANCELLED, "user closed the browser"));
   assert(loginPromise->isRejected());
   assert(failedProvider == AuthProvider::MICROSOFT);
   assert(failedCode == AuthErrorCode::CANCELLED);
 
   auto refreshPromise = auth->refreshToken();
-  lastRefreshPromise->reject(std::make_exception_ptr(std::runtime_error("refresh_failed: invalid_grant")));
+  lastRefreshPromise->reject(makeAuthError(AuthErrorCode::REFRESH_FAILED, "invalid_grant"));
   assert(refreshPromise->isRejected());
 }
 
@@ -502,7 +589,7 @@ void testRefreshFailedEventCarriesTypedErrorCode() {
   });
 
   auto refreshPromise = auth->refreshToken();
-  lastRefreshPromise->reject(std::make_exception_ptr(std::runtime_error("network_error: connection refused")));
+  lastRefreshPromise->reject(makeAuthError(AuthErrorCode::NETWORK_ERROR, "connection refused"));
   assert(refreshPromise->isRejected());
   assert(refreshFailedEvents == 1);
   assert(failedCode == AuthErrorCode::NETWORK_ERROR);
@@ -538,7 +625,6 @@ void testDisposeRejectsPendingWorkAndClearsListeners() {
   assert(didLogout);
 
   int callsBefore = listenerCalls + eventCalls;
-  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "late"));
   assert(!auth->getCurrentUser().has_value());
   assert(listenerCalls + eventCalls == callsBefore);
 }
@@ -555,6 +641,29 @@ void testRevokeScopesPreservesVoidContract() {
   assert(revokePromise->isResolved());
   const std::vector<std::string> remaining{"email"};
   assert(auth->getGrantedScopes() == remaining);
+}
+
+void testAuthErrorEnvelopeIsByteIdentical() {
+  assert(std::string(AuthException(AuthErrorCode::CANCELLED).what()) == "cancelled");
+  assert(formatAuthErrorEnvelope(AuthErrorCode::NETWORK_ERROR, "connection refused") == "network_error: connection refused");
+  assert(formatAuthErrorEnvelope(AuthErrorCode::CANCELLED, "user closed the browser") == "cancelled: user closed the browser");
+  assert(formatAuthErrorEnvelope(AuthErrorCode::UNKNOWN, std::nullopt) == "unknown");
+  assert(formatAuthErrorEnvelope(AuthErrorCode::UNKNOWN, "") == "unknown");
+  assert(authErrorCodeFromInt(1) == AuthErrorCode::CANCELLED);
+  assert(authErrorCodeFromInt(-1) == AuthErrorCode::UNKNOWN);
+  assert(authErrorCodeFromInt(16) == AuthErrorCode::UNKNOWN);
+
+  try {
+    std::rethrow_exception(makeAuthError(AuthErrorCode::CANCELLED, "user closed the browser"));
+  } catch (const std::exception& e) {
+    assert(std::string(e.what()) == "cancelled: user closed the browser");
+  }
+  try {
+    std::rethrow_exception(makeAuthError(AuthErrorCode::NOT_SIGNED_IN));
+  } catch (const AuthException& e) {
+    assert(e.code() == AuthErrorCode::NOT_SIGNED_IN);
+    assert(std::string(e.what()) == "not_signed_in");
+  }
 }
 
 void testSessionScenariosInterleaveWithoutUnresolvedPromises() {
@@ -594,10 +703,13 @@ int main() {
   testScopeMergesAndRemovals();
   testListenerExceptionsDoNotBlockStateUpdates();
   testRefreshCancelledWhenSessionChanges();
+  testNewLoginReleasesStalePlatformSlotBeforeReplacementStarts();
   testLoginStartInvalidatesSilentRestore();
   testPendingLoginCancelledWhenSessionChanges();
   testRevokeAccessRequiresSession();
   testRevokeAccessClearsSessionOnlyAfterProviderRevocation();
+  testLogoutCancelsPendingRevokeAccess();
+  testNewLoginReleasesPendingRevokeBeforeReplacementStarts();
   testLogoutCancelsRefreshAndClearsSession();
   testSynchronousAccessorsAndListenerUnsubscribe();
   testSilentRestoreResolvedEmptyAndRejectedPaths();
@@ -608,6 +720,7 @@ int main() {
   testTypedAuthEventsAcrossLoginRefreshLogout();
   testLoginFailedEventCarriesTypedErrorCode();
   testRefreshFailedEventCarriesTypedErrorCode();
+  testAuthErrorEnvelopeIsByteIdentical();
   testDisposeRejectsPendingWorkAndClearsListeners();
   testRevokeScopesPreservesVoidContract();
   testSessionScenariosInterleaveWithoutUnresolvedPromises();

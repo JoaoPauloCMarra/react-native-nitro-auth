@@ -12,7 +12,6 @@ import type {
   TypedAuth,
   UseAuthReturn,
 } from "../index";
-import type { AuthError } from "../utils/auth-error";
 
 type AssertNever<T extends never> = T;
 type AssertTrue<T extends true> = T;
@@ -83,13 +82,13 @@ type WebHookUsesProviderLogin = AssertTrue<
 type NativeSocialButtonError = AssertTrue<
   IsAssignable<
     NonNullable<import("../index").SocialButtonProps["onError"]>,
-    (error: AuthError) => void
+    (error: unknown) => void
   >
 >;
 type WebSocialButtonError = AssertTrue<
   IsAssignable<
     NonNullable<import("../index.web").SocialButtonProps["onError"]>,
-    (error: AuthError) => void
+    (error: unknown) => void
   >
 >;
 

@@ -1,6 +1,49 @@
 # Changelog
 
-## 0.9.0 - 2026-08-20
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Breaking changes are always listed first in each release section.
+
+## [0.10.0] - 2026-08-24
+
+### Breaking changes
+
+- None.
+
+### Fixed
+
+- Android: a completed `msauth://` Microsoft redirect no longer reports
+  `cancelled` (and no longer clears PKCE state before the token exchange
+  finishes). The redirect handler resuming no longer cancels the flow.
+- Android: an abandoned interactive Google sign-in (sign-in activity finished
+  without a result) now rejects with `cancelled` instead of leaving the login
+  promise pending and rejecting later logins with `operation_in_progress`.
+  The sign-in activity no longer relaunches the Google flow after a
+  configuration change.
+- Android: cancelling the One-Tap (Credential Manager) sheet now resolves the
+  login with `cancelled` instead of silently launching the legacy sign-in
+  activity.
+
+### Changed
+
+- `requestScopes` now succeeds for one-tap-only Google sessions on Android and
+  resolves with the session user plus the merged scope list, matching iOS.
+  Previously it rejected with `not_signed_in`.
+- `revokeAccess()` with no active Google session rejects with `not_signed_in` on
+  Android. Active Credential Manager/One-Tap sessions are not eligible for
+  client-side provider revocation and reject with `unsupported_provider`; local
+  session state is unchanged.
+- iOS now populates `AuthError.underlyingMessage`: native rejections use the
+  same `<code>: <detail>` envelope as Android and web.
+- The returned user's `hostedDomain` now reports the requested configuration
+  value on Android, matching iOS; it is never derived from the account email.
+- Unknown provider strings from platform callbacks now reject with
+  `unsupported_provider` instead of defaulting to Apple (iOS silent restore,
+  Android login callbacks).
+
+## [0.9.0] - 2026-08-20
 
 ### Breaking changes
 
@@ -10,12 +53,13 @@
 
 ### Changed
 
-- Updated the validated compatibility baseline to Nitro Modules 0.37.0 while
-  retaining Expo SDK 57's React Native 0.86.2 example baseline and adding
-  standalone package validation with React Native 0.87.0.
-- `SocialButtonProps.onError` now exposes the normalized `AuthError` contract.
+- Added a React Native 0.87.0 Strict TypeScript compatibility check while
+  retaining React Native 0.86.2 for the package gate and Expo SDK 57 example.
+- `SocialButton` still delivers normalized `AuthError` instances at runtime;
+  the callback parameter remains `unknown` so existing callback annotations
+  stay source-compatible.
 
-## 0.8.0 - 2026-08-13
+## [0.8.0] - 2026-08-13
 
 ### Breaking changes
 
@@ -33,7 +77,7 @@
 
 - Documented that `logout()` is synchronous `void`.
 
-## 0.7.0 - 2026-08-12
+## [0.7.0] - 2026-08-12
 
 ### Breaking changes
 
@@ -57,7 +101,9 @@
 - Added `nitroAuthPersistProfileOnWeb` to keep web profile PII (email, name,
   photo) out of storage, and declared `expo-constants` as an optional peer for
   the web provider-config read.
+
 ### Changed
+
 - `AuthError` now carries the failed `operation` phase and preserves
   `underlyingMessage` from native `<code>: <detail>` envelopes; message text is
   never used as control flow.
@@ -93,7 +139,7 @@
   when a nonce is provided.
 - Web refresh now requires an `id_token` in the token response, matching iOS.
 
-## 0.6.6 - 2026-07-30
+## [0.6.6] - 2026-07-30
 
 ### Changed
 
@@ -108,7 +154,7 @@
 - Propagated native and web silent-restore configuration and network failures while suppressing only a genuine missing session.
 - Propagated Android native initialization failures as `configuration_error` and reset disposed service singletons for safe recreation.
 
-## 0.6.4 - 2026-06-11
+## [0.6.4] - 2026-06-11
 
 ### Added
 
@@ -122,7 +168,7 @@
 
 - Encoded iOS Microsoft token request bodies as form data so authorization codes, redirect URIs, and refresh tokens containing reserved characters are posted correctly.
 
-## 0.6.3 - 2026-06-10
+## [0.6.3] - 2026-06-10
 
 ### Fixed
 
@@ -133,7 +179,7 @@
 - Updated README setup, provider examples, option tables, error codes, and typed API documentation to match the current package surface.
 - Added stronger compile-time coverage for provider-specific login options used by `AuthService.login()` and `useAuth().login()`.
 
-## 0.6.1 - 2026-05-21
+## [0.6.1] - 2026-05-21
 
 ### Changed
 
@@ -145,7 +191,7 @@
 
 - Retained the active iOS Apple Sign-In controller until completion to avoid premature native lifecycle cleanup.
 
-## 0.6.0 - 2026-05-14
+## [0.6.0] - 2026-05-14
 
 ### Added
 
@@ -167,26 +213,26 @@
 - Fixed Android Google cancellation handling so cancellations are not reported as unknown failures.
 - Fixed native session cleanup paths to reject pending work before clearing provider state.
 
-## 0.5.12 - 2026-05-13
+## [0.5.12] - 2026-05-13
 
 ### Fixed
 
 - Normalized web `SocialButton` and native login failures so presentation-anchor and missing-code errors surface as stable `AuthError` codes.
 - Shipped package-level Watchman ignores for Android CMake cache output so consumers avoid noisy native build watcher events.
 
-## 0.5.11 - 2026-05-05
+## [0.5.11] - 2026-05-05
 
 ### Fixed
 
 - Wrapped synchronous native service failures in `AuthError` so public service errors keep a consistent code contract.
 
-## 0.5.10 - 2026-04-27
+## [0.5.10] - 2026-04-27
 
 ### Fixed
 
 - Fixed iOS Microsoft sign-in so `ASWebAuthenticationSession` is retained until callback or cancellation and duplicate sessions fail with `operation_in_progress`.
 
-## 0.5.9 - 2026-04-24
+## [0.5.9] - 2026-04-24
 
 ### Changed
 

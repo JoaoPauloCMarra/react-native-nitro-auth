@@ -1,4 +1,5 @@
 #include "PlatformAuth.hpp"
+#include "AuthError.hpp"
 #include "AuthUser.hpp"
 #include "AuthTokens.hpp"
 #include "AuthCache.hpp"
@@ -6,8 +7,12 @@
 #include <fbjni/fbjni.h>
 #include <NitroModules/NitroLogger.hpp>
 #include <NitroModules/Promise.hpp>
+#include <cstdint>
 #include <exception>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
+#include <vector>
 
 namespace margelo::nitro::NitroAuth {
 
@@ -19,17 +24,90 @@ static std::shared_ptr<Promise<AuthTokens>> gRefreshPromise;
 static std::shared_ptr<Promise<std::optional<AuthUser>>> gSilentPromise;
 static std::shared_ptr<Promise<void>> gRevokeAccessPromise;
 static std::mutex gMutex;
+static uint64_t gGenerationCounter = 0;
+static uint64_t gLoginGeneration = 0;
+static uint64_t gScopesGeneration = 0;
+static uint64_t gRefreshGeneration = 0;
+static uint64_t gSilentGeneration = 0;
+static uint64_t gRevokeAccessGeneration = 0;
+static std::mutex gJniMutex;
 static jclass gAuthAdapterClass = nullptr;
 static jmethodID gLoginMethod = nullptr;
 static jmethodID gRequestScopesMethod = nullptr;
 static jmethodID gRefreshMethod = nullptr;
 static jmethodID gRestoreMethod = nullptr;
 static jmethodID gHasPlayMethod = nullptr;
+static jmethodID gCancelPendingOperationsMethod = nullptr;
 static jmethodID gLogoutMethod = nullptr;
 static jmethodID gRevokeAccessMethod = nullptr;
 
-// Call from JNI_OnUnload or dispose to prevent stale refs after a module reload.
-static void clearCachedJniRefs(JNIEnv* env) {
+static uint64_t nextGenerationLocked() {
+    ++gGenerationCounter;
+    if (gGenerationCounter == 0) {
+        ++gGenerationCounter;
+    }
+    return gGenerationCounter;
+}
+
+struct AuthAdapterMethods {
+    JNIEnv* env;
+    jclass clazz;
+    jmethodID login;
+    jmethodID requestScopes;
+    jmethodID refresh;
+    jmethodID restore;
+    jmethodID hasPlay;
+    jmethodID cancelPendingOperations;
+    jmethodID logout;
+    jmethodID revokeAccess;
+
+    AuthAdapterMethods(
+        JNIEnv* env,
+        jclass clazz,
+        jmethodID login,
+        jmethodID requestScopes,
+        jmethodID refresh,
+        jmethodID restore,
+        jmethodID hasPlay,
+        jmethodID cancelPendingOperations,
+        jmethodID logout,
+        jmethodID revokeAccess)
+        : env(env),
+          clazz(clazz),
+          login(login),
+          requestScopes(requestScopes),
+          refresh(refresh),
+          restore(restore),
+          hasPlay(hasPlay),
+          cancelPendingOperations(cancelPendingOperations),
+          logout(logout),
+          revokeAccess(revokeAccess) {}
+
+    ~AuthAdapterMethods() {
+        if (clazz != nullptr) {
+            env->DeleteLocalRef(clazz);
+        }
+    }
+
+    AuthAdapterMethods(const AuthAdapterMethods&) = delete;
+    AuthAdapterMethods& operator=(const AuthAdapterMethods&) = delete;
+
+    AuthAdapterMethods(AuthAdapterMethods&& other) noexcept
+        : env(other.env),
+          clazz(other.clazz),
+          login(other.login),
+          requestScopes(other.requestScopes),
+          refresh(other.refresh),
+          restore(other.restore),
+          hasPlay(other.hasPlay),
+          cancelPendingOperations(other.cancelPendingOperations),
+          logout(other.logout),
+          revokeAccess(other.revokeAccess) {
+        other.clazz = nullptr;
+    }
+};
+
+static void clearCachedJniRefsLocked(JNIEnv* env) {
     if (gAuthAdapterClass != nullptr) {
         env->DeleteGlobalRef(gAuthAdapterClass);
         gAuthAdapterClass = nullptr;
@@ -39,14 +117,16 @@ static void clearCachedJniRefs(JNIEnv* env) {
     gRefreshMethod = nullptr;
     gRestoreMethod = nullptr;
     gHasPlayMethod = nullptr;
+    gCancelPendingOperationsMethod = nullptr;
     gLogoutMethod = nullptr;
     gRevokeAccessMethod = nullptr;
 }
 
-static void ensureAuthAdapterMethods(JNIEnv* env) {
+static void ensureAuthAdapterMethodsLocked(JNIEnv* env) {
     if (gAuthAdapterClass != nullptr && gLoginMethod != nullptr
         && gRequestScopesMethod != nullptr && gRefreshMethod != nullptr
         && gRestoreMethod != nullptr && gHasPlayMethod != nullptr
+        && gCancelPendingOperationsMethod != nullptr
         && gLogoutMethod != nullptr && gRevokeAccessMethod != nullptr) {
         return;
     }
@@ -54,38 +134,47 @@ static void ensureAuthAdapterMethods(JNIEnv* env) {
     if (gAuthAdapterClass == nullptr) {
         jclass localAdapterClass = env->FindClass("com/auth/AuthAdapter");
         if (localAdapterClass == nullptr) {
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
             throw std::runtime_error("Unable to resolve com/auth/AuthAdapter");
         }
         gAuthAdapterClass = static_cast<jclass>(env->NewGlobalRef(localAdapterClass));
         env->DeleteLocalRef(localAdapterClass);
+        if (gAuthAdapterClass == nullptr) {
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+            throw std::runtime_error("Unable to cache AuthAdapter class");
+        }
     }
 
     if (gLoginMethod == nullptr) {
         gLoginMethod = env->GetStaticMethodID(
             gAuthAdapterClass,
             "loginSync",
-            "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZZZZZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V"
+            "(Landroid/content/Context;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZZZZZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;J)V"
         );
     }
     if (gRequestScopesMethod == nullptr) {
         gRequestScopesMethod = env->GetStaticMethodID(
             gAuthAdapterClass,
             "requestScopesSync",
-            "(Landroid/content/Context;[Ljava/lang/String;)V"
+            "(Landroid/content/Context;[Ljava/lang/String;J)V"
         );
     }
     if (gRefreshMethod == nullptr) {
         gRefreshMethod = env->GetStaticMethodID(
             gAuthAdapterClass,
             "refreshTokenSync",
-            "(Landroid/content/Context;)V"
+            "(Landroid/content/Context;J)V"
         );
     }
     if (gRestoreMethod == nullptr) {
         gRestoreMethod = env->GetStaticMethodID(
             gAuthAdapterClass,
             "restoreSession",
-            "(Landroid/content/Context;)V"
+            "(Landroid/content/Context;J)V"
         );
     }
     if (gHasPlayMethod == nullptr) {
@@ -93,6 +182,13 @@ static void ensureAuthAdapterMethods(JNIEnv* env) {
             gAuthAdapterClass,
             "hasPlayServices",
             "(Landroid/content/Context;)Z"
+        );
+    }
+    if (gCancelPendingOperationsMethod == nullptr) {
+        gCancelPendingOperationsMethod = env->GetStaticMethodID(
+            gAuthAdapterClass,
+            "cancelPendingOperations",
+            "()V"
         );
     }
     if (gLogoutMethod == nullptr) {
@@ -106,8 +202,63 @@ static void ensureAuthAdapterMethods(JNIEnv* env) {
         gRevokeAccessMethod = env->GetStaticMethodID(
             gAuthAdapterClass,
             "revokeAccessSync",
-            "(Landroid/content/Context;Ljava/lang/String;)V"
+            "(Landroid/content/Context;Ljava/lang/String;J)V"
         );
+    }
+
+    if (gLoginMethod == nullptr || gRequestScopesMethod == nullptr
+        || gRefreshMethod == nullptr || gRestoreMethod == nullptr
+        || gHasPlayMethod == nullptr || gCancelPendingOperationsMethod == nullptr
+        || gLogoutMethod == nullptr
+        || gRevokeAccessMethod == nullptr) {
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        clearCachedJniRefsLocked(env);
+        throw std::runtime_error("Unable to resolve AuthAdapter methods");
+    }
+}
+
+static AuthAdapterMethods getAuthAdapterMethods(JNIEnv* env) {
+    std::lock_guard<std::mutex> lock(gJniMutex);
+    ensureAuthAdapterMethodsLocked(env);
+    auto localClass = static_cast<jclass>(env->NewLocalRef(gAuthAdapterClass));
+    if (localClass == nullptr) {
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        throw std::runtime_error("Unable to snapshot AuthAdapter class");
+    }
+    return AuthAdapterMethods(
+        env,
+        localClass,
+        gLoginMethod,
+        gRequestScopesMethod,
+        gRefreshMethod,
+        gRestoreMethod,
+        gHasPlayMethod,
+        gCancelPendingOperationsMethod,
+        gLogoutMethod,
+        gRevokeAccessMethod);
+}
+
+static void clearCachedJniRefs(JNIEnv* env) {
+    std::lock_guard<std::mutex> lock(gJniMutex);
+    clearCachedJniRefsLocked(env);
+}
+
+static void invokeCancelPendingOperations(JNIEnv* env) {
+    std::optional<AuthAdapterMethods> methods;
+    try {
+        methods.emplace(getAuthAdapterMethods(env));
+    } catch (...) {
+        return;
+    }
+
+    env->CallStaticVoidMethod(methods->clazz, methods->cancelPendingOperations);
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
     }
 }
 
@@ -115,16 +266,19 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     auto promise = Promise<AuthUser>::create();
     auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
     if (!contextPtr) {
-        promise->reject(std::make_exception_ptr(std::runtime_error("configuration_error")));
+        promise->reject(makeAuthError(AuthErrorCode::CONFIGURATION_ERROR));
         return promise;
     }
 
+    uint64_t generation;
     {
         std::lock_guard<std::mutex> lock(gMutex);
         if (gLoginPromise) {
-            promise->reject(std::make_exception_ptr(std::runtime_error("operation_in_progress")));
+            promise->reject(makeAuthError(AuthErrorCode::OPERATION_IN_PROGRESS));
             return promise;
         }
+        generation = nextGenerationLocked();
+        gLoginGeneration = generation;
         gLoginPromise = promise;
     }
     
@@ -173,12 +327,13 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
     }
 
     JNIEnv* env = Environment::current();
+    std::optional<AuthAdapterMethods> methods;
     try {
-        ensureAuthAdapterMethods(env);
+        methods.emplace(getAuthAdapterMethods(env));
     } catch (...) {
         {
             std::lock_guard<std::mutex> lock(gMutex);
-            gLoginPromise = nullptr;
+            if (gLoginGeneration == generation) gLoginPromise = nullptr;
         }
         promise->reject(std::current_exception());
         return promise;
@@ -217,10 +372,9 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         openIDRealmRef = make_jstring(openIDRealm.value());
     }
 
-    env->CallStaticVoidMethod(gAuthAdapterClass, gLoginMethod,
+    env->CallStaticVoidMethod(methods->clazz, methods->login,
         contextPtr,
         providerRef.get(),
-        nullptr,
         jScopes,
         loginHintRef.get(),
         nonceRef.get(),
@@ -233,7 +387,8 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         tenantRef.get(),
         promptRef.get(),
         hostedDomainRef.get(),
-        openIDRealmRef.get());
+        openIDRealmRef.get(),
+        static_cast<jlong>(generation));
 
     env->DeleteLocalRef(jScopes);
     env->DeleteLocalRef(stringClass);
@@ -243,7 +398,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, co
         env->ExceptionClear();
         {
             std::lock_guard<std::mutex> lock(gMutex);
-            gLoginPromise = nullptr;
+            if (gLoginGeneration == generation) gLoginPromise = nullptr;
         }
         promise->reject(std::make_exception_ptr(std::runtime_error("JNI call failed")));
         return promise;
@@ -256,26 +411,30 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector
     auto promise = Promise<AuthUser>::create();
     auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
     if (!contextPtr) {
-        promise->reject(std::make_exception_ptr(std::runtime_error("configuration_error")));
+        promise->reject(makeAuthError(AuthErrorCode::CONFIGURATION_ERROR));
         return promise;
     }
     
+    uint64_t generation;
     {
         std::lock_guard<std::mutex> lock(gMutex);
         if (gScopesPromise) {
-            promise->reject(std::make_exception_ptr(std::runtime_error("operation_in_progress")));
+            promise->reject(makeAuthError(AuthErrorCode::OPERATION_IN_PROGRESS));
             return promise;
         }
+        generation = nextGenerationLocked();
+        gScopesGeneration = generation;
         gScopesPromise = promise;
     }
     
     JNIEnv* env = Environment::current();
+    std::optional<AuthAdapterMethods> methods;
     try {
-        ensureAuthAdapterMethods(env);
+        methods.emplace(getAuthAdapterMethods(env));
     } catch (...) {
         {
             std::lock_guard<std::mutex> lock(gMutex);
-            gScopesPromise = nullptr;
+            if (gScopesGeneration == generation) gScopesPromise = nullptr;
         }
         promise->reject(std::current_exception());
         return promise;
@@ -287,7 +446,12 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector
         env->SetObjectArrayElement(jScopes, i, jstr.get());
     }
 
-    env->CallStaticVoidMethod(gAuthAdapterClass, gRequestScopesMethod, contextPtr, jScopes);
+    env->CallStaticVoidMethod(
+        methods->clazz,
+        methods->requestScopes,
+        contextPtr,
+        jScopes,
+        static_cast<jlong>(generation));
     env->DeleteLocalRef(jScopes);
     env->DeleteLocalRef(stringClass);
 
@@ -296,7 +460,7 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector
         env->ExceptionClear();
         {
             std::lock_guard<std::mutex> lock(gMutex);
-            gScopesPromise = nullptr;
+            if (gScopesGeneration == generation) gScopesPromise = nullptr;
         }
         promise->reject(std::make_exception_ptr(std::runtime_error("JNI call failed")));
         return promise;
@@ -309,39 +473,47 @@ std::shared_ptr<Promise<AuthTokens>> PlatformAuth::refreshToken() {
     auto promise = Promise<AuthTokens>::create();
     auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
     if (!contextPtr) {
-        promise->reject(std::make_exception_ptr(std::runtime_error("configuration_error")));
+        promise->reject(makeAuthError(AuthErrorCode::CONFIGURATION_ERROR));
         return promise;
     }
     
+    uint64_t generation;
     {
         std::lock_guard<std::mutex> lock(gMutex);
         if (gRefreshPromise) {
-            promise->reject(std::make_exception_ptr(std::runtime_error("operation_in_progress")));
+            promise->reject(makeAuthError(AuthErrorCode::OPERATION_IN_PROGRESS));
             return promise;
         }
+        generation = nextGenerationLocked();
+        gRefreshGeneration = generation;
         gRefreshPromise = promise;
     }
     
     JNIEnv* env = Environment::current();
+    std::optional<AuthAdapterMethods> methods;
     try {
-        ensureAuthAdapterMethods(env);
+        methods.emplace(getAuthAdapterMethods(env));
     } catch (...) {
         {
             std::lock_guard<std::mutex> lock(gMutex);
-            gRefreshPromise = nullptr;
+            if (gRefreshGeneration == generation) gRefreshPromise = nullptr;
         }
         promise->reject(std::current_exception());
         return promise;
     }
 
-    env->CallStaticVoidMethod(gAuthAdapterClass, gRefreshMethod, contextPtr);
+    env->CallStaticVoidMethod(
+        methods->clazz,
+        methods->refresh,
+        contextPtr,
+        static_cast<jlong>(generation));
 
     if (env->ExceptionCheck()) {
         env->ExceptionDescribe();
         env->ExceptionClear();
         {
             std::lock_guard<std::mutex> lock(gMutex);
-            gRefreshPromise = nullptr;
+            if (gRefreshGeneration == generation) gRefreshPromise = nullptr;
         }
         promise->reject(std::make_exception_ptr(std::runtime_error("JNI call failed")));
         return promise;
@@ -354,39 +526,47 @@ std::shared_ptr<Promise<std::optional<AuthUser>>> PlatformAuth::silentRestore() 
     auto promise = Promise<std::optional<AuthUser>>::create();
     auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
     if (!contextPtr) {
-        promise->reject(std::make_exception_ptr(std::runtime_error("configuration_error")));
+        promise->reject(makeAuthError(AuthErrorCode::CONFIGURATION_ERROR));
         return promise;
     }
 
+    uint64_t generation;
     {
         std::lock_guard<std::mutex> lock(gMutex);
         if (gSilentPromise) {
-            promise->reject(std::make_exception_ptr(std::runtime_error("operation_in_progress")));
+            promise->reject(makeAuthError(AuthErrorCode::OPERATION_IN_PROGRESS));
             return promise;
         }
+        generation = nextGenerationLocked();
+        gSilentGeneration = generation;
         gSilentPromise = promise;
     }
 
     JNIEnv* env = Environment::current();
+    std::optional<AuthAdapterMethods> methods;
     try {
-        ensureAuthAdapterMethods(env);
+        methods.emplace(getAuthAdapterMethods(env));
     } catch (...) {
         {
             std::lock_guard<std::mutex> lock(gMutex);
-            gSilentPromise = nullptr;
+            if (gSilentGeneration == generation) gSilentPromise = nullptr;
         }
         promise->reject(std::current_exception());
         return promise;
     }
 
-    env->CallStaticVoidMethod(gAuthAdapterClass, gRestoreMethod, contextPtr);
+    env->CallStaticVoidMethod(
+        methods->clazz,
+        methods->restore,
+        contextPtr,
+        static_cast<jlong>(generation));
 
     if (env->ExceptionCheck()) {
         env->ExceptionDescribe();
         env->ExceptionClear();
         {
             std::lock_guard<std::mutex> lock(gMutex);
-            gSilentPromise = nullptr;
+            if (gSilentGeneration == generation) gSilentPromise = nullptr;
         }
         promise->reject(std::make_exception_ptr(std::runtime_error("JNI call failed")));
         return promise;
@@ -400,13 +580,14 @@ bool PlatformAuth::hasPlayServices() {
     if (!contextPtr) return false;
 
     JNIEnv* env = Environment::current();
+    std::optional<AuthAdapterMethods> methods;
     try {
-        ensureAuthAdapterMethods(env);
+        methods.emplace(getAuthAdapterMethods(env));
     } catch (...) {
         return false;
     }
 
-    jboolean result = env->CallStaticBooleanMethod(gAuthAdapterClass, gHasPlayMethod, contextPtr);
+    jboolean result = env->CallStaticBooleanMethod(methods->clazz, methods->hasPlay, contextPtr);
 
     if (env->ExceptionCheck()) {
         env->ExceptionDescribe();
@@ -417,18 +598,53 @@ bool PlatformAuth::hasPlayServices() {
     return result;
 }
 
+void PlatformAuth::invalidatePendingOperations() {
+    invokeCancelPendingOperations(Environment::current());
+}
+
+void PlatformAuth::cancelPendingOperations(AuthErrorCode reason) {
+    std::shared_ptr<Promise<AuthUser>> loginPromise;
+    std::shared_ptr<Promise<AuthUser>> scopesPromise;
+    std::shared_ptr<Promise<AuthTokens>> refreshPromise;
+    std::shared_ptr<Promise<std::optional<AuthUser>>> silentPromise;
+    std::shared_ptr<Promise<void>> revokeAccessPromise;
+    {
+        std::lock_guard<std::mutex> lock(gMutex);
+        loginPromise = std::move(gLoginPromise);
+        scopesPromise = std::move(gScopesPromise);
+        refreshPromise = std::move(gRefreshPromise);
+        silentPromise = std::move(gSilentPromise);
+        revokeAccessPromise = std::move(gRevokeAccessPromise);
+        gLoginGeneration = nextGenerationLocked();
+        gScopesGeneration = nextGenerationLocked();
+        gRefreshGeneration = nextGenerationLocked();
+        gSilentGeneration = nextGenerationLocked();
+        gRevokeAccessGeneration = nextGenerationLocked();
+    }
+
+    auto cancellation = makeAuthError(reason);
+    if (loginPromise) loginPromise->reject(cancellation);
+    if (scopesPromise) scopesPromise->reject(cancellation);
+    if (refreshPromise) refreshPromise->reject(cancellation);
+    if (silentPromise) silentPromise->reject(cancellation);
+    if (revokeAccessPromise) revokeAccessPromise->reject(cancellation);
+
+    invokeCancelPendingOperations(Environment::current());
+}
+
 void PlatformAuth::logout() {
     auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
     if (!contextPtr) return;
 
     JNIEnv* env = Environment::current();
+    std::optional<AuthAdapterMethods> methods;
     try {
-        ensureAuthAdapterMethods(env);
+        methods.emplace(getAuthAdapterMethods(env));
     } catch (...) {
         return;
     }
 
-    env->CallStaticVoidMethod(gAuthAdapterClass, gLogoutMethod, contextPtr);
+    env->CallStaticVoidMethod(methods->clazz, methods->logout, contextPtr);
 
     if (env->ExceptionCheck()) {
         env->ExceptionDescribe();
@@ -440,26 +656,30 @@ std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess(AuthProvider provider)
     auto promise = Promise<void>::create();
     auto contextPtr = static_cast<jobject>(AuthCache::getAndroidContext());
     if (!contextPtr) {
-        promise->reject(std::make_exception_ptr(std::runtime_error("configuration_error")));
+        promise->reject(makeAuthError(AuthErrorCode::CONFIGURATION_ERROR));
         return promise;
     }
 
+    uint64_t generation;
     {
         std::lock_guard<std::mutex> lock(gMutex);
         if (gRevokeAccessPromise) {
-            promise->reject(std::make_exception_ptr(std::runtime_error("operation_in_progress")));
+            promise->reject(makeAuthError(AuthErrorCode::OPERATION_IN_PROGRESS));
             return promise;
         }
+        generation = nextGenerationLocked();
+        gRevokeAccessGeneration = generation;
         gRevokeAccessPromise = promise;
     }
 
     JNIEnv* env = Environment::current();
+    std::optional<AuthAdapterMethods> methods;
     try {
-        ensureAuthAdapterMethods(env);
+        methods.emplace(getAuthAdapterMethods(env));
     } catch (...) {
         {
             std::lock_guard<std::mutex> lock(gMutex);
-            gRevokeAccessPromise = nullptr;
+            if (gRevokeAccessGeneration == generation) gRevokeAccessPromise = nullptr;
         }
         promise->reject(std::current_exception());
         return promise;
@@ -469,7 +689,12 @@ std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess(AuthProvider provider)
         ? "google"
         : provider == AuthProvider::APPLE ? "apple" : "microsoft";
     jstring providerString = env->NewStringUTF(providerName);
-    env->CallStaticVoidMethod(gAuthAdapterClass, gRevokeAccessMethod, contextPtr, providerString);
+    env->CallStaticVoidMethod(
+        methods->clazz,
+        methods->revokeAccess,
+        contextPtr,
+        providerString,
+        static_cast<jlong>(generation));
     env->DeleteLocalRef(providerString);
 
     if (env->ExceptionCheck()) {
@@ -477,7 +702,7 @@ std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess(AuthProvider provider)
         env->ExceptionClear();
         {
             std::lock_guard<std::mutex> lock(gMutex);
-            gRevokeAccessPromise = nullptr;
+            if (gRevokeAccessGeneration == generation) gRevokeAccessPromise = nullptr;
         }
         promise->reject(std::make_exception_ptr(std::runtime_error("JNI call failed")));
         return promise;
@@ -490,9 +715,9 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeInitialize(JNI
     AuthCache::setAndroidContext(context);
 }
 
-extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess(
+extern "C" JNIEXPORT jboolean JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess(
     JNIEnv* env, jclass,
-    jstring origin, jstring provider, jstring email, jstring name, jstring photo, jstring idToken, jstring accessToken, jstring serverAuthCode, jstring userId, jstring phoneNumber, jstring hostedDomain, jobjectArray scopes, jobject expirationTime) {
+    jstring origin, jstring provider, jstring email, jstring name, jstring photo, jstring idToken, jstring accessToken, jstring serverAuthCode, jstring userId, jstring phoneNumber, jstring hostedDomain, jobjectArray scopes, jobject expirationTime, jlong generation) {
 
     const char* originCStr = env->GetStringUTFChars(origin, nullptr);
     std::string originStr(originCStr);
@@ -504,28 +729,37 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess
     {
         std::lock_guard<std::mutex> lock(gMutex);
         if (originStr == "login") {
-            loginPromise = gLoginPromise;
-            gLoginPromise = nullptr;
+            if (gLoginPromise && generation > 0 && gLoginGeneration == static_cast<uint64_t>(generation)) {
+                loginPromise = std::move(gLoginPromise);
+            }
         } else if (originStr == "scopes") {
-            scopesPromise = gScopesPromise;
-            gScopesPromise = nullptr;
+            if (gScopesPromise && generation > 0 && gScopesGeneration == static_cast<uint64_t>(generation)) {
+                scopesPromise = std::move(gScopesPromise);
+            }
         } else if (originStr == "silent") {
-            silentPromise = gSilentPromise;
-            gSilentPromise = nullptr;
+            if (gSilentPromise && generation > 0 && gSilentGeneration == static_cast<uint64_t>(generation)) {
+                silentPromise = std::move(gSilentPromise);
+            }
         }
     }
+
+    if (!loginPromise && !scopesPromise && !silentPromise) return JNI_FALSE;
 
     AuthUser user;
     const char* providerCStr = env->GetStringUTFChars(provider, nullptr);
     std::string providerStr(providerCStr);
+    env->ReleaseStringUTFChars(provider, providerCStr);
     if (providerStr == "google") {
         user.provider = AuthProvider::GOOGLE;
     } else if (providerStr == "microsoft") {
         user.provider = AuthProvider::MICROSOFT;
     } else {
-        user.provider = AuthProvider::APPLE;
+        auto rejection = makeAuthError(AuthErrorCode::UNSUPPORTED_PROVIDER);
+        if (loginPromise) loginPromise->reject(rejection);
+        if (scopesPromise) scopesPromise->reject(rejection);
+        if (silentPromise) silentPromise->reject(rejection);
+        return JNI_TRUE;
     }
-    env->ReleaseStringUTFChars(provider, providerCStr);
     
     if (email) {
         const char* s = env->GetStringUTFChars(email, nullptr);
@@ -594,10 +828,11 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess
     if (loginPromise) loginPromise->resolve(user);
     if (scopesPromise) scopesPromise->resolve(user);
     if (silentPromise) silentPromise->resolve(user);
+    return JNI_TRUE;
 }
 
-extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginError(
-    JNIEnv* env, jclass, jstring origin, jstring error, jstring underlyingError) {
+extern "C" JNIEXPORT jboolean JNICALL Java_com_auth_AuthAdapter_nativeOnLoginError(
+    JNIEnv* env, jclass, jstring origin, jint code, jstring underlyingError, jlong generation) {
 
     const char* originCStr = env->GetStringUTFChars(origin, nullptr);
     std::string originStr(originCStr);
@@ -609,54 +844,52 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnLoginError(
     {
         std::lock_guard<std::mutex> lock(gMutex);
         if (originStr == "login") {
-            loginPromise = gLoginPromise;
-            gLoginPromise = nullptr;
+            if (gLoginPromise && generation > 0 && gLoginGeneration == static_cast<uint64_t>(generation)) {
+                loginPromise = std::move(gLoginPromise);
+            }
         } else if (originStr == "scopes") {
-            scopesPromise = gScopesPromise;
-            gScopesPromise = nullptr;
+            if (gScopesPromise && generation > 0 && gScopesGeneration == static_cast<uint64_t>(generation)) {
+                scopesPromise = std::move(gScopesPromise);
+            }
         } else if (originStr == "silent") {
-            silentPromise = gSilentPromise;
-            gSilentPromise = nullptr;
+            if (gSilentPromise && generation > 0 && gSilentGeneration == static_cast<uint64_t>(generation)) {
+                silentPromise = std::move(gSilentPromise);
+            }
         }
     }
-    
-    const char* errorCStr = env->GetStringUTFChars(error, nullptr);
-    std::string errorStr(errorCStr);
-    env->ReleaseStringUTFChars(error, errorCStr);
 
-    // errorStr is the structured AuthErrorCode (e.g. "cancelled", "network_error").
-    // The raw platform message is appended after the stable code so JavaScript
-    // receives the typed envelope `code: underlyingMessage`. Message text is
-    // never used as control flow; the code prefix is the contract.
-    std::string envelope = errorStr;
+    if (!loginPromise && !scopesPromise && !silentPromise) return JNI_FALSE;
+
+    const AuthErrorCode errorCode = authErrorCodeFromInt(static_cast<int>(code));
+    std::optional<std::string> underlying;
     if (underlyingError) {
       const char* uCStr = env->GetStringUTFChars(underlyingError, nullptr);
-      std::string underlyingStr(uCStr);
+      underlying = std::string(uCStr);
       env->ReleaseStringUTFChars(underlyingError, uCStr);
-      if (!underlyingStr.empty()) {
-        envelope = errorStr + ": " + underlyingStr;
-      }
     }
 
-    auto rejection = std::make_exception_ptr(std::runtime_error(envelope));
+    auto rejection = makeAuthError(errorCode, underlying);
     if (loginPromise) loginPromise->reject(rejection);
     if (scopesPromise) scopesPromise->reject(rejection);
     if (silentPromise) {
-      if (errorStr == "not_signed_in") silentPromise->resolve(std::nullopt);
+      if (errorCode == AuthErrorCode::NOT_SIGNED_IN) silentPromise->resolve(std::nullopt);
       else silentPromise->reject(rejection);
     }
+    return JNI_TRUE;
   }
 
-extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshSuccess(
-    JNIEnv* env, jclass, jstring idToken, jstring accessToken, jobject expirationTime) {
+extern "C" JNIEXPORT jboolean JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshSuccess(
+    JNIEnv* env, jclass, jstring idToken, jstring accessToken, jobject expirationTime, jlong generation) {
     
     std::shared_ptr<Promise<AuthTokens>> refreshPromise;
     {
         std::lock_guard<std::mutex> lock(gMutex);
-        refreshPromise = gRefreshPromise;
-        gRefreshPromise = nullptr;
+        if (gRefreshPromise && generation > 0 && gRefreshGeneration == static_cast<uint64_t>(generation)) {
+            refreshPromise = std::move(gRefreshPromise);
+        }
     }
     
+    if (!refreshPromise) return JNI_FALSE;
     if (refreshPromise) {
         AuthTokens tokens;
         if (idToken) {
@@ -677,66 +910,82 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshSucce
         }
         refreshPromise->resolve(tokens);
     }
+    return JNI_TRUE;
 }
 
-extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshError(
-    JNIEnv* env, jclass, jstring error, jstring underlyingError) {
-    
+extern "C" JNIEXPORT jboolean JNICALL Java_com_auth_AuthAdapter_nativeOnRefreshError(
+    JNIEnv* env, jclass, jint code, jstring underlyingError, jlong generation) {
+
     std::shared_ptr<Promise<AuthTokens>> refreshPromise;
     {
         std::lock_guard<std::mutex> lock(gMutex);
-        refreshPromise = gRefreshPromise;
-        gRefreshPromise = nullptr;
+        if (gRefreshPromise && generation > 0 && gRefreshGeneration == static_cast<uint64_t>(generation)) {
+            refreshPromise = std::move(gRefreshPromise);
+        }
     }
+    if (!refreshPromise) return JNI_FALSE;
     if (refreshPromise) {
-        const char* errorCStr = env->GetStringUTFChars(error, nullptr);
-        std::string errorStr(errorCStr);
-        env->ReleaseStringUTFChars(error, errorCStr);
-
-        std::string envelope = errorStr;
+        const AuthErrorCode errorCode = authErrorCodeFromInt(static_cast<int>(code));
+        std::optional<std::string> underlying;
         if (underlyingError) {
             const char* uCStr = env->GetStringUTFChars(underlyingError, nullptr);
-            std::string underlyingStr(uCStr);
+            underlying = std::string(uCStr);
             env->ReleaseStringUTFChars(underlyingError, uCStr);
-            if (!underlyingStr.empty()) {
-                envelope = errorStr + ": " + underlyingStr;
-            }
         }
-        refreshPromise->reject(std::make_exception_ptr(std::runtime_error(envelope)));
+        refreshPromise->reject(makeAuthError(errorCode, underlying));
     }
+    return JNI_TRUE;
   }
 
-extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeOnRevokeAccessResult(
-    JNIEnv* env, jclass, jstring error, jstring underlyingError) {
+static std::optional<int> unboxOptionalInteger(JNIEnv* env, jobject value) {
+    if (value == nullptr) {
+        return std::nullopt;
+    }
+    jclass integerClass = env->FindClass("java/lang/Integer");
+    if (integerClass == nullptr) {
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        return std::nullopt;
+    }
+    jmethodID intValueMethod = env->GetMethodID(integerClass, "intValue", "()I");
+    env->DeleteLocalRef(integerClass);
+    if (intValueMethod == nullptr) {
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        return std::nullopt;
+    }
+    return static_cast<int>(env->CallIntMethod(value, intValueMethod));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_com_auth_AuthAdapter_nativeOnRevokeAccessResult(
+    JNIEnv* env, jclass, jobject code, jstring underlyingError, jlong generation) {
     std::shared_ptr<Promise<void>> revokeAccessPromise;
     {
         std::lock_guard<std::mutex> lock(gMutex);
-        revokeAccessPromise = std::move(gRevokeAccessPromise);
-        gRevokeAccessPromise = nullptr;
-    }
-    if (!revokeAccessPromise) {
-        return;
-    }
-    if (!error) {
-        revokeAccessPromise->resolve();
-        return;
-    }
-
-    const char* errorChars = env->GetStringUTFChars(error, nullptr);
-    std::string errorString(errorChars);
-    env->ReleaseStringUTFChars(error, errorChars);
-    std::string envelope = errorString;
-    if (underlyingError) {
-        const char* underlyingChars = env->GetStringUTFChars(underlyingError, nullptr);
-        std::string underlyingString(underlyingChars);
-        env->ReleaseStringUTFChars(underlyingError, underlyingChars);
-        if (!underlyingString.empty()) {
-            envelope = errorString + ": " + underlyingString;
+        if (gRevokeAccessPromise && generation > 0 && gRevokeAccessGeneration == static_cast<uint64_t>(generation)) {
+            revokeAccessPromise = std::move(gRevokeAccessPromise);
         }
     }
-    revokeAccessPromise->reject(
-        std::make_exception_ptr(std::runtime_error(envelope))
-    );
+    if (!revokeAccessPromise) {
+        return JNI_FALSE;
+    }
+    std::optional<int> errorCodeValue = unboxOptionalInteger(env, code);
+    if (!errorCodeValue.has_value()) {
+        revokeAccessPromise->resolve();
+        return JNI_TRUE;
+    }
+
+    const AuthErrorCode errorCode = authErrorCodeFromInt(*errorCodeValue);
+    std::optional<std::string> underlying;
+    if (underlyingError) {
+        const char* underlyingChars = env->GetStringUTFChars(underlyingError, nullptr);
+        underlying = std::string(underlyingChars);
+        env->ReleaseStringUTFChars(underlyingError, underlyingChars);
+    }
+    revokeAccessPromise->reject(makeAuthError(errorCode, underlying));
+    return JNI_TRUE;
   }
 
 extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeDispose(JNIEnv* env, jclass) {
@@ -752,14 +1001,14 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeDispose(JNIEnv
         refreshPromise = std::move(gRefreshPromise);
         silentPromise = std::move(gSilentPromise);
         revokeAccessPromise = std::move(gRevokeAccessPromise);
-        gLoginPromise = nullptr;
-        gScopesPromise = nullptr;
-        gRefreshPromise = nullptr;
-        gSilentPromise = nullptr;
-        gRevokeAccessPromise = nullptr;
+        gLoginGeneration = nextGenerationLocked();
+        gScopesGeneration = nextGenerationLocked();
+        gRefreshGeneration = nextGenerationLocked();
+        gSilentGeneration = nextGenerationLocked();
+        gRevokeAccessGeneration = nextGenerationLocked();
     }
 
-    auto disposed = std::make_exception_ptr(std::runtime_error("cancelled"));
+    auto disposed = makeAuthError(AuthErrorCode::CANCELLED);
     if (loginPromise) loginPromise->reject(disposed);
     if (scopesPromise) scopesPromise->reject(disposed);
     if (refreshPromise) refreshPromise->reject(disposed);

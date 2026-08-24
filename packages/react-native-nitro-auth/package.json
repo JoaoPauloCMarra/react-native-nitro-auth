@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-auth",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "High-performance authentication library for React Native with Google Sign-In, Apple Sign-In, and Microsoft Sign-In support, powered by Nitro Modules (JSI)",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -17,6 +17,7 @@
     "ios",
     "nitrogen",
     "nitro.json",
+    "docs/error-contract.md",
     "CHANGELOG.md",
     "SECURITY.md",
     "*.podspec",
@@ -35,8 +36,8 @@
     "prebuild": "bun run codegen",
     "build": "bob build",
     "clean": "rimraf lib nitrogen/generated",
-    "codegen": "nitrogen --logLevel=\"debug\"",
-    "format:check": "eslint .",
+    "codegen": "nitrogen --logLevel=\"debug\" && bun scripts/generate-oauth-errors.js",
+    "format:check": "bunx --no-install prettier --check \"../../README.md\" \"../../CHANGELOG.md\" \"../../SECURITY.md\" \"../../docs/**/*.md\"",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "jest",
@@ -44,9 +45,10 @@
     "test:cpp": "node scripts/test-cpp.js",
     "test:cpp:coverage": "node scripts/test-cpp.js --coverage",
     "prepublishOnly": "bun run clean && bun run codegen && bun run build && bun run typecheck && bun run lint && bun run test && bun run test:cpp",
-    "prepack": "bun ../../scripts/sync-package-docs.ts",
-    "pack:dry-run": "bun pm pack --dry-run --ignore-scripts",
-    "publish:dry-run": "bun publish --dry-run --access public --ignore-scripts"
+    "prepack": "bun ../../scripts/sync-package-docs.ts prepare",
+    "postpack": "bun ../../scripts/sync-package-docs.ts cleanup",
+    "pack:dry-run": "node scripts/package-dry-run.js pack",
+    "publish:dry-run": "node scripts/package-dry-run.js publish"
   },
   "keywords": [
     "react-native",
@@ -75,7 +77,7 @@
   "homepage": "https://github.com/JoaoPauloCMarra/react-native-nitro-auth#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/JoaoPauloCMarra/react-native-nitro-auth.git"
+    "url": "git+https://github.com/JoaoPauloCMarra/react-native-nitro-auth.git"
   },
   "bugs": {
     "url": "https://github.com/JoaoPauloCMarra/react-native-nitro-auth/issues"
@@ -85,7 +87,7 @@
     "access": "public"
   },
   "dependencies": {
-    "expo-build-properties": "~57.0.13"
+    "expo-build-properties": "~57.0.14"
   },
   "devDependencies": {
     "@expo/config-plugins": "^57.0.6",

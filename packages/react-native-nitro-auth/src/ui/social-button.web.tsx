@@ -22,7 +22,12 @@ export type SocialButtonProps = {
   textStyle?: TextStyle;
   disabled?: boolean;
   onSuccess?: (user: AuthUser) => void;
-  onError?: (error: AuthError) => void;
+  /**
+   * Receives the normalized runtime error. Keep the parameter broad for
+   * source compatibility with earlier releases; narrow with AuthError when
+   * the callback needs provider-specific fields.
+   */
+  onError?: (error: unknown) => void;
   onPress?: () => void;
 };
 

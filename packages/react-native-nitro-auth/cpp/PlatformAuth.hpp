@@ -3,6 +3,7 @@
 #include "AuthProvider.hpp"
 #include "AuthUser.hpp"
 #include "AuthTokens.hpp"
+#include "AuthErrorCode.hpp"
 #include "LoginOptions.hpp"
 #include <NitroModules/Promise.hpp>
 #include <memory>
@@ -20,6 +21,8 @@ public:
   static std::shared_ptr<Promise<AuthTokens>> refreshToken();
   static std::shared_ptr<Promise<std::optional<AuthUser>>> silentRestore();
   static bool hasPlayServices();
+  static void invalidatePendingOperations();
+  static void cancelPendingOperations(AuthErrorCode reason);
   static void logout();
   static std::shared_ptr<Promise<void>> revokeAccess(AuthProvider provider);
 };
