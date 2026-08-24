@@ -72,7 +72,8 @@
     "example:install-check": "bun run --cwd apps/example install-check",
     "example:doctor": "bun run --cwd apps/example doctor",
     "example:config": "bun run --cwd apps/example config:introspect",
-    "release:preflight": "bun run check:ci && bun run format:check && bun run example:check && bun run audit:package && bun run publish-package:dry-run"
+    "release:preflight": "bun run check:ci && bun run format:check && bun run example:check && bun run audit:package && bun run publish-package:dry-run",
+    "example:smoke:ci": "node scripts/assert-example-smoke.js"
   },
   "workspaces": [
     "apps/*",

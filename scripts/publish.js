@@ -253,7 +253,7 @@ function assertReleaseTag(version) {
 function assertChangelogCovers(version) {
   const changelogPath = path.join(packageDir, "CHANGELOG.md");
   const changelog = fs.readFileSync(changelogPath, "utf8");
-  const topEntry = changelog.match(/^##\s+([^\s]+)/m)?.[1];
+  const topEntry = changelog.match(/^##\s+([^\s]+)/m)?.[1]?.replace(/^[[]|]$/g, "");
 
   if (topEntry === version) {
     console.log(`  ✓ CHANGELOG.md top entry covers ${version}`);
