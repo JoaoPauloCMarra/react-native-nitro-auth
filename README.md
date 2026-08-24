@@ -305,9 +305,10 @@ Supported login options:
   `unsupported_provider`; local session state is unchanged.
 
 `SocialButton` normalizes runtime failures to `AuthError` instances. Its
-`onError` parameter remains typed as `unknown` for compatibility with earlier
-versions; use `error instanceof AuthError` before reading `code` or
-`underlyingMessage`.
+`onError` callback receives an `AuthError`, so TypeScript exposes `code`,
+`operation`, and `underlyingMessage` without a cast. Use
+`error instanceof AuthError` when handling an error value that came from
+outside the package.
 
 ### Token semantics and capabilities
 

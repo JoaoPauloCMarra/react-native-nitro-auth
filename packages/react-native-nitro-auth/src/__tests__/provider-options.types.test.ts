@@ -1,6 +1,7 @@
 import type {
   AuthLogin,
   AuthLoginAndGetUser,
+  AuthError,
   AppleIOSLoginOptions,
   AppleLoginOptions,
   AppleWebLoginOptions,
@@ -79,16 +80,42 @@ type WebProviderOptionsMatchNative = AssertTrue<
 type WebHookUsesProviderLogin = AssertTrue<
   IsAssignable<WebUseAuthReturn["login"], AuthLogin>
 >;
+type SocialButtonErrorCallback = (error: AuthError) => void;
+type BroadSocialButtonErrorCallback = (error: unknown) => void;
 type NativeSocialButtonError = AssertTrue<
   IsAssignable<
     NonNullable<import("../index").SocialButtonProps["onError"]>,
-    (error: unknown) => void
+    SocialButtonErrorCallback
+  >
+>;
+type NativeSocialButtonAcceptsAuthError = AssertTrue<
+  IsAssignable<
+    SocialButtonErrorCallback,
+    NonNullable<import("../index").SocialButtonProps["onError"]>
+  >
+>;
+type NativeSocialButtonAcceptsBroadError = AssertTrue<
+  IsAssignable<
+    BroadSocialButtonErrorCallback,
+    NonNullable<import("../index").SocialButtonProps["onError"]>
   >
 >;
 type WebSocialButtonError = AssertTrue<
   IsAssignable<
     NonNullable<import("../index.web").SocialButtonProps["onError"]>,
-    (error: unknown) => void
+    SocialButtonErrorCallback
+  >
+>;
+type WebSocialButtonAcceptsAuthError = AssertTrue<
+  IsAssignable<
+    SocialButtonErrorCallback,
+    NonNullable<import("../index.web").SocialButtonProps["onError"]>
+  >
+>;
+type WebSocialButtonAcceptsBroadError = AssertTrue<
+  IsAssignable<
+    BroadSocialButtonErrorCallback,
+    NonNullable<import("../index.web").SocialButtonProps["onError"]>
   >
 >;
 
@@ -141,4 +168,8 @@ void (0 as unknown as HookUsesProviderLogin);
 void (0 as unknown as WebProviderOptionsMatchNative);
 void (0 as unknown as WebHookUsesProviderLogin);
 void (0 as unknown as NativeSocialButtonError);
+void (0 as unknown as NativeSocialButtonAcceptsAuthError);
+void (0 as unknown as NativeSocialButtonAcceptsBroadError);
 void (0 as unknown as WebSocialButtonError);
+void (0 as unknown as WebSocialButtonAcceptsAuthError);
+void (0 as unknown as WebSocialButtonAcceptsBroadError);
