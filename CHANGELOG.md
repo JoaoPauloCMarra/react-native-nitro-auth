@@ -42,6 +42,9 @@ Breaking changes are always listed first in each release section.
 - Unknown provider strings from platform callbacks now reject with
   `unsupported_provider` instead of defaulting to Apple (iOS silent restore,
   Android login callbacks).
+- `SocialButton.onError` preserves the 0.9.x `(error: AuthError) => void`
+  callback type; runtime failures are normalized to `AuthError` before the
+  callback.
 
 ## [0.9.0] - 2026-08-20
 
@@ -55,9 +58,7 @@ Breaking changes are always listed first in each release section.
 
 - Added a React Native 0.87.0 Strict TypeScript compatibility check while
   retaining React Native 0.86.2 for the package gate and Expo SDK 57 example.
-- `SocialButton` still delivers normalized `AuthError` instances at runtime;
-  the callback parameter remains `unknown` so existing callback annotations
-  stay source-compatible.
+- `SocialButtonProps.onError` now exposes the normalized `AuthError` contract.
 
 ## [0.8.0] - 2026-08-13
 
