@@ -25,7 +25,7 @@ const packageRoot = join(import.meta.dir, "..");
 const sourcePath = join(packageRoot, "scripts", "oauth-errors.json");
 
 function fail(message) {
-  console.error(`generate-oauth-errors: ${message}`);
+  process.stderr.write(`generate-oauth-errors: ${message}\n`);
   process.exit(1);
 }
 
@@ -118,6 +118,6 @@ writeGenerated(
 );
 writeGenerated("ios/GeneratedOAuthErrorCodes.swift", emitSwift());
 
-console.log(
-  `generate-oauth-errors: wrote ${entries.length} mappings to src/generated/oauth-error-codes.ts, android/src/main/java/com/auth/OAuthErrorCodes.kt, ios/GeneratedOAuthErrorCodes.swift`,
+process.stdout.write(
+  `generate-oauth-errors: wrote ${entries.length} mappings to src/generated/oauth-error-codes.ts, android/src/main/java/com/auth/OAuthErrorCodes.kt, ios/GeneratedOAuthErrorCodes.swift\n`,
 );

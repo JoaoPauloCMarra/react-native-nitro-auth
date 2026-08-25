@@ -79,7 +79,9 @@ function checkPackedFiles(output) {
 
 const mode = process.argv[2] || "pack";
 if (mode !== "pack" && mode !== "publish") {
-  console.error("Usage: node scripts/package-dry-run.js <pack|publish>");
+  process.stderr.write(
+    "Usage: node scripts/package-dry-run.js <pack|publish>\n",
+  );
   process.exitCode = 1;
 } else {
   let prepared = false;
@@ -102,15 +104,17 @@ if (mode !== "pack" && mode !== "publish") {
       `Package artifact dry-run passed (${packedCount} files).\n`,
     );
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    process.stderr.write(
+      `${error instanceof Error ? error.message : String(error)}\n`,
+    );
     process.exitCode = 1;
   } finally {
     if (prepared) {
       try {
         lifecycle.cleanup();
       } catch (error) {
-        console.error(
-          `Lifecycle cleanup failed; preserve ${lifecycle.stateRoot}: ${error instanceof Error ? error.message : String(error)}`,
+        process.stderr.write(
+          `Lifecycle cleanup failed; preserve ${lifecycle.stateRoot}: ${error instanceof Error ? error.message : String(error)}\n`,
         );
         process.exitCode = 1;
       }
