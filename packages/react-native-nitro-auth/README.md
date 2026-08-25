@@ -464,8 +464,9 @@ bun run example:android
 bun run example:ios
 ```
 
-Run native example builds before release when changing plugin, native, Nitro, or
-packaging files.
+Run native example builds locally before release when changing plugin, native,
+Nitro, or packaging files. GitHub CI does not build the Android or iOS example;
+use the commands above for local validation.
 
 ## Links
 
