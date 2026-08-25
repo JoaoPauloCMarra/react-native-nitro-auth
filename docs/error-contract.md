@@ -127,13 +127,15 @@ parse identical responses; the fixture corpus in
 
 ## 6. Persistence and PII (U4 item 12, U6 item 23)
 
-- Web tokens are memory-only unless `nitroAuthPersistTokensOnWeb` is
-  explicitly enabled. A custom storage adapter changes WHERE values are
-  stored, never WHETHER tokens may be persisted. Persisted tokens widen the
-  XSS exposure.
+- With the default browser storage, web tokens are memory-only unless
+  `nitroAuthPersistTokensOnWeb` is explicitly enabled. A custom storage
+  adapter keeps the pre-0.7 token-persistence behavior when the option is
+  omitted; set the option explicitly in new integrations. Persisted tokens
+  widen the XSS exposure.
 - Profile metadata (email, name, photo) is persisted by default; set
   `nitroAuthPersistProfileOnWeb: false` to keep it memory-only. Token fields
-  and the Microsoft refresh token are never persisted without opt-in.
+  and the Microsoft refresh token remain memory-only with the default browser
+  storage unless token persistence is enabled.
 - Native token fields are process-memory only.
 
 ## 7. Observability (U6, item 20)
@@ -145,7 +147,9 @@ parse identical responses; the fixture corpus in
 
 ## 8. Revocation (U6, item 22)
 
-- `revokeScopes` is local-only on every platform and returns
+- `revokeScopes` is local-only on every platform and retains its
+  `Promise<void>` return for compatibility. `revokeScopesWithResult` is the
+  additive method that returns
   `ScopeRevocationResult { revokedAtProvider: false, revokedScopes }`.
 - `revokeAccess()` performs provider revocation where supported (Google web/iOS,
   Android legacy Google) and only clears local state after provider
@@ -154,7 +158,7 @@ parse identical responses; the fixture corpus in
   reject with `unsupported_provider`.
 - Modern Android Google sessions created through Credential Manager/One-Tap are
   not eligible for client-side provider revocation and reject with
-  `not_signed_in`.
+  `unsupported_provider`.
 - Web Google revocation can also reject with `token_error` when the current
   Google session has no access token; this is a web-provider contract, not a
   claim that every platform exposes the same token.

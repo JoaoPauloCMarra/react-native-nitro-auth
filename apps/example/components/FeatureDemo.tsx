@@ -140,7 +140,7 @@ function maskSecret(value: string | undefined): string {
   }
 
   if (value.length <= 18) {
-    return value;
+    return "••••••";
   }
 
   return `${value.slice(0, 10)}...${value.slice(-6)}`;
@@ -569,7 +569,10 @@ export function FeatureDemo() {
     await runAuthAction("Opening account picker", async () => {
       await auth.login("google", {
         forceAccountPicker: true,
-        scopes: auth.scopes.length > 0 ? auth.scopes : undefined,
+        scopes:
+          auth.user?.provider === "google" && auth.scopes.length > 0
+            ? auth.scopes
+            : undefined,
         useLegacyGoogleSignIn:
           Platform.OS === "android" ? useLegacyGoogleSignIn : undefined,
       });
@@ -589,6 +592,7 @@ export function FeatureDemo() {
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
+        keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
           <Text style={styles.eyebrow}>react-native-nitro-auth</Text>
@@ -607,7 +611,10 @@ export function FeatureDemo() {
           <MetricTile value="3" label="Providers" />
           <MetricTile value={displayScopes.length.toString()} label="Scopes" />
           <MetricTile
-            value={auth.hasPlayServices ? "Yes" : "No"}
+            value={Platform.select({
+              android: auth.hasPlayServices ? "Yes" : "No",
+              default: "N/A",
+            })}
             label="Play Services"
           />
         </View>
@@ -1006,6 +1013,7 @@ const ToggleRow = memo(function ToggleRow({
     <View style={styles.toggleRow}>
       <Text style={styles.toggleLabel}>{label}</Text>
       <Switch
+        accessibilityLabel={label}
         value={value}
         onValueChange={onChange}
         trackColor={switchTrackColors}
@@ -1032,6 +1040,7 @@ const TextInputRow = memo(function TextInputRow({
     <View style={styles.inputRow}>
       <Text style={styles.inputLabel}>{label}</Text>
       <TextInput
+        accessibilityLabel={label}
         style={styles.input}
         value={value}
         placeholder={placeholder}

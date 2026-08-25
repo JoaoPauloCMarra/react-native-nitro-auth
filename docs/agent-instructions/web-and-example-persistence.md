@@ -7,8 +7,9 @@
   consumers (`nitroAuthPersistTokensOnWeb`).
 - Profile metadata (email, name, photo) is persisted by default; disable with
   `nitroAuthPersistProfileOnWeb: false`.
-- A custom storage adapter changes WHERE values are stored, never WHETHER
-  tokens may be persisted.
+- A custom storage adapter retains legacy token persistence when
+  `nitroAuthPersistTokensOnWeb` is omitted. New integrations must set the
+  option explicitly.
 - `expo-constants` is an optional peer dependency used for web provider
   config; without it web falls back to defaults.
 
@@ -20,9 +21,11 @@
 
 ## Example App Persistence Rules
 
-- Use `react-native-nitro-storage` Disk in `apps/example` (`localStorage`
-  fallback on web).
-- Keep Disk snapshot across refresh/restart.
-- Clear snapshot only on explicit logout.
-- Merge token refresh events into the snapshot so `accessToken` and
-  `expirationTime` survive reloads.
+- The example's optional "Keep session snapshot in memory" setting stores a
+  display-only snapshot in React state; it does not persist across refresh or
+  restart and does not replace `AuthService` session state.
+- Clear the in-memory snapshot on explicit logout.
+- Merge token refresh events into the in-memory snapshot for display only; this
+  does not change package token storage.
+- Durable consumer persistence belongs in app-level storage, not package
+  internals.

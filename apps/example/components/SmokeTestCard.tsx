@@ -84,6 +84,18 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
   const tests: TestCase[] = [
     test("AuthService is available", () => {
       assert(AuthService != null, "AuthService is null");
+      assert(
+        typeof AuthService.loginAndGetUser === "function",
+        "loginAndGetUser is not a function",
+      );
+      assert(
+        typeof AuthService.revokeScopesWithResult === "function",
+        "revokeScopesWithResult is not a function",
+      );
+      assert(
+        typeof AuthService.revokeAccess === "function",
+        "revokeAccess is not a function",
+      );
     }),
     test("useAuth exposes the public API", () => {
       assert(typeof hookReturn.login === "function", "login is not a function");
@@ -98,6 +110,10 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
       assert(
         typeof hookReturn.revokeScopes === "function",
         "revokeScopes is not a function",
+      );
+      assert(
+        typeof hookReturn.revokeScopesWithResult === "function",
+        "revokeScopesWithResult is not a function",
       );
       assert(
         typeof hookReturn.getAccessToken === "function",
@@ -141,8 +157,14 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
         typeof unsubscribeTokens === "function",
         "token unsubscribe invalid",
       );
+      const unsubscribeEvents = AuthService.onAuthEvent(() => {});
+      assert(
+        typeof unsubscribeEvents === "function",
+        "event unsubscribe invalid",
+      );
       unsubscribeAuth();
       unsubscribeTokens();
+      unsubscribeEvents();
     }),
     test("setLoggingEnabled toggles without throwing", () => {
       AuthService.setLoggingEnabled(true);
