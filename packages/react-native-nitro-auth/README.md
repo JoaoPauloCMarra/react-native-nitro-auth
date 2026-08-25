@@ -472,6 +472,7 @@ packaging files.
 - [npm package](https://www.npmjs.com/package/react-native-nitro-auth)
 - [GitHub repository](https://github.com/JoaoPauloCMarra/react-native-nitro-auth)
 - [Issue tracker](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/issues)
+- [Benchmark policy](docs/benchmarks.md)
 - [Changelog](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/CHANGELOG.md)
 
 ## License

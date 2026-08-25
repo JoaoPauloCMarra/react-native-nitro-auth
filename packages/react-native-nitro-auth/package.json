@@ -40,7 +40,7 @@
     "format:check": "bunx --no-install prettier --check \"../../README.md\" \"../../CHANGELOG.md\" \"../../SECURITY.md\" \"../../docs/**/*.md\"",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "jest",
+    "test": "jest --runInBand",
     "test:coverage": "jest --coverage",
     "test:cpp": "node scripts/test-cpp.js",
     "test:cpp:coverage": "node scripts/test-cpp.js --coverage",

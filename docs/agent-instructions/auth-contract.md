@@ -5,8 +5,11 @@ summarizes the invariants agents must preserve.
 
 ## Native Stateless Rule
 
-- No internal persistence in iOS/Android for user, session, or token data.
-- `silentRestore()` must rely on provider SDK session restore only.
+- Native token fields remain in process memory. Android may persist only
+  non-secret Google session metadata (session kind, account identity, and the
+  requested hosted-domain configuration) to correlate restored provider state.
+- `silentRestore()` must rely on provider SDK session restore, not package token
+  persistence.
 - Never dereference `std::optional<AuthUser>` without checking.
 
 ## Login and Token Semantics
@@ -63,6 +66,7 @@ summarizes the invariants agents must preserve.
 - Public API must not reintroduce storage-adapter exports/functions.
 - `AuthUser.underlyingError` is deprecated; structured details live on
   `AuthError`.
-- Web token persistence requires explicit `nitroAuthPersistTokensOnWeb`
-  opt-in; profile PII persistence is controlled by
+- Default browser storage requires explicit `nitroAuthPersistTokensOnWeb`
+  opt-in; custom storage adapters retain legacy token persistence when the
+  option is omitted. Profile PII persistence is controlled by
   `nitroAuthPersistProfileOnWeb`.

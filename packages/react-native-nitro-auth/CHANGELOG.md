@@ -28,6 +28,8 @@ Breaking changes are always listed first in each release section.
 
 ### Changed
 
+- Web popup completion polling now runs every 500 ms, reducing background
+  main-thread wakeups while preserving redirect and cancellation behavior.
 - `requestScopes` now succeeds for one-tap-only Google sessions on Android and
   resolves with the session user plus the merged scope list, matching iOS.
   Previously it rejected with `not_signed_in`.
