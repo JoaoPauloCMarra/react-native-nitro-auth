@@ -19,7 +19,9 @@ def isNewArchitectureEnabled() {
 }
 
 apply plugin: "com.android.library"
-apply plugin: "org.jetbrains.kotlin.android"
+if (project.extensions.findByName("kotlin") == null) {
+  apply plugin: "org.jetbrains.kotlin.android"
+}
 
 apply from: "../nitrogen/generated/android/NitroAuth+autolinking.gradle"
 

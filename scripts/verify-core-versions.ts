@@ -1,18 +1,18 @@
 const projectRoot = import.meta.dir + "/..";
 
 const expectedVersions = {
-  expo: "~57.0.16",
-  "expo-asset": "~57.0.14",
-  "expo-build-properties": "~57.0.14",
-  "expo-constants": "~57.0.14",
-  "expo-linking": "~57.0.7",
-  "expo-router": "~57.0.16",
-  nitrogen: "0.37.0",
+  expo: "~57.0.21",
+  "expo-asset": "~57.0.16",
+  "expo-build-properties": "~57.0.17",
+  "expo-constants": "~57.0.17",
+  "expo-linking": "~57.0.9",
+  "expo-router": "~57.0.20",
+  nitrogen: "0.37.1",
   react: "19.2.3",
   "react-dom": "19.2.3",
-  "react-native": "0.86.2",
-  "react-native-example": "0.86.2",
-  "react-native-nitro-modules": "0.37.0",
+  "react-native": "0.86.3",
+  "react-native-example": "0.86.3",
+  "react-native-nitro-modules": "0.37.1",
 } as const;
 const expectedNitroPeerRange = ">=0.37.0 <0.38.0";
 

@@ -1,0 +1,5 @@
+open "com.auth.example" "auth://e2e" --relaunch
+wait "stable"
+wait id="e2e-screen"
+wait text "e2e-ready"
+close

@@ -22,6 +22,7 @@ import {
   type ProviderLoginOptions,
 } from "react-native-nitro-auth";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { E2eGate } from "./e2e-gate";
 import { SmokeTestCard } from "./SmokeTestCard";
 import { version as packageVersion } from "../../../packages/react-native-nitro-auth/package.json";
 
@@ -605,6 +606,7 @@ export function FeatureDemo() {
             <Text style={styles.headerMeta}>v{packageVersion}</Text>
             <Text style={styles.headerMeta}>{Platform.OS}</Text>
           </View>
+          <E2eGate />
         </View>
 
         <View style={styles.metricsGrid}>
@@ -775,11 +777,13 @@ export function FeatureDemo() {
           </Text>
           <View style={styles.actionGrid}>
             <ActionButton
+              testID="silent-restore"
               label="Silent restore"
               disabled={auth.loading}
               onPress={silentRestore}
             />
             <ActionButton
+              testID="get-token"
               label="Get token"
               disabled={auth.loading}
               onPress={getAccessToken}
@@ -1060,12 +1064,14 @@ const ActionButton = memo(function ActionButton({
   tone = "primary",
   disabled = false,
   disabledReason,
+  testID,
 }: {
   label: string;
   onPress: () => void;
   tone?: "primary" | "danger";
   disabled?: boolean;
   disabledReason?: string;
+  testID?: string;
 }) {
   const buttonStyle = tone === "danger" ? styles.actionButtonDanger : null;
   const textStyle = [
@@ -1075,6 +1081,7 @@ const ActionButton = memo(function ActionButton({
 
   return (
     <Pressable
+      testID={testID}
       accessibilityLabel={
         disabled && disabledReason ? `${label}. ${disabledReason}` : label
       }

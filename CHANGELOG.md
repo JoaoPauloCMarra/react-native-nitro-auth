@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [0.10.1] - 2026-09-09
+
+### Breaking changes
+
+- None.
+
+### Fixed
+
+- Apply the Kotlin Android plugin only when the Gradle Kotlin extension is
+  absent, so AGP 9 consumers that already ship built-in Kotlin can configure
+  the library.
+
 ## [0.10.0] - 2026-08-25
 
 ### Breaking changes
