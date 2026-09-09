@@ -321,22 +321,25 @@ export const SmokeTestCard = memo(function SmokeTestCard() {
       ),
     [results],
   );
+  const completionLabel =
+    counts.fail === 0 ? "Complete: PASS" : "Complete: FAIL";
 
   return (
     <View style={styles.card}>
       <View style={styles.header}>
         <View style={styles.headerCopy}>
           <Text style={styles.title}>Smoke Tests</Text>
-          <Text style={styles.summary}>
+          <Text testID="smoke-summary" style={styles.summary}>
             {results.length === 0
               ? "Run lightweight runtime checks"
-              : `${counts.pass}/${results.length} passed, ${counts.skip} skipped`}
+              : `${running ? "Running" : completionLabel}: ${counts.pass}/${results.length} passed, ${counts.fail} failed, ${counts.skip} skipped`}
           </Text>
           {counts.fail > 0 ? (
             <Text style={styles.failSummary}>{counts.fail} failed</Text>
           ) : null}
         </View>
         <Pressable
+          testID="smoke-run-all"
           accessibilityLabel={
             results.length > 0 ? "Run smoke tests again" : "Run smoke tests"
           }
