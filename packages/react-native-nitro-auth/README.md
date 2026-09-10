@@ -51,6 +51,10 @@ bare app.
 | Expo                       | SDK `57.0.21` development builds; RN `0.86.3`                                      |
 | iOS                        | `16.4` or later                                                                    |
 
+iOS static frameworks are supported with source-built React Native. After
+upgrading, regenerate the Expo native project or run `pod install`, then rebuild
+the app so CocoaPods applies the updated header paths.
+
 ## Expo Config
 
 Add the plugin to `app.json` or `app.config.js` before prebuild:
