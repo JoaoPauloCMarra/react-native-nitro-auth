@@ -425,6 +425,13 @@ visual content; it receives `SocialButtonContentProps` and cannot replace the
 outer press or accessibility behavior. Custom visual overrides and style
 changes are the app's responsibility to keep within provider requirements.
 
+Custom content can use the exported `SocialProviderIcon` for Google or Apple
+artwork without copying assets or loading a font. Set `loadingIndicator={null}`
+when that content renders its own loading state; this removes the default
+indicator and its reserved bottom gap while preserving the outer button's
+busy state and duplicate-press protection. A React element passed as
+`loadingIndicator` replaces the default indicator below the button.
+
 ```tsx
 <SocialButton provider="google" appearance="light" shape="pill" />
 <SocialButton provider="apple" renderMode="svg" iconOnly />
@@ -441,7 +448,10 @@ existing `react-native-nitro-auth` plugin options only when using custom Google
 text:
 
 ```js
-["react-native-nitro-auth", { googleButtonFont: true /* keep other options */ }]
+[
+  "react-native-nitro-auth",
+  { googleButtonFont: true /* keep other options */ },
+];
 ```
 
 Image and SVG modes, custom icon-only buttons, and the Apple custom button do
