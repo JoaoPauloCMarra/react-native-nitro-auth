@@ -15,6 +15,8 @@
 
 // Forward declaration of `AuthUser` to properly resolve imports.
 namespace margelo::nitro::NitroAuth { struct AuthUser; }
+// Forward declaration of `AuthNonce` to properly resolve imports.
+namespace margelo::nitro::NitroAuth { struct AuthNonce; }
 // Forward declaration of `AuthProvider` to properly resolve imports.
 namespace margelo::nitro::NitroAuth { enum class AuthProvider; }
 // Forward declaration of `LoginOptions` to properly resolve imports.
@@ -28,6 +30,7 @@ namespace margelo::nitro::NitroAuth { struct AuthEvent; }
 #include <optional>
 #include <string>
 #include <vector>
+#include "AuthNonce.hpp"
 #include <NitroModules/Promise.hpp>
 #include "AuthProvider.hpp"
 #include "LoginOptions.hpp"
@@ -68,6 +71,7 @@ namespace margelo::nitro::NitroAuth {
 
     public:
       // Methods
+      virtual std::shared_ptr<Promise<AuthNonce>> createNonce() = 0;
       virtual std::shared_ptr<Promise<void>> login(AuthProvider provider, const std::optional<LoginOptions>& options) = 0;
       virtual std::shared_ptr<Promise<void>> requestScopes(const std::vector<std::string>& scopes) = 0;
       virtual std::shared_ptr<Promise<void>> revokeScopes(const std::vector<std::string>& scopes) = 0;

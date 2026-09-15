@@ -225,6 +225,37 @@ async function signInWithMicrosoft() {
 returns that user or rejects with `not_signed_in`. `logout()` is synchronous and
 returns `void`.
 
+Use `getCredential()` when the app sends an identity-provider token to its own
+backend and does not need a local package session:
+
+```ts
+const credential = await AuthService.getCredential("google", {
+  forceAccountPicker: true,
+});
+
+await fetch(yourAuthEndpoint, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    provider: credential.provider,
+    idToken: credential.idToken,
+    nonce: credential.nonce,
+  }),
+});
+
+console.log(credential.user.firstName, credential.user.lastName);
+```
+
+`getCredential()` supports Google and Apple. It creates a random nonce, sends
+its SHA-256 hex value to the provider, returns the raw nonce for backend
+verification, and clears the temporary package session before resolving.
+Google defaults to `openid`, `email`, and `profile`; Apple defaults to `email`
+and `fullName` (`name` in Apple's web SDK). Explicit `scopes` replace those defaults. Caller-supplied `nonce`
+and Android `useLegacyGoogleSignIn` are not accepted. Android nonce-bound Google
+flows use Credential Manager even with `forceAccountPicker: true`; they reject
+when Credential Manager cannot provide and verify a matching ID token instead
+of retrying through legacy Google Sign-In.
+
 ## Providers
 
 | Provider  | Native       | Web | Notes                                                                 |
@@ -246,6 +277,8 @@ Main exports:
 - `AuthService` for imperative operations and account listeners.
 - `AuthService.loginAndGetUser()` when the caller needs the signed-in user from
   the same call.
+- `AuthService.getCredential()` when the caller needs a nonce-bound Google or
+  Apple ID token without retaining a package session.
 - `SocialButton` for provider-aware UI.
 - `AuthProvider` for `"google"`, `"apple"`, and `"microsoft"`.
 - `AuthError` and `AuthErrorCode` for deterministic failures.

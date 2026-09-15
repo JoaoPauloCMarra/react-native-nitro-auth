@@ -129,6 +129,10 @@ bool HybridAuth::getHasPlayServices() {
   return PlatformAuth::hasPlayServices();
 }
 
+std::shared_ptr<Promise<AuthNonce>> HybridAuth::createNonce() {
+  return PlatformAuth::createNonce();
+}
+
 void HybridAuth::notifyAuthStateChanged() {
   std::optional<AuthUser> user;
   std::optional<AuthProvider> provider;

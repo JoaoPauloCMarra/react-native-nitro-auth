@@ -231,6 +231,8 @@ export function FeatureDemo() {
   const [microsoftPrompt, setMicrosoftPrompt] =
     useState<MicrosoftPrompt>(undefined);
   const [lastTokens, setLastTokens] = useState<AuthTokens | undefined>();
+  const [lastCredentialSummary, setLastCredentialSummary] =
+    useState("Not requested");
   const [snapshot, setSnapshot] = useState<AuthSnapshot>(EMPTY_AUTH_SNAPSHOT);
 
   const displayUser =
@@ -525,6 +527,17 @@ export function FeatureDemo() {
     });
   }, [auth, runAuthAction, setNotice, updateAuthSnapshot]);
 
+  const getCredential = useCallback(async () => {
+    await runAuthAction("Getting Google credential", async () => {
+      const credential = await AuthService.getCredential("google", {
+        forceAccountPicker: true,
+      });
+      setLastCredentialSummary(
+        `${credential.user.email ?? "Google account"} · ID token ${maskSecret(credential.idToken)} · nonce ${maskSecret(credential.nonce)}`,
+      );
+    });
+  }, [runAuthAction]);
+
   const refreshToken = useCallback(async () => {
     await runAuthAction("Refreshing tokens", async () => {
       const tokens = await auth.refreshToken();
@@ -749,6 +762,18 @@ export function FeatureDemo() {
               value={displayUser?.userId ?? "Not available"}
             />
             <DetailRow
+              label="First name"
+              value={displayUser?.firstName ?? "Not available"}
+            />
+            <DetailRow
+              label="Last name"
+              value={displayUser?.lastName ?? "Not available"}
+            />
+            <DetailRow
+              label="Credential handoff"
+              value={lastCredentialSummary}
+            />
+            <DetailRow
               label="Phone"
               value={displayUser?.phoneNumber ?? "Not available"}
             />
@@ -787,6 +812,12 @@ export function FeatureDemo() {
               label="Get token"
               disabled={auth.loading}
               onPress={getAccessToken}
+            />
+            <ActionButton
+              testID="get-credential"
+              label="Get credential"
+              disabled={auth.loading}
+              onPress={getCredential}
             />
             <ActionButton
               label="Refresh"

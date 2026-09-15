@@ -489,6 +489,10 @@ function createNativeFacade(): {
     get hasPlayServices() {
       return true;
     },
+    createNonce: async () => ({
+      raw: "raw-test-nonce",
+      hashed: "a".repeat(64),
+    }),
     login,
     requestScopes: () => Promise.resolve(),
     revokeScopes: () => Promise.resolve(),

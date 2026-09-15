@@ -1,6 +1,7 @@
 #pragma once
 
 #include "HybridAuthSpec.hpp"
+#include "AuthNonce.hpp"
 #include "AuthUser.hpp"
 #include "AuthEvent.hpp"
 #include "LoginOptions.hpp"
@@ -23,6 +24,7 @@ public:
   std::vector<std::string> getGrantedScopes() override;
   bool getHasPlayServices() override;
 
+  std::shared_ptr<Promise<AuthNonce>> createNonce() override;
   std::shared_ptr<Promise<void>> login(AuthProvider provider, const std::optional<LoginOptions>& options) override;
   std::shared_ptr<Promise<void>> requestScopes(const std::vector<std::string>& scopes) override;
   std::shared_ptr<Promise<void>> revokeScopes(const std::vector<std::string>& scopes) override;

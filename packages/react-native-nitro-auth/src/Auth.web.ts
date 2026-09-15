@@ -1,5 +1,6 @@
 import type {
   Auth,
+  AuthNonce,
   AuthUser,
   AuthProvider,
   LoginOptions,
@@ -178,6 +179,8 @@ const parseAuthUser = (value: unknown): AuthUser | undefined => {
   };
   setIfDefined(user, "email", getOptionalString(value, "email"));
   setIfDefined(user, "name", getOptionalString(value, "name"));
+  setIfDefined(user, "firstName", getOptionalString(value, "firstName"));
+  setIfDefined(user, "lastName", getOptionalString(value, "lastName"));
   setIfDefined(user, "photo", getOptionalString(value, "photo"));
   setIfDefined(user, "idToken", getOptionalString(value, "idToken"));
   setIfDefined(user, "accessToken", getOptionalString(value, "accessToken"));
@@ -307,6 +310,7 @@ class AuthWeb implements Auth {
   private _refreshReject: ((error: unknown) => void) | undefined;
   private _loginReject: ((error: unknown) => void) | undefined;
   private _pendingGoogleNonce: string | undefined;
+  private _credentialOnlyLogin = false;
   private _loginInFlight: boolean = false;
   private _sessionGeneration = 0;
   private _disposed = false;
@@ -474,6 +478,8 @@ class AuthWeb implements Auth {
     if (!this.shouldPersistProfile()) {
       delete safeUser.email;
       delete safeUser.name;
+      delete safeUser.firstName;
+      delete safeUser.lastName;
       delete safeUser.photo;
     }
     return safeUser;
@@ -519,6 +525,8 @@ class AuthWeb implements Auth {
         if (!this.shouldPersistProfile()) {
           delete this._currentUser.email;
           delete this._currentUser.name;
+          delete this._currentUser.firstName;
+          delete this._currentUser.lastName;
           delete this._currentUser.photo;
         }
       } catch (error) {
@@ -671,6 +679,37 @@ class AuthWeb implements Auth {
   private assertActiveGeneration(generation: number): void {
     if (this._disposed || this._sessionGeneration !== generation) {
       throw new AuthWebError("cancelled", "Auth operation was cancelled");
+    }
+  }
+
+  async createNonce(): Promise<AuthNonce> {
+    const randomBytes = crypto.getRandomValues(new Uint8Array(32));
+    const raw = this.base64UrlEncode(randomBytes);
+    const hash = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(raw),
+    );
+    const hashed = Array.from(new Uint8Array(hash), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+    return { raw, hashed };
+  }
+
+  async loginForCredential(
+    provider: AuthProvider,
+    options?: LoginOptions,
+  ): Promise<void> {
+    if (this._credentialOnlyLogin) {
+      throw new AuthWebError(
+        "operation_in_progress",
+        "A credential-only login is already in progress",
+      );
+    }
+    this._credentialOnlyLogin = true;
+    try {
+      await this.login(provider, options);
+    } finally {
+      this._credentialOnlyLogin = false;
     }
   }
 
@@ -1276,7 +1315,9 @@ class AuthWeb implements Auth {
         }
 
         this._grantedScopes = scopes;
-        this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
+        if (!this._credentialOnlyLogin) {
+          this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
+        }
 
         const user: AuthUser = {
           provider: "google",
@@ -1310,6 +1351,8 @@ class AuthWeb implements Auth {
       const user: Partial<AuthUser> = {};
       setIfDefined(user, "email", getOptionalString(decoded, "email"));
       setIfDefined(user, "name", getOptionalString(decoded, "name"));
+      setIfDefined(user, "firstName", getOptionalString(decoded, "given_name"));
+      setIfDefined(user, "lastName", getOptionalString(decoded, "family_name"));
       setIfDefined(user, "photo", getOptionalString(decoded, "picture"));
       setIfDefined(user, "userId", getOptionalString(decoded, "sub"));
       setIfDefined(user, "hostedDomain", getOptionalString(decoded, "hd"));
@@ -1701,10 +1744,9 @@ class AuthWeb implements Auth {
     const nonce = options?.nonce ?? crypto.randomUUID();
     const appleAuthConfig: AppleAuthInitConfig = {
       clientId,
-      scope: (options?.scopes?.length
-        ? options.scopes
-        : ["name", "email"]
-      ).join(" "),
+      scope: (options?.scopes?.length ? options.scopes : ["name", "email"])
+        .map((scope) => (scope === "fullName" ? "name" : scope))
+        .join(" "),
       redirectURI: window.location.origin,
       usePopup: true,
     };
@@ -1730,6 +1772,8 @@ class AuthWeb implements Auth {
       };
       setIfDefined(user, "authorizationCode", response.authorization.code);
       setIfDefined(user, "email", response.user?.email);
+      setIfDefined(user, "firstName", response.user?.name?.firstName);
+      setIfDefined(user, "lastName", response.user?.name?.lastName);
       setIfDefined(
         user,
         "name",
@@ -1809,8 +1853,10 @@ class AuthWeb implements Auth {
 
   private updateUser(user: AuthUser) {
     this._currentUser = user;
-    const userToPersist = this.sanitizeUserForPersistence(user);
-    this.saveValue(CACHE_KEY, JSON.stringify(userToPersist));
+    if (!this._credentialOnlyLogin) {
+      const userToPersist = this.sanitizeUserForPersistence(user);
+      this.saveValue(CACHE_KEY, JSON.stringify(userToPersist));
+    }
     this.notify();
   }
 

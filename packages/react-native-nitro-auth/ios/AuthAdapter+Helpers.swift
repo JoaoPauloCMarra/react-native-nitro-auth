@@ -77,7 +77,11 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
       // When a nonce was requested, verify the identity token carries it.
       // Apple SDKs bind the nonce into the token; the claim check prevents a
       // replayed or swapped token from being accepted.
-      if let expectedNonce = expectedNonce, let idToken = idToken {
+      if let expectedNonce = expectedNonce {
+        guard let idToken = idToken, !idToken.isEmpty else {
+          completion(nil, NSNumber(value: AuthErrorCode.noIdToken.rawValue), nil)
+          return
+        }
         let claims = AuthAdapter.decodeJwt(idToken)
         guard claims["nonce"] == expectedNonce else {
           completion(nil, NSNumber(value: AuthErrorCode.invalidNonce.rawValue), nil)
@@ -89,6 +93,8 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
         "provider": "apple",
         "email": email ?? "",
         "name": name,
+        "firstName": fullName?.givenName ?? "",
+        "lastName": fullName?.familyName ?? "",
         "idToken": idToken ?? "",
         "authorizationCode": appleIDCredential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) } ?? "",
         "userId": appleIDCredential.user,

@@ -4,6 +4,16 @@ import { AuthService } from "../service";
 import { AuthError } from "../utils/auth-error";
 import type { AuthTokens, AuthUser } from "../Auth.nitro";
 
+const createJwtWithPayload = (payload: Record<string, unknown>) => {
+  const encode = (value: Record<string, unknown>) =>
+    Buffer.from(JSON.stringify(value), "utf8")
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  return `${encode({ alg: "none", typ: "JWT" })}.${encode(payload)}.sig`;
+};
+
 let mockCurrentUser: AuthUser | undefined;
 const mockGetCurrentUser = jest.fn(() => mockCurrentUser);
 let onAuthStateChangedCallback: ((user: AuthUser | undefined) => void) | null =
@@ -13,6 +23,7 @@ type MockHybridObject = {
   readonly currentUser: AuthUser | undefined;
   grantedScopes: string[];
   hasPlayServices: boolean;
+  createNonce: jest.Mock;
   login: jest.Mock;
   logout: jest.Mock;
   requestScopes: jest.Mock;
@@ -29,11 +40,6 @@ type MockHybridObject = {
   equals: jest.Mock;
 };
 
-// eslint-disable-next-line no-var
-var mockState: { hybridObject: MockHybridObject | undefined } = {
-  hybridObject: undefined,
-};
-
 jest.mock("react-native-nitro-modules", () => {
   const hybridObject: MockHybridObject = {
     name: "Auth",
@@ -42,6 +48,7 @@ jest.mock("react-native-nitro-modules", () => {
     },
     grantedScopes: [],
     hasPlayServices: true,
+    createNonce: jest.fn(),
     login: jest.fn(),
     logout: jest.fn(),
     requestScopes: jest.fn(),
@@ -64,8 +71,6 @@ jest.mock("react-native-nitro-modules", () => {
     dispose: jest.fn(),
     equals: jest.fn(),
   };
-  mockState = { hybridObject };
-
   return {
     NitroModules: {
       createHybridObject: jest.fn(() => hybridObject),
@@ -75,8 +80,8 @@ jest.mock("react-native-nitro-modules", () => {
 
 describe("AuthService", () => {
   function native() {
-    const [result] = (NitroModules.createHybridObject as jest.Mock).mock
-      .results;
+    const results = (NitroModules.createHybridObject as jest.Mock).mock.results;
+    const result = results.at(-1);
 
     if (!result) {
       throw new Error("Auth hybrid object was not created");
@@ -91,9 +96,10 @@ describe("AuthService", () => {
     mockGetCurrentUser.mockReset();
     mockGetCurrentUser.mockImplementation(() => mockCurrentUser);
     onAuthStateChangedCallback = null;
-    const hybridObject = mockState.hybridObject;
+    const hybridObject = native();
     if (hybridObject) {
       hybridObject.login.mockReset();
+      hybridObject.createNonce.mockReset();
       hybridObject.logout.mockReset();
       hybridObject.requestScopes.mockReset();
       hybridObject.revokeScopes.mockReset();
@@ -133,6 +139,7 @@ describe("AuthService", () => {
   it("should have all required methods", () => {
     expect(AuthService.login).toBeDefined();
     expect(AuthService.loginAndGetUser).toBeDefined();
+    expect(AuthService.getCredential).toBeDefined();
     expect(AuthService.logout).toBeDefined();
     expect(AuthService.requestScopes).toBeDefined();
     expect(AuthService.revokeScopes).toBeDefined();
@@ -477,6 +484,340 @@ describe("AuthService", () => {
         "refresh_failed: invalid_grant",
       );
       expect((error as AuthError).operation).toBe("refreshToken");
+    });
+  });
+
+  describe("getCredential", () => {
+    const rawNonce = "raw-credential-nonce";
+    const hashedNonce = "a".repeat(64);
+    const idToken = createJwtWithPayload({ nonce: hashedNonce });
+
+    it("returns a copied nonce-bound Google credential and cleans the temporary session", async () => {
+      const user: AuthUser = {
+        provider: "google",
+        email: "credential@example.com",
+        firstName: "Jane",
+        lastName: "Doe",
+        scopes: ["openid", "email", "profile"],
+        idToken,
+      };
+      native().createNonce.mockResolvedValueOnce({
+        raw: rawNonce,
+        hashed: hashedNonce,
+      });
+      native().login.mockImplementationOnce(
+        async (_provider: string, options: Record<string, unknown>) => {
+          expect(options).toEqual({
+            forceAccountPicker: true,
+            scopes: ["openid", "email", "profile"],
+            nonce: hashedNonce,
+          });
+          mockCurrentUser = user;
+        },
+      );
+
+      const result = await AuthService.getCredential("google", {
+        forceAccountPicker: true,
+      });
+
+      expect(result).toEqual({
+        provider: "google",
+        idToken,
+        nonce: rawNonce,
+        user,
+      });
+      expect(result.user).not.toBe(user);
+      expect(result.user.scopes).not.toBe(user.scopes);
+      expect(native().createNonce).toHaveBeenCalledTimes(1);
+      expect(native().login).toHaveBeenCalledTimes(1);
+      expect(native().logout).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses Apple credential scopes and preserves an explicit override", async () => {
+      const user: AuthUser = { provider: "apple", idToken };
+      native().createNonce.mockResolvedValueOnce({
+        raw: rawNonce,
+        hashed: hashedNonce,
+      });
+      native().login.mockImplementationOnce(
+        async (_provider: string, options: Record<string, unknown>) => {
+          expect(options).toEqual({ scopes: ["email"], nonce: hashedNonce });
+          mockCurrentUser = user;
+        },
+      );
+
+      await expect(
+        AuthService.getCredential("apple", { scopes: ["email"] }),
+      ).resolves.toMatchObject({ provider: "apple", nonce: rawNonce });
+    });
+
+    it("uses Apple credential defaults when the caller omits scopes", async () => {
+      native().createNonce.mockResolvedValueOnce({
+        raw: rawNonce,
+        hashed: hashedNonce,
+      });
+      native().login.mockImplementationOnce(
+        async (_provider: string, options: Record<string, unknown>) => {
+          expect(options).toEqual({
+            scopes: ["email", "fullName"],
+            nonce: hashedNonce,
+          });
+          mockCurrentUser = { provider: "apple", idToken };
+        },
+      );
+
+      await expect(AuthService.getCredential("apple")).resolves.toMatchObject({
+        provider: "apple",
+        nonce: rawNonce,
+      });
+    });
+
+    it("rejects a credential whose ID token nonce does not match and still cleans the session", async () => {
+      native().createNonce.mockResolvedValueOnce({
+        raw: rawNonce,
+        hashed: hashedNonce,
+      });
+      native().login.mockRejectedValueOnce(new Error("invalid_nonce"));
+
+      await expect(AuthService.getCredential("google")).rejects.toMatchObject({
+        code: "invalid_nonce",
+        operation: "getCredential",
+      });
+      expect(native().logout).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects an invalid native credential result and cleans the session", async () => {
+      native().createNonce.mockResolvedValueOnce({
+        raw: rawNonce,
+        hashed: hashedNonce,
+      });
+      native().login.mockImplementationOnce(async () => {
+        mockCurrentUser = { provider: "google" };
+      });
+
+      await expect(AuthService.getCredential("google")).rejects.toMatchObject({
+        code: "no_id_token",
+        operation: "getCredential",
+      });
+      expect(native().logout).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects malformed nonce material before starting provider login", async () => {
+      native().createNonce.mockResolvedValueOnce({ raw: "", hashed: "bad" });
+
+      await expect(AuthService.getCredential("google")).rejects.toMatchObject({
+        code: "invalid_nonce",
+        operation: "getCredential",
+      });
+      expect(native().login).not.toHaveBeenCalled();
+      expect(native().logout).not.toHaveBeenCalled();
+    });
+
+    it("preserves the primary credential error when cleanup also fails", async () => {
+      native().createNonce.mockResolvedValueOnce({
+        raw: rawNonce,
+        hashed: hashedNonce,
+      });
+      native().login.mockRejectedValueOnce(new Error("network_error"));
+      native().logout.mockImplementationOnce(() => {
+        throw new Error("configuration_error");
+      });
+
+      await expect(AuthService.getCredential("google")).rejects.toMatchObject({
+        code: "network_error",
+        operation: "getCredential",
+      });
+    });
+
+    it("normalizes a cleanup error when credential acquisition succeeds", async () => {
+      native().createNonce.mockResolvedValueOnce({
+        raw: rawNonce,
+        hashed: hashedNonce,
+      });
+      native().login.mockImplementationOnce(async () => {
+        mockCurrentUser = { provider: "google", idToken };
+      });
+      native().logout.mockImplementationOnce(() => {
+        throw new Error("configuration_error");
+      });
+
+      await expect(AuthService.getCredential("google")).rejects.toMatchObject({
+        code: "configuration_error",
+        operation: "getCredential",
+      });
+    });
+
+    it("rejects concurrent credential acquisition before starting a second native flow", async () => {
+      let resolveNonce:
+        ((value: { raw: string; hashed: string }) => void) | undefined;
+      native().createNonce.mockImplementationOnce(
+        () =>
+          new Promise<{ raw: string; hashed: string }>((resolve) => {
+            resolveNonce = resolve;
+          }),
+      );
+
+      const first = AuthService.getCredential("google");
+      await expect(AuthService.getCredential("apple")).rejects.toMatchObject({
+        code: "operation_in_progress",
+        operation: "getCredential",
+      });
+
+      resolveNonce?.({ raw: rawNonce, hashed: hashedNonce });
+      native().login.mockImplementationOnce(async () => {
+        mockCurrentUser = { provider: "google", idToken };
+      });
+      await expect(first).resolves.toMatchObject({ nonce: rawNonce });
+      expect(native().login).toHaveBeenCalledTimes(1);
+    });
+
+    it("blocks a newer service login until credential cleanup completes", async () => {
+      let resolveLogin: (() => void) | undefined;
+      native().createNonce.mockResolvedValueOnce({
+        raw: rawNonce,
+        hashed: hashedNonce,
+      });
+      native().login.mockImplementationOnce(
+        () => new Promise<void>((resolve) => (resolveLogin = resolve)),
+      );
+
+      const credential = AuthService.getCredential("google");
+      await expect(AuthService.login("apple")).rejects.toMatchObject({
+        code: "operation_in_progress",
+        operation: "login",
+      });
+      await expect(AuthService.loginAndGetUser("apple")).rejects.toMatchObject({
+        code: "operation_in_progress",
+        operation: "login",
+      });
+
+      mockCurrentUser = { provider: "google", idToken };
+      resolveLogin?.();
+      await expect(credential).resolves.toMatchObject({ nonce: rawNonce });
+      expect(native().logout).toHaveBeenCalledTimes(1);
+      expect(native().login).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects credential acquisition while a service login is already active", async () => {
+      let resolveLogin: (() => void) | undefined;
+      native().login.mockImplementationOnce(
+        () => new Promise<void>((resolve) => (resolveLogin = resolve)),
+      );
+
+      const login = AuthService.login("google");
+      await expect(AuthService.getCredential("google")).rejects.toMatchObject({
+        code: "operation_in_progress",
+        operation: "getCredential",
+      });
+
+      expect(native().createNonce).not.toHaveBeenCalled();
+      expect(native().logout).not.toHaveBeenCalled();
+      resolveLogin?.();
+      await expect(login).resolves.toBeUndefined();
+    });
+
+    it.each(["logout", "dispose"] as const)(
+      "does not start provider login when service %s interrupts nonce creation",
+      async (operation) => {
+        let resolveNonce:
+          ((value: { raw: string; hashed: string }) => void) | undefined;
+        const auth = native();
+        auth.createNonce.mockImplementationOnce(
+          () =>
+            new Promise<{ raw: string; hashed: string }>((resolve) => {
+              resolveNonce = resolve;
+            }),
+        );
+
+        const credential = AuthService.getCredential("google");
+        if (operation === "logout") {
+          AuthService.logout();
+        } else {
+          AuthService.dispose();
+        }
+        resolveNonce?.({ raw: rawNonce, hashed: hashedNonce });
+
+        await expect(credential).rejects.toMatchObject({
+          code: "cancelled",
+          operation: "getCredential",
+        });
+        expect(auth.login).not.toHaveBeenCalled();
+        expect(auth[operation]).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it.each(["requestScopes", "silentRestore"] as const)(
+      "rejects credential acquisition while %s is active",
+      async (operation) => {
+        let resolveOperation: (() => void) | undefined;
+        const auth = native();
+        const pendingOperation = new Promise<void>(
+          (resolve) => (resolveOperation = resolve),
+        );
+        if (operation === "requestScopes") {
+          auth.requestScopes.mockReturnValueOnce(pendingOperation);
+        } else {
+          auth.silentRestore.mockReturnValueOnce(pendingOperation);
+        }
+
+        const active =
+          operation === "requestScopes"
+            ? AuthService.requestScopes(["email"])
+            : AuthService.silentRestore();
+        await expect(AuthService.getCredential("google")).rejects.toMatchObject(
+          {
+            code: "operation_in_progress",
+            operation: "getCredential",
+          },
+        );
+        expect(auth.createNonce).not.toHaveBeenCalled();
+        expect(auth.logout).not.toHaveBeenCalled();
+
+        resolveOperation?.();
+        await expect(active).resolves.toBeUndefined();
+      },
+    );
+
+    it("blocks scope requests and restore during credential acquisition", async () => {
+      let resolveNonce:
+        ((value: { raw: string; hashed: string }) => void) | undefined;
+      const auth = native();
+      auth.createNonce.mockImplementationOnce(
+        () =>
+          new Promise<{ raw: string; hashed: string }>((resolve) => {
+            resolveNonce = resolve;
+          }),
+      );
+
+      const credential = AuthService.getCredential("google");
+      await expect(AuthService.requestScopes(["email"])).rejects.toMatchObject({
+        code: "operation_in_progress",
+        operation: "requestScopes",
+      });
+      await expect(AuthService.silentRestore()).rejects.toMatchObject({
+        code: "operation_in_progress",
+        operation: "silentRestore",
+      });
+      expect(auth.requestScopes).not.toHaveBeenCalled();
+      expect(auth.silentRestore).not.toHaveBeenCalled();
+
+      resolveNonce?.({ raw: rawNonce, hashed: hashedNonce });
+      auth.login.mockImplementationOnce(async () => {
+        mockCurrentUser = { provider: "google", idToken };
+      });
+      await expect(credential).resolves.toMatchObject({ nonce: rawNonce });
+    });
+
+    it("rejects unsupported providers without touching native auth", async () => {
+      await expect(
+        AuthService.getCredential("microsoft" as never),
+      ).rejects.toMatchObject({
+        code: "unsupported_provider",
+        operation: "getCredential",
+      });
+      expect(native().createNonce).not.toHaveBeenCalled();
+      expect(native().login).not.toHaveBeenCalled();
+      expect(native().logout).not.toHaveBeenCalled();
     });
   });
 

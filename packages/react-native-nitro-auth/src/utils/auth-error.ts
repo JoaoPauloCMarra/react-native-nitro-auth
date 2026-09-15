@@ -57,6 +57,7 @@ export function toAuthErrorCode(raw: string): AuthErrorCode {
  */
 export type AuthOperation =
   | "login"
+  | "getCredential"
   | "requestScopes"
   | "revokeScopes"
   | "revokeAccess"

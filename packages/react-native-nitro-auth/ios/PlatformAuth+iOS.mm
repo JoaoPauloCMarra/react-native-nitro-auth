@@ -70,6 +70,8 @@ uint64_t nextGeneration() {
      user.provider = provider;
      user.email = nsToStd([data objectForKey:@"email"]);
      user.name = nsToStd([data objectForKey:@"name"]);
+     user.firstName = nsToStd([data objectForKey:@"firstName"]);
+     user.lastName = nsToStd([data objectForKey:@"lastName"]);
      user.photo = nsToStd([data objectForKey:@"photo"]);
      user.idToken = nsToStd([data objectForKey:@"idToken"]);
      if ([data objectForKey:@"accessToken"]) user.accessToken = nsToStd([data objectForKey:@"accessToken"]);
@@ -83,6 +85,28 @@ uint64_t nextGeneration() {
      if ([data objectForKey:@"underlyingError"]) user.underlyingError = nsToStd([data objectForKey:@"underlyingError"]);
      return user;
  }
+
+std::shared_ptr<Promise<AuthNonce>> PlatformAuth::createNonce() {
+    auto promise = Promise<AuthNonce>::create();
+    NSDictionary* data = [AuthAdapter createNonce];
+    if (data == nil) {
+        promise->reject(makeAuthError(AuthErrorCode::CONFIGURATION_ERROR));
+        return promise;
+    }
+
+    auto raw = nsToStd([data objectForKey:@"raw"]);
+    auto hashed = nsToStd([data objectForKey:@"hashed"]);
+    if (!raw.has_value() || !hashed.has_value()) {
+        promise->reject(makeAuthError(AuthErrorCode::INVALID_NONCE));
+        return promise;
+    }
+
+    AuthNonce nonce;
+    nonce.raw = raw.value();
+    nonce.hashed = hashed.value();
+    promise->resolve(nonce);
+    return promise;
+}
 
 std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, const std::optional<LoginOptions>& options) {
     auto promise = Promise<AuthUser>::create();

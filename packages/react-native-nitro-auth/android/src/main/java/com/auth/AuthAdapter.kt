@@ -27,6 +27,7 @@ import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.api.Scope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
@@ -39,10 +40,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.LinkedHashMap
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.UUID
 
 object AuthAdapter {
     private const val TAG = "AuthAdapter"
+    private val nonceRandom = SecureRandom()
     private val defaultMicrosoftScopes =
         listOf("openid", "email", "profile", "offline_access", "User.Read")
 
@@ -146,6 +150,8 @@ object AuthAdapter {
         provider: String,
         email: String?,
         name: String?,
+        firstName: String?,
+        lastName: String?,
         photo: String?,
         idToken: String?,
         accessToken: String?,
@@ -160,6 +166,22 @@ object AuthAdapter {
 
     @JvmStatic
     private external fun nativeOnLoginError(origin: String, code: Int, underlyingError: String?, generation: Long): Boolean
+
+    @JvmStatic
+    fun createNonce(): Array<String> {
+        val randomBytes = ByteArray(32)
+        nonceRandom.nextBytes(randomBytes)
+        val raw = Base64.encodeToString(
+            randomBytes,
+            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP,
+        )
+        val hashed = MessageDigest.getInstance("SHA-256")
+            .digest(raw.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte ->
+                (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+            }
+        return arrayOf(raw, hashed)
+    }
 
     @JvmStatic
     private external fun nativeOnRefreshSuccess(idToken: String?, accessToken: String?, expirationTime: Long?, generation: Long): Boolean
@@ -399,8 +421,9 @@ object AuthAdapter {
             return false
         }
         val expirationTime = getGoogleExpirationTimeMs(account.idToken)
+        val claims = MicrosoftAuthConfig.decodeJwt(account.idToken.orEmpty())
         if (!nativeOnLoginSuccess(origin, "google", account.email, account.displayName,
-            account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
+            claims["given_name"], claims["family_name"], account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
             account.id, null, hostedDomain, scopes.toTypedArray(), expirationTime, generation)
         ) {
             cleanupStaleGoogleAccount(context, account)
@@ -497,7 +520,7 @@ object AuthAdapter {
 
         val startLogin = {
             if (isCurrentGoogleGeneration("login", generation) && isCurrentGoogleStateEpoch(loginStateEpoch)) {
-                if (useLegacyGoogleSignIn || forceAccountPicker) {
+                if (nonce == null && (useLegacyGoogleSignIn || forceAccountPicker)) {
                     loginLegacy(context, clientId, requestedScopes, loginHint, forceAccountPicker, forceCodeForRefreshToken, hostedDomain, "login", generation)
                 } else {
                     loginOneTap(context, clientId, requestedScopes, loginHint, nonce, forceAccountPicker, useOneTap, filterByAuthorizedAccounts, requestVerifiedPhoneNumber, hostedDomain, "login", generation)
@@ -731,6 +754,8 @@ object AuthAdapter {
                             "microsoft",
                             completion.email,
                             completion.name,
+                            null,
+                            null,
                             null,
                             completion.idToken,
                             completion.accessToken,
@@ -1467,44 +1492,73 @@ object AuthAdapter {
     ) {
         val activity = currentActivity ?: context as? Activity
         if (activity == null) {
+            if (nonce != null) {
+                Log.w(TAG, "No Activity context available for nonce-bound Credential Manager login")
+                if (consumeGoogleGeneration(origin, generation)) {
+                    nativeOnLoginError(origin, AuthErrorCode.CONFIGURATION_ERROR.code, "An Activity is required for nonce-bound Google credentials", generation)
+                }
+                return
+            }
             Log.w(TAG, "No Activity context available for One-Tap, falling back to legacy")
             return loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, false, hostedDomain, origin, generation)
         }
 
         val credentialManager = CredentialManager.create(activity)
-        val googleIdOption = GetGoogleIdOption.Builder()
-            .setFilterByAuthorizedAccounts(filterByAuthorizedAccounts)
-            .setServerClientId(clientId)
-            .setAutoSelectEnabled(useOneTap && !forceAccountPicker)
-            .setRequestVerifiedPhoneNumber(requestVerifiedPhoneNumber)
-            .apply {
-                if (nonce != null) setNonce(nonce)
-                if (hostedDomain != null) setHostedDomainFilter(hostedDomain)
-            }
-            .build()
-
-        val request = GetCredentialRequest.Builder()
-            .addCredentialOption(googleIdOption)
-            .build()
+        val requestBuilder = GetCredentialRequest.Builder()
+        if (nonce != null && forceAccountPicker) {
+            val signInOption = GetSignInWithGoogleOption.Builder(clientId)
+                .apply {
+                    setNonce(nonce)
+                    if (hostedDomain != null) setHostedDomainFilter(hostedDomain)
+                }
+                .build()
+            requestBuilder.addCredentialOption(signInOption)
+        } else {
+            val googleIdOption = GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(filterByAuthorizedAccounts)
+                .setServerClientId(clientId)
+                .setAutoSelectEnabled(useOneTap && !forceAccountPicker)
+                .setRequestVerifiedPhoneNumber(requestVerifiedPhoneNumber)
+                .apply {
+                    if (nonce != null) setNonce(nonce)
+                    if (hostedDomain != null) setHostedDomainFilter(hostedDomain)
+                }
+                .build()
+            requestBuilder.addCredentialOption(googleIdOption)
+        }
+        val request = requestBuilder.build()
 
         moduleScope.launch(Dispatchers.Main) {
             try {
                 val result = credentialManager.getCredential(context = activity, request = request)
-                handleCredentialResponse(result, scopes, hostedDomain, origin, generation)
+                handleCredentialResponse(result, scopes, hostedDomain, nonce, origin, generation)
             } catch (e: CancellationException) {
+                if (consumeGoogleGeneration(origin, generation)) {
+                    nativeOnLoginError(origin, AuthErrorCode.CANCELLED.code, e.message, generation)
+                }
                 return@launch
             } catch (e: GetCredentialCancellationException) {
                 if (consumeGoogleGeneration(origin, generation)) {
                     nativeOnLoginError(origin, AuthErrorCode.CANCELLED.code, e.message, generation)
                 }
             } catch (e: NoCredentialException) {
-                Log.w(TAG, "One-Tap has no credentials, falling back to legacy: ${e.message}")
-                if (isCurrentGoogleGeneration(origin, generation)) {
+                if (nonce != null) {
+                    Log.w(TAG, "Credential Manager returned no nonce-bound Google credential")
+                    if (consumeGoogleGeneration(origin, generation)) {
+                        nativeOnLoginError(origin, AuthErrorCode.NO_ID_TOKEN.code, e.message, generation)
+                    }
+                } else if (isCurrentGoogleGeneration(origin, generation)) {
+                    Log.w(TAG, "One-Tap has no credentials, falling back to legacy: ${e.message}")
                     loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, false, hostedDomain, origin, generation)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "One-Tap failed, falling back to legacy: ${e.message}")
-                if (isCurrentGoogleGeneration(origin, generation)) {
+                if (nonce != null) {
+                    Log.w(TAG, "Nonce-bound Credential Manager login failed (${e.javaClass.simpleName})")
+                    if (consumeGoogleGeneration(origin, generation)) {
+                        nativeOnLoginError(origin, AuthErrorCode.UNKNOWN.code, e.message, generation)
+                    }
+                } else if (isCurrentGoogleGeneration(origin, generation)) {
+                    Log.w(TAG, "One-Tap failed, falling back to legacy: ${e.message}")
                     loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, false, hostedDomain, origin, generation)
                 }
             }
@@ -1534,6 +1588,7 @@ object AuthAdapter {
         response: GetCredentialResponse,
         scopes: List<String>,
         hostedDomain: String?,
+        expectedNonce: String?,
         origin: String,
         generation: Long,
     ) {
@@ -1552,15 +1607,39 @@ object AuthAdapter {
         }
 
         if (googleIdTokenCredential != null) {
-            val context = appContext ?: return
+            val context = appContext
+            if (context == null) {
+                if (consumeGoogleGeneration(origin, generation)) {
+                    nativeOnLoginError(origin, AuthErrorCode.CONFIGURATION_ERROR.code, "Auth adapter is not initialized", generation)
+                }
+                return
+            }
             if (!synchronized(this) { acceptsPendingGoogleGenerationLocked(origin, generation) }) return
-            val expirationTime = getGoogleExpirationTimeMs(googleIdTokenCredential.idToken)
+            val idToken = googleIdTokenCredential.idToken
+            if (expectedNonce != null) {
+                if (idToken.isBlank()) {
+                    if (consumeGoogleGeneration(origin, generation)) {
+                        nativeOnLoginError(origin, AuthErrorCode.NO_ID_TOKEN.code, "Google returned an empty ID token", generation)
+                    }
+                    return
+                }
+                if (MicrosoftAuthConfig.decodeJwt(idToken)["nonce"] != expectedNonce) {
+                    if (consumeGoogleGeneration(origin, generation)) {
+                        nativeOnLoginError(origin, AuthErrorCode.INVALID_NONCE.code, "Nonce mismatch - token may be replayed", generation)
+                    }
+                    return
+                }
+            }
+            val claims = MicrosoftAuthConfig.decodeJwt(idToken)
+            val expirationTime = getGoogleExpirationTimeMs(idToken)
             if (!nativeOnLoginSuccess(
                 origin, "google",
                 googleIdTokenCredential.email,
                 googleIdTokenCredential.displayName,
+                claims["given_name"],
+                claims["family_name"],
                 googleIdTokenCredential.profilePictureUri?.toString(),
-                googleIdTokenCredential.idToken,
+                idToken,
                 null, null,
                 googleIdTokenCredential.id,
                 googleIdTokenCredential.phoneNumber,
@@ -1593,7 +1672,8 @@ object AuthAdapter {
         } else {
             Log.w(TAG, "Unsupported credential type: ${credential.type}")
             if (consumeGoogleGeneration(origin, generation)) {
-                nativeOnLoginError(origin, AuthErrorCode.UNKNOWN.code, "Unsupported credential type: ${credential.type}", generation)
+                val code = if (expectedNonce != null) AuthErrorCode.NO_ID_TOKEN else AuthErrorCode.UNKNOWN
+                nativeOnLoginError(origin, code.code, "Unsupported credential type: ${credential.type}", generation)
             }
         }
     }
@@ -1668,10 +1748,13 @@ object AuthAdapter {
             val mergedScopes = (oneTapSession.scopes + scopes.toList()).distinct()
             if (!synchronized(this) { acceptsPendingGoogleGenerationLocked("scopes", generation) }) return
             val credential = oneTapSession.credential
+            val claims = MicrosoftAuthConfig.decodeJwt(credential.idToken)
             if (!nativeOnLoginSuccess(
                 "scopes", "google",
                 credential.email,
                 credential.displayName,
+                claims["given_name"],
+                claims["family_name"],
                 credential.profilePictureUri?.toString(),
                 credential.idToken,
                 null, null,
@@ -1916,8 +1999,9 @@ object AuthAdapter {
             }
             if (!synchronized(this) { acceptsSilentGenerationLocked(generation) }) return
             val expirationTime = getGoogleExpirationTimeMs(account.idToken)
+            val claims = MicrosoftAuthConfig.decodeJwt(account.idToken.orEmpty())
             if (!nativeOnLoginSuccess("silent", "google", account.email, account.displayName,
-                account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
+                claims["given_name"], claims["family_name"], account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
                 account.id, null, hostedDomain, account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), expirationTime, generation)
             ) return
             synchronized(this) {
@@ -1994,6 +2078,8 @@ object AuthAdapter {
                             "microsoft",
                             completion.email,
                             completion.name,
+                            null,
+                            null,
                             null,
                             completion.idToken,
                             completion.accessToken,

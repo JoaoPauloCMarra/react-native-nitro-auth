@@ -87,6 +87,15 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider, const std::
   return lastLoginPromise;
 }
 
+std::shared_ptr<Promise<AuthNonce>> PlatformAuth::createNonce() {
+  auto promise = Promise<AuthNonce>::create();
+  AuthNonce nonce;
+  nonce.raw = "raw-test-nonce";
+  nonce.hashed = "hashed-test-nonce";
+  promise->resolve(nonce);
+  return promise;
+}
+
 std::shared_ptr<Promise<AuthUser>> PlatformAuth::requestScopes(const std::vector<std::string>&) {
   lastRequestScopesPromise = Promise<AuthUser>::create();
   return lastRequestScopesPromise;
@@ -157,6 +166,29 @@ void testScopeMergesAndRemovals() {
   const std::vector<std::string> remainingScopes{"email"};
   assert(auth->getGrantedScopes() == remainingScopes);
   assert(auth->getCurrentUser()->scopes == remainingScopes);
+}
+
+void testNonceGenerationDelegatesToPlatform() {
+  auto auth = std::make_shared<HybridAuth>();
+  auto promise = auth->createNonce();
+  assert(promise->isResolved());
+  assert(promise->getResult().raw == "raw-test-nonce");
+  assert(promise->getResult().hashed == "hashed-test-nonce");
+}
+
+void testStructuredNamesRemainAvailableOnTheUser() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  auto user = makeUser();
+  user.firstName = "Jane";
+  user.lastName = "Doe";
+
+  auto promise = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(user);
+
+  assert(promise->isResolved());
+  assert(auth->getCurrentUser()->firstName == "Jane");
+  assert(auth->getCurrentUser()->lastName == "Doe");
 }
 
 void testListenerExceptionsDoNotBlockStateUpdates() {
@@ -700,6 +732,8 @@ void testSessionScenariosInterleaveWithoutUnresolvedPromises() {
 } // namespace
 
 int main() {
+  testNonceGenerationDelegatesToPlatform();
+  testStructuredNamesRemainAvailableOnTheUser();
   testScopeMergesAndRemovals();
   testListenerExceptionsDoNotBlockStateUpdates();
   testRefreshCancelledWhenSessionChanges();

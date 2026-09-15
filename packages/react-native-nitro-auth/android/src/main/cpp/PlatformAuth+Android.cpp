@@ -33,6 +33,7 @@ static uint64_t gRevokeAccessGeneration = 0;
 static std::mutex gJniMutex;
 static jclass gAuthAdapterClass = nullptr;
 static jmethodID gLoginMethod = nullptr;
+static jmethodID gCreateNonceMethod = nullptr;
 static jmethodID gRequestScopesMethod = nullptr;
 static jmethodID gRefreshMethod = nullptr;
 static jmethodID gRestoreMethod = nullptr;
@@ -53,6 +54,7 @@ struct AuthAdapterMethods {
     JNIEnv* env;
     jclass clazz;
     jmethodID login;
+    jmethodID createNonce;
     jmethodID requestScopes;
     jmethodID refresh;
     jmethodID restore;
@@ -65,6 +67,7 @@ struct AuthAdapterMethods {
         JNIEnv* env,
         jclass clazz,
         jmethodID login,
+        jmethodID createNonce,
         jmethodID requestScopes,
         jmethodID refresh,
         jmethodID restore,
@@ -75,6 +78,7 @@ struct AuthAdapterMethods {
         : env(env),
           clazz(clazz),
           login(login),
+          createNonce(createNonce),
           requestScopes(requestScopes),
           refresh(refresh),
           restore(restore),
@@ -96,6 +100,7 @@ struct AuthAdapterMethods {
         : env(other.env),
           clazz(other.clazz),
           login(other.login),
+          createNonce(other.createNonce),
           requestScopes(other.requestScopes),
           refresh(other.refresh),
           restore(other.restore),
@@ -113,6 +118,7 @@ static void clearCachedJniRefsLocked(JNIEnv* env) {
         gAuthAdapterClass = nullptr;
     }
     gLoginMethod = nullptr;
+    gCreateNonceMethod = nullptr;
     gRequestScopesMethod = nullptr;
     gRefreshMethod = nullptr;
     gRestoreMethod = nullptr;
@@ -124,6 +130,7 @@ static void clearCachedJniRefsLocked(JNIEnv* env) {
 
 static void ensureAuthAdapterMethodsLocked(JNIEnv* env) {
     if (gAuthAdapterClass != nullptr && gLoginMethod != nullptr
+        && gCreateNonceMethod != nullptr
         && gRequestScopesMethod != nullptr && gRefreshMethod != nullptr
         && gRestoreMethod != nullptr && gHasPlayMethod != nullptr
         && gCancelPendingOperationsMethod != nullptr
@@ -154,6 +161,13 @@ static void ensureAuthAdapterMethodsLocked(JNIEnv* env) {
             gAuthAdapterClass,
             "loginSync",
             "(Landroid/content/Context;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZZZZZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;J)V"
+        );
+    }
+    if (gCreateNonceMethod == nullptr) {
+        gCreateNonceMethod = env->GetStaticMethodID(
+            gAuthAdapterClass,
+            "createNonce",
+            "()[Ljava/lang/String;"
         );
     }
     if (gRequestScopesMethod == nullptr) {
@@ -206,7 +220,7 @@ static void ensureAuthAdapterMethodsLocked(JNIEnv* env) {
         );
     }
 
-    if (gLoginMethod == nullptr || gRequestScopesMethod == nullptr
+    if (gLoginMethod == nullptr || gCreateNonceMethod == nullptr || gRequestScopesMethod == nullptr
         || gRefreshMethod == nullptr || gRestoreMethod == nullptr
         || gHasPlayMethod == nullptr || gCancelPendingOperationsMethod == nullptr
         || gLogoutMethod == nullptr
@@ -233,6 +247,7 @@ static AuthAdapterMethods getAuthAdapterMethods(JNIEnv* env) {
         env,
         localClass,
         gLoginMethod,
+        gCreateNonceMethod,
         gRequestScopesMethod,
         gRefreshMethod,
         gRestoreMethod,
@@ -260,6 +275,96 @@ static void invokeCancelPendingOperations(JNIEnv* env) {
         env->ExceptionDescribe();
         env->ExceptionClear();
     }
+}
+
+std::shared_ptr<Promise<AuthNonce>> PlatformAuth::createNonce() {
+    auto promise = Promise<AuthNonce>::create();
+    JNIEnv* env = Environment::current();
+    std::optional<AuthAdapterMethods> methods;
+    try {
+        methods.emplace(getAuthAdapterMethods(env));
+    } catch (...) {
+        promise->reject(std::current_exception());
+        return promise;
+    }
+
+    auto values = static_cast<jobjectArray>(env->CallStaticObjectMethod(methods->clazz, methods->createNonce));
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        promise->reject(makeAuthError(AuthErrorCode::CONFIGURATION_ERROR));
+        return promise;
+    }
+    if (values == nullptr) {
+        promise->reject(makeAuthError(AuthErrorCode::INVALID_NONCE));
+        return promise;
+    }
+
+    const jsize valueCount = env->GetArrayLength(values);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        env->DeleteLocalRef(values);
+        promise->reject(makeAuthError(AuthErrorCode::INVALID_NONCE));
+        return promise;
+    }
+    if (valueCount != 2) {
+        env->DeleteLocalRef(values);
+        promise->reject(makeAuthError(AuthErrorCode::INVALID_NONCE));
+        return promise;
+    }
+
+    auto rawValue = static_cast<jstring>(env->GetObjectArrayElement(values, 0));
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        env->DeleteLocalRef(values);
+        promise->reject(makeAuthError(AuthErrorCode::INVALID_NONCE));
+        return promise;
+    }
+    auto hashedValue = static_cast<jstring>(env->GetObjectArrayElement(values, 1));
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        if (rawValue != nullptr) env->DeleteLocalRef(rawValue);
+        env->DeleteLocalRef(values);
+        promise->reject(makeAuthError(AuthErrorCode::INVALID_NONCE));
+        return promise;
+    }
+    env->DeleteLocalRef(values);
+    if (rawValue == nullptr || hashedValue == nullptr) {
+        if (rawValue != nullptr) env->DeleteLocalRef(rawValue);
+        if (hashedValue != nullptr) env->DeleteLocalRef(hashedValue);
+        promise->reject(makeAuthError(AuthErrorCode::INVALID_NONCE));
+        return promise;
+    }
+
+    const char* rawChars = env->GetStringUTFChars(rawValue, nullptr);
+    const bool rawFetchThrew = env->ExceptionCheck();
+    if (rawFetchThrew || rawChars == nullptr) {
+        if (rawFetchThrew) env->ExceptionClear();
+        if (rawChars != nullptr) env->ReleaseStringUTFChars(rawValue, rawChars);
+        env->DeleteLocalRef(rawValue);
+        env->DeleteLocalRef(hashedValue);
+        promise->reject(makeAuthError(AuthErrorCode::INVALID_NONCE));
+        return promise;
+    }
+    const char* hashedChars = env->GetStringUTFChars(hashedValue, nullptr);
+    if (env->ExceptionCheck() || hashedChars == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        env->ReleaseStringUTFChars(rawValue, rawChars);
+        if (hashedChars != nullptr) env->ReleaseStringUTFChars(hashedValue, hashedChars);
+        env->DeleteLocalRef(rawValue);
+        env->DeleteLocalRef(hashedValue);
+        promise->reject(makeAuthError(AuthErrorCode::INVALID_NONCE));
+        return promise;
+    }
+
+    AuthNonce nonce;
+    nonce.raw = rawChars;
+    nonce.hashed = hashedChars;
+    env->ReleaseStringUTFChars(rawValue, rawChars);
+    env->ReleaseStringUTFChars(hashedValue, hashedChars);
+    env->DeleteLocalRef(rawValue);
+    env->DeleteLocalRef(hashedValue);
+    promise->resolve(nonce);
+    return promise;
 }
 
 std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, const std::optional<LoginOptions>& options) {
@@ -717,7 +822,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_auth_AuthAdapter_nativeInitialize(JNI
 
 extern "C" JNIEXPORT jboolean JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuccess(
     JNIEnv* env, jclass,
-    jstring origin, jstring provider, jstring email, jstring name, jstring photo, jstring idToken, jstring accessToken, jstring serverAuthCode, jstring userId, jstring phoneNumber, jstring hostedDomain, jobjectArray scopes, jobject expirationTime, jlong generation) {
+    jstring origin, jstring provider, jstring email, jstring name, jstring firstName, jstring lastName, jstring photo, jstring idToken, jstring accessToken, jstring serverAuthCode, jstring userId, jstring phoneNumber, jstring hostedDomain, jobjectArray scopes, jobject expirationTime, jlong generation) {
 
     const char* originCStr = env->GetStringUTFChars(origin, nullptr);
     std::string originStr(originCStr);
@@ -770,6 +875,16 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuc
         const char* s = env->GetStringUTFChars(name, nullptr);
         user.name = std::string(s);
         env->ReleaseStringUTFChars(name, s);
+    }
+    if (firstName) {
+        const char* s = env->GetStringUTFChars(firstName, nullptr);
+        user.firstName = std::string(s);
+        env->ReleaseStringUTFChars(firstName, s);
+    }
+    if (lastName) {
+        const char* s = env->GetStringUTFChars(lastName, nullptr);
+        user.lastName = std::string(s);
+        env->ReleaseStringUTFChars(lastName, s);
     }
     if (photo) {
         const char* s = env->GetStringUTFChars(photo, nullptr);

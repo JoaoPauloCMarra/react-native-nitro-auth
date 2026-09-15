@@ -3,6 +3,7 @@ import GoogleSignIn
 import AuthenticationServices
 import NitroModules
 import CommonCrypto
+import Security
 
 @objc
 public class AuthAdapter: NSObject {
@@ -64,6 +65,26 @@ public class AuthAdapter: NSObject {
   static let formUrlEncodedAllowedCharacters = CharacterSet(
     charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
   )
+
+  @objc
+  public static func createNonce() -> NSDictionary? {
+    var randomBytes = [UInt8](repeating: 0, count: 32)
+    guard SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes) == errSecSuccess else {
+      return nil
+    }
+
+    let raw = Data(randomBytes).base64EncodedString()
+      .replacingOccurrences(of: "+", with: "-")
+      .replacingOccurrences(of: "/", with: "_")
+      .replacingOccurrences(of: "=", with: "")
+    guard let data = raw.data(using: .ascii) else { return nil }
+    var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+    data.withUnsafeBytes {
+      _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &digest)
+    }
+    let hashed = Data(digest).map { String(format: "%02x", $0) }.joined()
+    return ["raw": raw, "hashed": hashed] as NSDictionary
+  }
 
   static func advanceOperation() -> AuthOperationToken {
     tokenStoreLock.lock()
@@ -186,7 +207,7 @@ public class AuthAdapter: NSObject {
             return
           }
           GIDSignIn.sharedInstance.signIn(withPresenting: rootVC, hint: effectiveHint, additionalScopes: additionalScopes, nonce: nonce) { result, error in
-            self.handleGoogleResult(result, error: error, operation: operation, completion: complete)
+            self.handleGoogleResult(result, error: error, operation: operation, expectedNonce: nonce, completion: complete)
           }
         }
 

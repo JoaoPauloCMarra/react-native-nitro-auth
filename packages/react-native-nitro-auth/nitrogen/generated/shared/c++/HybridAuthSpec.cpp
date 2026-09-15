@@ -17,6 +17,7 @@ namespace margelo::nitro::NitroAuth {
       prototype.registerHybridGetter("currentUser", &HybridAuthSpec::getCurrentUser);
       prototype.registerHybridGetter("grantedScopes", &HybridAuthSpec::getGrantedScopes);
       prototype.registerHybridGetter("hasPlayServices", &HybridAuthSpec::getHasPlayServices);
+      prototype.registerHybridMethod("createNonce", &HybridAuthSpec::createNonce);
       prototype.registerHybridMethod("login", &HybridAuthSpec::login);
       prototype.registerHybridMethod("requestScopes", &HybridAuthSpec::requestScopes);
       prototype.registerHybridMethod("revokeScopes", &HybridAuthSpec::revokeScopes);

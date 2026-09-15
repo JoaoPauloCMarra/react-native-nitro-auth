@@ -1,6 +1,9 @@
 import type {
   AuthLogin,
   AuthLoginAndGetUser,
+  AuthGetCredential,
+  CredentialOptions,
+  CredentialProvider,
   AuthError,
   AppleIOSLoginOptions,
   AppleLoginOptions,
@@ -68,6 +71,9 @@ type TypedAuthUsesProviderLogin = AssertTrue<
 type TypedAuthUsesLoginAndGetUser = AssertTrue<
   IsAssignable<TypedAuth["loginAndGetUser"], AuthLoginAndGetUser>
 >;
+type TypedAuthUsesGetCredential = AssertTrue<
+  IsAssignable<TypedAuth["getCredential"], AuthGetCredential>
+>;
 type HookUsesProviderLogin = AssertTrue<
   IsAssignable<UseAuthReturn["login"], AuthLogin>
 >;
@@ -79,6 +85,22 @@ type WebProviderOptionsMatchNative = AssertTrue<
 >;
 type WebHookUsesProviderLogin = AssertTrue<
   IsAssignable<WebUseAuthReturn["login"], AuthLogin>
+>;
+type GoogleCredentialOptions = CredentialOptions<"google">;
+type AppleCredentialOptions = CredentialOptions<"apple">;
+type CredentialProviderValues = AssertTrue<
+  IsAssignable<CredentialProvider, "google" | "apple"> extends true
+    ? IsAssignable<"google" | "apple", CredentialProvider>
+    : false
+>;
+type GoogleCredentialRejectsNonce = AssertTrue<
+  "nonce" extends keyof GoogleCredentialOptions ? false : true
+>;
+type AppleCredentialRejectsNonce = AssertTrue<
+  "nonce" extends keyof AppleCredentialOptions ? false : true
+>;
+type GoogleCredentialRejectsLegacy = AssertTrue<
+  "useLegacyGoogleSignIn" extends keyof GoogleCredentialOptions ? false : true
 >;
 type SocialButtonErrorCallback = (error: AuthError) => void;
 type BroadSocialButtonErrorCallback = (error: unknown) => void;
@@ -164,9 +186,14 @@ void (0 as unknown as NativeServiceUsesTypedAuth);
 void (0 as unknown as WebServiceUsesTypedAuth);
 void (0 as unknown as TypedAuthUsesProviderLogin);
 void (0 as unknown as TypedAuthUsesLoginAndGetUser);
+void (0 as unknown as TypedAuthUsesGetCredential);
 void (0 as unknown as HookUsesProviderLogin);
 void (0 as unknown as WebProviderOptionsMatchNative);
 void (0 as unknown as WebHookUsesProviderLogin);
+void (0 as unknown as CredentialProviderValues);
+void (0 as unknown as GoogleCredentialRejectsNonce);
+void (0 as unknown as AppleCredentialRejectsNonce);
+void (0 as unknown as GoogleCredentialRejectsLegacy);
 void (0 as unknown as NativeSocialButtonError);
 void (0 as unknown as NativeSocialButtonAcceptsAuthError);
 void (0 as unknown as NativeSocialButtonAcceptsBroadError);

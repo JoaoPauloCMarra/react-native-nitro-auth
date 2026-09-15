@@ -2,16 +2,28 @@ import type {
   Auth,
   AuthEvent,
   AuthProvider,
+  AuthNonce,
   AuthTokens,
   AuthUser,
+  LoginOptions,
   ScopeRevocationResult,
 } from "./Auth.nitro";
-import type { ProviderLoginOptions, TypedAuth } from "./provider-options";
+import type {
+  AuthCredential,
+  CredentialOptions,
+  CredentialProvider,
+  ProviderLoginOptions,
+  TypedAuth,
+} from "./provider-options";
 import { AuthError, type AuthOperation } from "./utils/auth-error";
 
 type AuthSource = () => Auth;
 type AuthDisposeHandler = (auth: Auth) => void;
 type AuthWithOptionalNativeMembers = Auth & {
+  loginForCredential?: (
+    provider: AuthProvider,
+    options?: LoginOptions,
+  ) => Promise<void>;
   onAuthStateChanged?: (
     callback: (user: AuthUser | undefined) => void,
   ) => () => void;
@@ -47,6 +59,25 @@ export function createAuthService(
   getAuth: AuthSource,
   onDispose?: AuthDisposeHandler,
 ): TypedAuth {
+  let credentialAcquisitionInFlight = false;
+  let sessionOperationsInFlight = 0;
+  let authOperationGeneration = 0;
+
+  const runSessionOperation = async <T>(
+    operation: AuthOperation,
+    run: () => Promise<T>,
+  ): Promise<T> => {
+    if (credentialAcquisitionInFlight) {
+      throw new AuthError("operation_in_progress", operation);
+    }
+    sessionOperationsInFlight += 1;
+    try {
+      return await run();
+    } finally {
+      sessionOperationsInFlight -= 1;
+    }
+  };
+
   return {
     get name() {
       return wrapSyncAuthOperation(undefined, () => getAuth().name);
@@ -72,7 +103,7 @@ export function createAuthService(
       options?: ProviderLoginOptions<Provider>,
     ) {
       return wrapAuthOperation("login", () =>
-        getAuth().login(provider, options),
+        runSessionOperation("login", () => getAuth().login(provider, options)),
       );
     },
 
@@ -80,70 +111,188 @@ export function createAuthService(
       provider: Provider,
       options?: ProviderLoginOptions<Provider>,
     ) {
-      return wrapAuthOperation("login", async () => {
-        await getAuth().login(provider, options);
-        const user = getAuth().currentUser;
-        if (!user) {
-          throw new AuthError("not_signed_in", "login");
+      return wrapAuthOperation("login", () =>
+        runSessionOperation("login", async () => {
+          await getAuth().login(provider, options);
+          const user = getAuth().currentUser;
+          if (!user) {
+            throw new AuthError("not_signed_in", "login");
+          }
+          return user;
+        }),
+      );
+    },
+
+    getCredential<Provider extends CredentialProvider>(
+      provider: Provider,
+      options?: CredentialOptions<Provider>,
+    ): Promise<AuthCredential> {
+      return wrapAuthOperation("getCredential", async () => {
+        if (provider !== "google" && provider !== "apple") {
+          throw new AuthError("unsupported_provider", "getCredential");
         }
-        return user;
+        if (credentialAcquisitionInFlight || sessionOperationsInFlight > 0) {
+          throw new AuthError("operation_in_progress", "getCredential");
+        }
+
+        credentialAcquisitionInFlight = true;
+        try {
+          const operationGeneration = authOperationGeneration;
+          const auth = getAuth();
+          let nativeLoginStarted = false;
+          let hasPrimaryError = false;
+          let primaryError: unknown;
+          let credential: AuthCredential | undefined;
+
+          try {
+            const nonce: AuthNonce = await auth.createNonce();
+            if (operationGeneration !== authOperationGeneration) {
+              throw new AuthError("cancelled", "getCredential");
+            }
+            if (
+              typeof nonce?.raw !== "string" ||
+              nonce.raw.length === 0 ||
+              typeof nonce.hashed !== "string" ||
+              !/^[a-f0-9]{64}$/.test(nonce.hashed)
+            ) {
+              throw new AuthError("invalid_nonce", "getCredential");
+            }
+
+            const loginOptions: LoginOptions = {
+              ...options,
+              scopes:
+                options?.scopes ??
+                (provider === "google"
+                  ? ["openid", "email", "profile"]
+                  : ["email", "fullName"]),
+              nonce: nonce.hashed,
+            };
+            delete loginOptions.useLegacyGoogleSignIn;
+
+            nativeLoginStarted = true;
+            const loginForCredential = (auth as AuthWithOptionalNativeMembers)
+              .loginForCredential;
+            if (loginForCredential) {
+              await loginForCredential.call(auth, provider, loginOptions);
+            } else {
+              await auth.login(provider, loginOptions);
+            }
+            if (operationGeneration !== authOperationGeneration) {
+              throw new AuthError("cancelled", "getCredential");
+            }
+
+            const user = auth.currentUser;
+            if (user?.provider !== provider) {
+              throw new AuthError("invalid_state", "getCredential");
+            }
+            if (typeof user.idToken !== "string" || user.idToken.length === 0) {
+              throw new AuthError("no_id_token", "getCredential");
+            }
+
+            const copiedUser: AuthUser = { ...user };
+            if (user.scopes) {
+              copiedUser.scopes = [...user.scopes];
+            }
+            credential = {
+              provider,
+              idToken: user.idToken,
+              nonce: nonce.raw,
+              user: copiedUser,
+            };
+          } catch (error: unknown) {
+            hasPrimaryError = true;
+            primaryError = error;
+          }
+
+          if (nativeLoginStarted) {
+            try {
+              auth.logout();
+            } catch (cleanupError: unknown) {
+              if (!hasPrimaryError) {
+                hasPrimaryError = true;
+                primaryError = cleanupError;
+              }
+            }
+          }
+
+          if (hasPrimaryError) {
+            throw primaryError;
+          }
+          if (!credential) {
+            throw new AuthError("unknown", "getCredential");
+          }
+          return credential;
+        } finally {
+          credentialAcquisitionInFlight = false;
+        }
       });
     },
 
     requestScopes(scopes: string[]) {
       return wrapAuthOperation("requestScopes", () =>
-        getAuth().requestScopes(scopes),
+        runSessionOperation("requestScopes", () =>
+          getAuth().requestScopes(scopes),
+        ),
       );
     },
 
     revokeScopes(scopes: string[]): Promise<void> {
       return wrapAuthOperation("revokeScopes", () =>
-        getAuth().revokeScopes(scopes),
+        runSessionOperation("revokeScopes", () =>
+          getAuth().revokeScopes(scopes),
+        ),
       );
     },
 
     revokeScopesWithResult(scopes: string[]): Promise<ScopeRevocationResult> {
-      return wrapAuthOperation("revokeScopes", async () => {
-        const auth = getAuth();
-        const scopesToRevoke = new Set(scopes);
-        const revokedScopes = auth.grantedScopes.filter((scope) =>
-          scopesToRevoke.has(scope),
-        );
-        await auth.revokeScopes(scopes);
-        return { revokedAtProvider: false, revokedScopes };
-      });
+      return wrapAuthOperation("revokeScopes", () =>
+        runSessionOperation("revokeScopes", async () => {
+          const auth = getAuth();
+          const scopesToRevoke = new Set(scopes);
+          const revokedScopes = auth.grantedScopes.filter((scope) =>
+            scopesToRevoke.has(scope),
+          );
+          await auth.revokeScopes(scopes);
+          return { revokedAtProvider: false, revokedScopes };
+        }),
+      );
     },
 
     revokeAccess() {
-      return wrapAuthOperation("revokeAccess", async () => {
-        const auth = getAuth() as AuthWithOptionalNativeMembers;
-        if (auth.revokeAccess) {
-          await auth.revokeAccess();
-          return;
-        }
-        throw new AuthError("configuration_error");
-      });
+      return wrapAuthOperation("revokeAccess", () =>
+        runSessionOperation("revokeAccess", async () => {
+          const auth = getAuth() as AuthWithOptionalNativeMembers;
+          if (auth.revokeAccess) {
+            await auth.revokeAccess();
+            return;
+          }
+          throw new AuthError("configuration_error");
+        }),
+      );
     },
 
     getAccessToken() {
       return wrapAuthOperation("getAccessToken", () =>
-        getAuth().getAccessToken(),
+        runSessionOperation("getAccessToken", () => getAuth().getAccessToken()),
       );
     },
 
     refreshToken() {
-      return wrapAuthOperation("refreshToken", () => getAuth().refreshToken());
+      return wrapAuthOperation("refreshToken", () =>
+        runSessionOperation("refreshToken", () => getAuth().refreshToken()),
+      );
     },
 
     logout() {
       wrapSyncAuthOperation("logout", () => {
+        authOperationGeneration += 1;
         getAuth().logout();
       });
     },
 
     silentRestore() {
       return wrapAuthOperation("silentRestore", () =>
-        getAuth().silentRestore(),
+        runSessionOperation("silentRestore", () => getAuth().silentRestore()),
       );
     },
 
@@ -177,6 +326,7 @@ export function createAuthService(
 
     dispose() {
       wrapSyncAuthOperation("dispose", () => {
+        authOperationGeneration += 1;
         const auth = getAuth();
         auth.dispose();
         onDispose?.(auth);

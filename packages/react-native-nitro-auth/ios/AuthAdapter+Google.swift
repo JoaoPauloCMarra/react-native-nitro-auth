@@ -26,7 +26,7 @@ extension AuthAdapter {
     return true
   }
 
-  static func handleGoogleResult(_ result: GIDSignInResult?, error: Error?, operation: AuthAdapter.AuthOperationToken, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
+  static func handleGoogleResult(_ result: GIDSignInResult?, error: Error?, operation: AuthAdapter.AuthOperationToken, expectedNonce: String? = nil, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
     if let error = error {
       completion(nil, NSNumber(value: mapError(error).rawValue), error.localizedDescription)
       return
@@ -35,6 +35,18 @@ extension AuthAdapter {
     guard let user = result?.user else {
       completion(nil, NSNumber(value: AuthErrorCode.unknown.rawValue), nil)
       return
+    }
+
+    let idToken = user.idToken?.tokenString
+    if let expectedNonce = expectedNonce {
+      guard let idToken = idToken, !idToken.isEmpty else {
+        completion(nil, NSNumber(value: AuthErrorCode.noIdToken.rawValue), nil)
+        return
+      }
+      guard AuthAdapter.decodeJwt(idToken)["nonce"] == expectedNonce else {
+        completion(nil, NSNumber(value: AuthErrorCode.invalidNonce.rawValue), nil)
+        return
+      }
     }
 
     let serverAuthCode = result?.serverAuthCode ?? ""
@@ -53,8 +65,10 @@ extension AuthAdapter {
       "provider": "google",
       "email": user.profile?.email ?? "",
       "name": user.profile?.name ?? "",
+      "firstName": user.profile?.givenName ?? "",
+      "lastName": user.profile?.familyName ?? "",
       "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
-      "idToken": user.idToken?.tokenString ?? "",
+      "idToken": idToken ?? "",
       "accessToken": user.accessToken.tokenString,
       "serverAuthCode": serverAuthCode,
       "userId": user.userID ?? "",

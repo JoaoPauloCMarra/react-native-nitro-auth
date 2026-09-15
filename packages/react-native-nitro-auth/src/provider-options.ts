@@ -12,6 +12,10 @@ type StrictLoginOptions<AllowedKeys extends keyof LoginOptions> = Pick<
 > &
   Partial<Record<Exclude<keyof LoginOptions, AllowedKeys>, never>>;
 
+type WithoutNonce<Options> = Options extends LoginOptions
+  ? Omit<Options, "nonce" | "useLegacyGoogleSignIn">
+  : never;
+
 type GoogleCommonKeys =
   "scopes" | "loginHint" | "nonce" | "forceAccountPicker" | "hostedDomain";
 
@@ -52,6 +56,21 @@ export type LoginOptionsByProvider = {
 export type ProviderLoginOptions<Provider extends AuthProvider> =
   LoginOptionsByProvider[Provider];
 
+export type CredentialProvider = "google" | "apple";
+
+export type CredentialOptions<Provider extends CredentialProvider> =
+  Provider extends "google"
+    ? WithoutNonce<GoogleLoginOptions>
+    : WithoutNonce<AppleLoginOptions>;
+
+export type AuthCredential = {
+  provider: CredentialProvider;
+  idToken: string;
+  /** The raw nonce used to create the provider's ID token. */
+  nonce: string;
+  user: AuthUser;
+};
+
 export type AuthLogin = <Provider extends AuthProvider>(
   provider: Provider,
   options?: ProviderLoginOptions<Provider>,
@@ -62,8 +81,14 @@ export type AuthLoginAndGetUser = <Provider extends AuthProvider>(
   options?: ProviderLoginOptions<Provider>,
 ) => Promise<AuthUser>;
 
-export type TypedAuth = Omit<Auth, "login"> & {
+export type AuthGetCredential = <Provider extends CredentialProvider>(
+  provider: Provider,
+  options?: CredentialOptions<Provider>,
+) => Promise<AuthCredential>;
+
+export type TypedAuth = Omit<Auth, "login" | "createNonce"> & {
   login: AuthLogin;
   loginAndGetUser: AuthLoginAndGetUser;
+  getCredential: AuthGetCredential;
   revokeScopesWithResult: (scopes: string[]) => Promise<ScopeRevocationResult>;
 };

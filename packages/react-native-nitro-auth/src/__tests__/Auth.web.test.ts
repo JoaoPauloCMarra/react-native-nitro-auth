@@ -8,6 +8,8 @@ type TestAuthUser = {
   provider: string;
   email?: string;
   name?: string;
+  firstName?: string;
+  lastName?: string;
   photo?: string;
   accessToken?: string;
   idToken?: string;
@@ -26,6 +28,7 @@ type TestAuthEvent = {
 type TestAuthModule = {
   currentUser: TestAuthUser | undefined;
   grantedScopes: string[];
+  createNonce: () => Promise<{ raw: string; hashed: string }>;
   logout: () => void;
   login: (
     provider: "google" | "apple" | "microsoft",
@@ -160,6 +163,16 @@ describe("AuthModule (web)", () => {
         value: () => "test-random-uuid",
       });
     }
+    Object.defineProperty(globalThis.crypto, "getRandomValues", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(<T extends ArrayBufferView>(array: T) => {
+        new Uint8Array(array.buffer, array.byteOffset, array.byteLength).fill(
+          1,
+        );
+        return array;
+      }),
+    });
     if (typeof globalThis.TextEncoder !== "function") {
       Object.defineProperty(globalThis, "TextEncoder", {
         configurable: true,
@@ -194,6 +207,64 @@ describe("AuthModule (web)", () => {
       writable: true,
       value: originalFetch,
     });
+  });
+
+  it("creates a random raw nonce and SHA-256 hex hash with WebCrypto", async () => {
+    const digest = globalThis.crypto.subtle.digest as jest.Mock;
+    const auth = await loadAuthModule();
+
+    const result = await auth.createNonce();
+
+    expect(result.raw).toBe("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE");
+    expect(result.hashed).toBe("00".repeat(32));
+    expect(globalThis.crypto.getRandomValues).toHaveBeenCalledTimes(1);
+    expect(digest).toHaveBeenCalledWith(
+      "SHA-256",
+      new TextEncoder().encode(result.raw),
+    );
+  });
+
+  it("does not persist a credential-only login when token persistence is enabled", async () => {
+    jest.useFakeTimers();
+    const idToken = createJwtWithPayload({
+      email: "credential@example.com",
+      nonce: "00".repeat(32),
+    });
+    const popup = {
+      closed: false,
+      close: jest.fn(),
+      location: { href: "" },
+    } as unknown as Window;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: jest.fn((url: string) => {
+        const state = new URL(url).searchParams.get("state");
+        popup.location.href = `${window.location.origin}#id_token=${idToken}&state=${state}&expires_in=3600`;
+        return popup;
+      }),
+    });
+    const setItem = jest.spyOn(Storage.prototype, "setItem");
+    const auth = await loadAuthService({
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+      nitroAuthPersistTokensOnWeb: true,
+    });
+
+    const credentialPromise = auth.getCredential("google");
+    await Promise.all([
+      expect(credentialPromise).resolves.toMatchObject({
+        provider: "google",
+        idToken,
+      }),
+      jest.advanceTimersByTimeAsync(501),
+    ]);
+
+    const persistedAuthKeys = setItem.mock.calls
+      .map(([key]) => key)
+      .filter((key) => key === CACHE_KEY || key === SCOPES_KEY);
+    expect(persistedAuthKeys).toEqual([]);
+    expect(sessionStorage.getItem(CACHE_KEY)).toBeNull();
+    expect(sessionStorage.getItem(SCOPES_KEY)).toBeNull();
   });
 
   it("defaults to session storage and strips sensitive tokens from persisted user", async () => {
@@ -1193,6 +1264,8 @@ describe("AuthModule (web)", () => {
         provider: "google",
         email: "pii@example.com",
         name: "PII Name",
+        firstName: "PII",
+        lastName: "Name",
         photo: "https://example.com/photo.jpg",
         userId: "sub-123",
       }),
@@ -1204,6 +1277,8 @@ describe("AuthModule (web)", () => {
     });
     expect(auth.currentUser?.email).toBeUndefined();
     expect(auth.currentUser?.name).toBeUndefined();
+    expect(auth.currentUser?.firstName).toBeUndefined();
+    expect(auth.currentUser?.lastName).toBeUndefined();
     expect(auth.currentUser?.photo).toBeUndefined();
     expect(auth.currentUser?.userId).toBe("sub-123");
   });
@@ -1905,6 +1980,35 @@ describe("AuthModule (web)", () => {
     );
   });
 
+  it("maps fullName to Apple's web name scope", async () => {
+    const initMock = jest.fn();
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: {
+        auth: {
+          init: initMock,
+          signIn: jest.fn(async () => ({
+            authorization: {
+              id_token: createJwtWithPayload({ nonce: "test-random-uuid" }),
+            },
+          })),
+        },
+      },
+    });
+
+    const auth = await loadAuthModule({
+      appleWebClientId: "apple-client-id",
+    });
+
+    await expect(
+      auth.login("apple", { scopes: ["email", "fullName"] }),
+    ).resolves.toBeUndefined();
+    expect(initMock).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "email name" }),
+    );
+  });
+
   it("isolates throwing auth-state listeners", async () => {
     const auth = await loadAuthModule();
     const throwing = jest.fn(() => {
@@ -2096,6 +2200,8 @@ describe("AuthModule (web)", () => {
 
     await auth.login("apple");
     expect(auth.currentUser?.name).toBe("Jane Doe");
+    expect(auth.currentUser?.firstName).toBe("Jane");
+    expect(auth.currentUser?.lastName).toBe("Doe");
   });
 
   it("resetAuthModule ignores foreign instances", async () => {
