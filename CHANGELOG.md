@@ -40,6 +40,8 @@ Breaking changes are always listed first in each release section.
 
 ### Fixed
 
+- Failed event subscriptions release their listeners, and snapshot dispatch
+  skips listeners unsubscribed earlier in the same dispatch.
 - Social buttons keep the provider mark, chrome, and size while loading, so
   turning `loading` on or off never moves or resizes the control. Labeled
   buttons place the indicator beside the mark; icon-only buttons dim the mark

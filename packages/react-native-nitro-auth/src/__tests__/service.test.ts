@@ -691,4 +691,38 @@ describe("AuthService", () => {
     remove();
     remove();
   });
+
+  it("does not retain an event listener when native registration fails", async () => {
+    const observer = jest.fn();
+    native().onAuthEvent.mockImplementationOnce(() => {
+      throw new Error("configuration_error");
+    });
+    expect(() => AuthService.onAuthEvent(observer)).toThrow(AuthError);
+    await AuthService.getAccessToken();
+    expect(observer).not.toHaveBeenCalled();
+  });
+
+  it("does not deliver a snapshot to a listener removed during dispatch", () => {
+    let deliver: ((snapshot: AuthSessionSnapshot) => void) | undefined;
+    const backend = {
+      ...native(),
+      getSessionSnapshot: jest.fn(() => ({ revision: 0, scopes: [] })),
+      onSessionChanged: jest.fn(
+        (listener: (snapshot: AuthSessionSnapshot) => void) => {
+          deliver = listener;
+          return jest.fn();
+        },
+      ),
+    };
+    const service = createAuthService(() => backend);
+    let removeSecond: () => void = jest.fn();
+    const removeFirst = service.onSessionChanged(() => {
+      removeSecond();
+    });
+    const second = jest.fn();
+    removeSecond = service.onSessionChanged(second);
+    deliver?.({ revision: 1, scopes: [] });
+    expect(second).not.toHaveBeenCalled();
+    removeFirst();
+  });
 });

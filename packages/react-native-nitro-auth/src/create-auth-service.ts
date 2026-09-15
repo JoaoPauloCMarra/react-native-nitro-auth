@@ -71,6 +71,7 @@ export function createAuthService(
   let removeSnapshot: (() => void) | undefined;
   const publishSnapshot = (snapshot: AuthSessionSnapshot) => {
     for (const callback of [...snapshotSubscribers]) {
+      if (!snapshotSubscribers.has(callback)) continue;
       try {
         callback(snapshot);
       } catch {
@@ -375,9 +376,15 @@ export function createAuthService(
         const auth = getAuth() as AuthWithOptionalNativeMembers;
         return subscribe((listener) => {
           eventSubscribers.add(listener);
-          const remove = auth.onAuthEvent?.((event) => {
-            if (event.type !== "dispose") listener(event);
-          });
+          let remove: (() => void) | undefined;
+          try {
+            remove = auth.onAuthEvent?.((event) => {
+              if (event.type !== "dispose") listener(event);
+            });
+          } catch (error) {
+            eventSubscribers.delete(listener);
+            throw error;
+          }
           return () => {
             eventSubscribers.delete(listener);
             remove?.();
