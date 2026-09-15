@@ -27,24 +27,24 @@ class AppleAndroidBrokerTest {
     fun brokerConfigurationRequiresAnHttpsBaseUrlAndCustomCallbackScheme() {
         val config = AppleAndroidBrokerConfig.parse(
             baseUrl = "https://auth.example.test/mobile/",
-            callbackScheme = "sidekick-auth",
+            callbackScheme = "nitro-auth-example",
         )
 
         assertNotNull(config)
         assertEquals("https://auth.example.test/mobile", config?.baseUrl)
-        assertEquals("sidekick-auth", config?.callbackScheme)
-        assertNull(AppleAndroidBrokerConfig.parse("http://auth.example.test", "sidekick-auth"))
-        assertNull(AppleAndroidBrokerConfig.parse("https://user:pass@auth.example.test", "sidekick-auth"))
-        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test?next=/", "sidekick-auth"))
+        assertEquals("nitro-auth-example", config?.callbackScheme)
+        assertNull(AppleAndroidBrokerConfig.parse("http://auth.example.test", "nitro-auth-example"))
+        assertNull(AppleAndroidBrokerConfig.parse("https://user:pass@auth.example.test", "nitro-auth-example"))
+        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test?next=/", "nitro-auth-example"))
         assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test", "https"))
-        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test", "sidekick-auth/callback"))
-        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test", "Sidekick-auth"))
+        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test", "nitro-auth-example/callback"))
+        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test", "Nitro-auth-example"))
         assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test", "javascript"))
-        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test:0", "sidekick-auth"))
-        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test/a/../b", "sidekick-auth"))
-        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test/%2e%2e/admin", "sidekick-auth"))
-        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test/%2fadmin", "sidekick-auth"))
-        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test/%5cadmin", "sidekick-auth"))
+        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test:0", "nitro-auth-example"))
+        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test/a/../b", "nitro-auth-example"))
+        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test/%2e%2e/admin", "nitro-auth-example"))
+        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test/%2fadmin", "nitro-auth-example"))
+        assertNull(AppleAndroidBrokerConfig.parse("https://auth.example.test/%5cadmin", "nitro-auth-example"))
     }
 
     @Test
@@ -60,21 +60,21 @@ class AppleAndroidBrokerTest {
     fun callbackMustMatchExactSchemePathAndCurrentUuidAttemptAndCanOnlyBeClaimedOnce() {
         val activeAttempt = "047168d4-5b95-4ea2-9b46-193bc1ea0fc8"
         val otherAttempt = "efc90a19-0a12-4aca-8b8f-68aaddd22c8a"
-        val callback = "sidekick-auth://apple/callback?attemptId=$activeAttempt"
+        val callback = "nitro-auth-example://apple/callback?attemptId=$activeAttempt"
 
         assertEquals(
             AppleCallbackDecision.CURRENT,
-            classifyAppleCallback(callback, "sidekick-auth", activeAttempt, alreadyHandled = false),
+            classifyAppleCallback(callback, "nitro-auth-example", activeAttempt, alreadyHandled = false),
         )
         assertEquals(
             AppleCallbackDecision.DUPLICATE,
-            classifyAppleCallback(callback, "sidekick-auth", activeAttempt, alreadyHandled = true),
+            classifyAppleCallback(callback, "nitro-auth-example", activeAttempt, alreadyHandled = true),
         )
         assertEquals(
             AppleCallbackDecision.STALE,
             classifyAppleCallback(
-                "sidekick-auth://apple/callback?attemptId=$otherAttempt",
-                "sidekick-auth",
+                "nitro-auth-example://apple/callback?attemptId=$otherAttempt",
+                "nitro-auth-example",
                 activeAttempt,
                 alreadyHandled = false,
             ),
@@ -82,8 +82,8 @@ class AppleAndroidBrokerTest {
         assertEquals(
             AppleCallbackDecision.INVALID,
             classifyAppleCallback(
-                "sidekick-auth://evil/callback?attemptId=$activeAttempt",
-                "sidekick-auth",
+                "nitro-auth-example://evil/callback?attemptId=$activeAttempt",
+                "nitro-auth-example",
                 activeAttempt,
                 alreadyHandled = false,
             ),
@@ -91,15 +91,15 @@ class AppleAndroidBrokerTest {
         assertEquals(
             AppleCallbackDecision.INVALID,
             classifyAppleCallback(
-                "sidekick-auth://apple/callback?attemptId=$activeAttempt&id_token=secret",
-                "sidekick-auth",
+                "nitro-auth-example://apple/callback?attemptId=$activeAttempt&id_token=secret",
+                "nitro-auth-example",
                 activeAttempt,
                 alreadyHandled = false,
             ),
         )
         assertEquals(
             AppleCallbackDecision.NO_ACTIVE_FLOW,
-            classifyAppleCallback(callback, "sidekick-auth", null, alreadyHandled = false),
+            classifyAppleCallback(callback, "nitro-auth-example", null, alreadyHandled = false),
         )
     }
 
@@ -187,7 +187,7 @@ class AppleAndroidBrokerTest {
 @RunWith(RobolectricTestRunner::class)
 class AppleAndroidBrokerTransportTest {
     private val config = requireNotNull(
-        AppleAndroidBrokerConfig.parse("https://auth.example.test/mobile", "sidekick-auth"),
+        AppleAndroidBrokerConfig.parse("https://auth.example.test/mobile", "nitro-auth-example"),
     )
 
     @Test

@@ -1,5 +1,24 @@
 export * from "./Auth.nitro";
-export * from "./provider-options";
+export type {
+  GoogleIOSLoginOptions,
+  GoogleAndroidLoginOptions,
+  GoogleWebLoginOptions,
+  GoogleLoginOptions,
+  AppleIOSLoginOptions,
+  AppleAndroidScope,
+  AppleAndroidLoginOptions,
+  AppleWebLoginOptions,
+  AppleLoginOptions,
+  MicrosoftLoginOptions,
+  LoginOptionsByProvider,
+  ProviderLoginOptions,
+  CredentialOptions,
+  AuthLogin,
+  AuthLoginAndGetUser,
+  AuthGetCredential,
+  TypedAuth,
+} from "./provider-options";
+export type { AuthLifecycleEvent, AuthOperationEvent } from "./auth-events";
 export * from "./capabilities";
 export * from "./ui/social-button";
 export { useAuth, type UseAuthReturn } from "./use-auth";

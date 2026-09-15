@@ -13,19 +13,25 @@ agree with it. Fixture tests that enforce parts of it live in
 Every public failure is an `AuthError` with:
 
 - `code` — a stable `AuthErrorCode`, safe to switch on;
-- `operation` — the phase that failed (`login`, `requestScopes`, `revokeScopes`,
+- `operation` — the phase that failed (`login`, `getCredential`, `requestScopes`, `revokeScopes`,
   `revokeAccess`, `getAccessToken`, `refreshToken`, `silentRestore`, `logout`,
   `dispose`), attached by the service boundary;
 - `underlyingMessage` — the raw platform/provider detail when it differs from
   the code.
 
 Native boundaries reject with `<code>` or `<code>: <detail>` envelopes; the
-code prefix is the contract and message text is never control flow. iOS,
-Android, and web all populate `AuthError.underlyingMessage` from the `<detail>`
-part when a platform message is available. Web throws
+code prefix is the contract. Native control flow uses typed codes; the JS
+compatibility boundary parses the prefix. Native `underlyingMessage` retains
+the full differing exception message, including its code prefix; structured
+web errors preserve their separate detail. Consumers must not parse detail
+text for control flow or forward it to telemetry without redaction. Web throws
 `AuthWebError(code, underlyingError)`, which the service converts into the
 public `AuthError` envelope. `AuthUser.underlyingError` is deprecated and
 reserved for compatibility; structured details live on `AuthError`.
+
+Getters and subscription setup can fail without an operation. An existing
+`AuthError` is preserved unchanged by `AuthError.from()`, including its existing
+or missing operation.
 
 ### Canonical OAuth error table
 
@@ -92,14 +98,32 @@ service boundary, and the C++ coordinator:
 | SC-09    | Concurrent login settles every promise with a typed result.             |
 
 SC-09 divergence (documented, not a parity defect): native cancels the first
-login (generation advance) and the platform rejects the duplicate with
-`operation_in_progress`; web keeps the first popup alive (browser-owned,
-cannot be closed cross-origin) and rejects the second with
-`operation_in_progress`.
+login (generation advance); the replacement settles with the platform result,
+which may include `operation_in_progress` while provider UI is still active.
+Web keeps the first request active and rejects the second with
+`operation_in_progress`. C++ mock tests prove coordinator settlement, not actual
+provider UI teardown timing.
 
 - `dispose()` rejects pending session and refresh work, clears listeners and
   tokens, and performs platform logout.
-- Listener exceptions are isolated per listener on every platform.
+- Service listeners isolate exceptions, and unsubscribe suppresses queued JS
+  delivery. Snapshot observers follow service recreation; other subscriptions
+  end when disposed.
+
+### Credential acquisition
+
+`AuthService.getCredential()` supports Google and Apple and returns
+`{provider, idToken, nonce, user}` without publishing a package session.
+It rejects an existing session with `invalid_state` before provider setup.
+Overlapping credential/session operations reject with `operation_in_progress`.
+Logout/disposal invalidate pending credential work. A primary failure takes
+precedence over a subsequent cleanup failure; cleanup failure rejects an
+otherwise successful acquisition. C++ transaction tests and web/service tests cover these cases.
+
+Nonce generation is platform-owned on native and uses Web Crypto on web.
+`getCredential()` passes the SHA-256 nonce to the provider and returns its raw
+counterpart. It emits operation events without temporary session events.
+Provider verification remains the server's responsibility.
 
 ## 4. OAuth token client (U4, item 11)
 
@@ -120,8 +144,9 @@ parse identical responses; the fixture corpus in
   intentionally server-side for Google (the package hands `serverAuthCode` to
   the backend), so no verifier is generated for Google. Microsoft uses
   PKCE S256 end-to-end on every platform.
-- Popup completion polls every 500 ms (event-driven completion is impossible
-  cross-origin) and times out after 120 s.
+- Google/Microsoft popup completion polls every 500 ms when its location can be
+  read, backs off to 1000 ms while cross-origin, and times out after 120 s.
+  This implementation does not use a callback-page message protocol.
 - Silent restore never opens interactive UI: a near-expiry Google session
   rejects with `interaction_required`.
 
@@ -140,10 +165,24 @@ parse identical responses; the fixture corpus in
 
 ## 7. Observability (U6, item 20)
 
-`onAuthEvent` delivers privacy-safe typed events: `login_started`,
-`login_succeeded`, `login_failed`, `tokens_refreshed`, `refresh_failed`,
-`session_changed`, `logout`, `dispose`. Events carry `provider` and a typed
-`errorCode` only — never tokens, payloads, or PII.
+`onAuthEvent` delivers the named login, refresh, session, logout, and dispose
+events plus correlated async service operation events. `AuthLifecycleEvent` is
+the full union. Each async call emits `operation_started` and one terminal
+`operation_succeeded` or `operation_failed`, with `operationId`, `operation`,
+optional `provider`, terminal `elapsedMilliseconds`, and failure `errorCode`.
+Validation failures also receive a pair. Disposal terminates pending event pairs
+with `cancelled` before removing event listeners. These payloads never include
+tokens, profile data, or raw provider messages.
+
+State, snapshot, and token subscriptions contain authentication data and must
+not be forwarded to telemetry. Each callback is isolated. Unsubscribe is
+idempotent and prevents queued callback delivery at the service boundary.
+Web legacy state subscriptions deliver an initial value; native ones do not.
+Snapshot consumers read after registration to close that gap.
+
+Refresh dispatches state, token data, then its named lifecycle event. Native JS
+callbacks are asynchronous: do not assume ordering against promise settlement
+or operation-event delivery. See [architecture](native-performance-plan.md).
 
 ## 8. Revocation (U6, item 22)
 

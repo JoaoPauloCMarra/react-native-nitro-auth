@@ -1,7 +1,10 @@
+import type { AuthLifecycleEvent } from "./auth-events";
 import type {
   Auth,
   AuthProvider,
   AuthUser,
+  AuthCredential,
+  CredentialProvider,
   LoginOptions,
   ScopeRevocationResult,
 } from "./Auth.nitro";
@@ -63,20 +66,12 @@ export type LoginOptionsByProvider = {
 export type ProviderLoginOptions<Provider extends AuthProvider> =
   LoginOptionsByProvider[Provider];
 
-export type CredentialProvider = "google" | "apple";
+export type { AuthCredential, CredentialProvider } from "./Auth.nitro";
 
 export type CredentialOptions<Provider extends CredentialProvider> =
   Provider extends "google"
     ? WithoutNonce<GoogleLoginOptions>
     : WithoutNonce<AppleLoginOptions>;
-
-export type AuthCredential = {
-  provider: CredentialProvider;
-  idToken: string;
-  /** The raw nonce used to create the provider's ID token. */
-  nonce: string;
-  user: AuthUser;
-};
 
 export type AuthLogin = <Provider extends AuthProvider>(
   provider: Provider,
@@ -93,7 +88,11 @@ export type AuthGetCredential = <Provider extends CredentialProvider>(
   options?: CredentialOptions<Provider>,
 ) => Promise<AuthCredential>;
 
-export type TypedAuth = Omit<Auth, "login" | "createNonce"> & {
+export type TypedAuth = Omit<
+  Auth,
+  "login" | "createNonce" | "loginAndGetUser" | "getCredential" | "onAuthEvent"
+> & {
+  onAuthEvent(callback: (event: AuthLifecycleEvent) => void): () => void;
   login: AuthLogin;
   loginAndGetUser: AuthLoginAndGetUser;
   getCredential: AuthGetCredential;

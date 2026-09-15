@@ -14,7 +14,8 @@ import {
   toAuthErrorCode,
   useAuth,
   type AuthErrorCode,
-  type AuthProvider,
+  getProviderTokenCapabilities,
+  type AuthLifecycleEvent,
 } from "react-native-nitro-auth";
 
 type TestStatus = "pass" | "fail" | "skip" | "pending";
@@ -71,116 +72,221 @@ function test(name: string, run: () => void | Promise<void>): TestCase {
   };
 }
 
-function unsupported(name: string, detail: string): TestCase {
-  return {
-    name,
-    unsupportedReason: detail,
-    run: () => skip(name, detail),
-  };
+async function expectSignedOutError(run: () => Promise<unknown>) {
+  try {
+    await run();
+  } catch (error) {
+    assert(
+      error instanceof AuthError && error.code === "not_signed_in",
+      "Expected typed not_signed_in",
+    );
+    return;
+  }
+  throw new Error("Expected rejection without a session");
+}
+
+async function cancelProviderOperation(run: () => Promise<unknown>) {
+  const pending = run();
+  AuthService.logout();
+  try {
+    await pending;
+    throw new Error("Provider operation completed after cancellation");
+  } catch (error) {
+    assert(error instanceof AuthError, "Provider error must be an AuthError");
+    const code = (error as AuthError).code;
+    assert(
+      [
+        "cancelled",
+        "configuration_error",
+        "unsupported_provider",
+        "not_signed_in",
+      ].includes(code),
+      `Unexpected provider cancellation code: ${code}`,
+    );
+  }
+  assert(
+    AuthService.currentUser === undefined,
+    "Cancelled operation published a user",
+  );
 }
 
 function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
-  const currentUser = AuthService.currentUser;
-  const tests: TestCase[] = [
-    test("AuthService is available", () => {
-      assert(AuthService != null, "AuthService is null");
-      assert(
-        typeof AuthService.loginAndGetUser === "function",
-        "loginAndGetUser is not a function",
-      );
-      assert(
-        typeof AuthService.revokeScopesWithResult === "function",
-        "revokeScopesWithResult is not a function",
-      );
-      assert(
-        typeof AuthService.revokeAccess === "function",
-        "revokeAccess is not a function",
-      );
+  return [
+    test("Start from a signed-out example session", () => {
+      AuthService.logout();
+      assert(AuthService.currentUser === undefined, "Session did not clear");
     }),
-    test("useAuth exposes the public API", () => {
-      assert(typeof hookReturn.login === "function", "login is not a function");
-      assert(
-        typeof hookReturn.logout === "function",
-        "logout is not a function",
-      );
-      assert(
-        typeof hookReturn.requestScopes === "function",
-        "requestScopes is not a function",
-      );
-      assert(
-        typeof hookReturn.revokeScopes === "function",
-        "revokeScopes is not a function",
-      );
-      assert(
-        typeof hookReturn.revokeScopesWithResult === "function",
-        "revokeScopesWithResult is not a function",
-      );
-      assert(
-        typeof hookReturn.getAccessToken === "function",
-        "getAccessToken is not a function",
-      );
-      assert(
-        typeof hookReturn.refreshToken === "function",
-        "refreshToken is not a function",
-      );
-      assert(
-        typeof hookReturn.silentRestore === "function",
-        "silentRestore is not a function",
-      );
-      assert(typeof hookReturn.loading === "boolean", "loading is not boolean");
-      assert(Array.isArray(hookReturn.scopes), "scopes is not an array");
-    }),
-    test("hasPlayServices returns a boolean", () => {
-      assert(
-        typeof AuthService.hasPlayServices === "boolean",
-        "hasPlayServices is not boolean",
-      );
-    }),
-    test("currentUser is undefined or shaped", () => {
-      const user = AuthService.currentUser;
-      if (!user) {
-        return;
+    test("Capabilities describe every provider on this platform", () => {
+      const platform =
+        Platform.OS === "ios"
+          ? "ios"
+          : Platform.OS === "android"
+            ? "android"
+            : "web";
+      for (const provider of ["google", "apple", "microsoft"] as const) {
+        const capabilities = getProviderTokenCapabilities(provider, platform);
+        assert(
+          typeof capabilities.supportsAccessToken === "boolean",
+          "Invalid capability",
+        );
       }
       assert(
-        ["google", "apple", "microsoft"].includes(user.provider),
-        `unexpected provider ${user.provider}`,
+        typeof AuthService.hasPlayServices === "boolean",
+        "Invalid Play Services result",
       );
     }),
-    test("grantedScopes returns an array", () => {
-      assert(Array.isArray(AuthService.grantedScopes), "not an array");
-    }),
-    test("listeners return unsubscribe functions", () => {
-      const unsubscribeAuth = AuthService.onAuthStateChanged(() => {});
-      const unsubscribeTokens = AuthService.onTokensRefreshed(() => {});
-      assert(typeof unsubscribeAuth === "function", "auth unsubscribe invalid");
+    test("Atomic snapshot agrees with legacy getters", () => {
+      const snapshot = AuthService.getSessionSnapshot();
       assert(
-        typeof unsubscribeTokens === "function",
-        "token unsubscribe invalid",
+        Number.isSafeInteger(snapshot.revision),
+        "Invalid snapshot revision",
       );
-      const unsubscribeEvents = AuthService.onAuthEvent(() => {});
       assert(
-        typeof unsubscribeEvents === "function",
-        "event unsubscribe invalid",
+        snapshot.user === undefined && AuthService.currentUser === undefined,
+        "Unexpected user",
       );
-      unsubscribeAuth();
-      unsubscribeTokens();
-      unsubscribeEvents();
-    }),
-    test("setLoggingEnabled toggles without throwing", () => {
-      AuthService.setLoggingEnabled(true);
-      AuthService.setLoggingEnabled(false);
-    }),
-    test("silentRestore resolves", async () => {
-      await AuthService.silentRestore();
-    }),
-    test("getAccessToken resolves or returns undefined", async () => {
-      const token = await AuthService.getAccessToken();
       assert(
-        token === undefined || typeof token === "string",
-        `expected string or undefined, got ${typeof token}`,
+        JSON.stringify(snapshot.scopes) ===
+          JSON.stringify(AuthService.grantedScopes),
+        "Scope mismatch",
       );
     }),
-    test("AuthError maps structured codes", () => {
+    test("Snapshot and user events survive a throwing listener", async () => {
+      let snapshots = 0;
+      let states = 0;
+      const bad = AuthService.onAuthStateChanged(() => {
+        throw new Error("smoke listener");
+      });
+      const state = AuthService.onAuthStateChanged(() => {
+        states += 1;
+      });
+      const snapshot = AuthService.onSessionChanged(() => {
+        snapshots += 1;
+      });
+      try {
+        AuthService.logout();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        assert(
+          states > 0 && snapshots > 0,
+          "Session listeners did not receive logout",
+        );
+      } finally {
+        bad();
+        state();
+        snapshot();
+      }
+    }),
+    test("Unsubscribe suppresses queued callbacks and is idempotent", async () => {
+      let calls = 0;
+      const remove = AuthService.onAuthStateChanged(() => {
+        calls += 1;
+      });
+      AuthService.logout();
+      remove();
+      remove();
+      const atRemoval = calls;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert(calls === atRemoval, "Queued callback ran after unsubscribe");
+      const tokens = AuthService.onTokensRefreshed(() => {
+        calls += 1;
+      });
+      tokens();
+      tokens();
+    }),
+    test("Operation events correlate failure and omit provider details", async () => {
+      const events: AuthLifecycleEvent[] = [];
+      const remove = AuthService.onAuthEvent((event) => events.push(event));
+      try {
+        await expectSignedOutError(() => AuthService.refreshToken());
+        const start = events.find(
+          (event) =>
+            event.type === "operation_started" &&
+            event.operation === "refreshToken",
+        );
+        const end = events.find(
+          (event) =>
+            event.type === "operation_failed" &&
+            event.operation === "refreshToken",
+        );
+        assert(
+          start?.type === "operation_started" &&
+            end?.type === "operation_failed",
+          "Missing operation pair",
+        );
+        if (
+          start?.type === "operation_started" &&
+          end?.type === "operation_failed"
+        ) {
+          assert(
+            start.operationId === end.operationId &&
+              end.elapsedMilliseconds >= 0,
+            "Invalid correlation",
+          );
+          assert(end.errorCode === "not_signed_in", "Incorrect failure code");
+          assert(
+            !("underlyingMessage" in end) && !("idToken" in end),
+            "Private data in lifecycle event",
+          );
+        }
+      } finally {
+        remove();
+      }
+    }),
+    test("Scope operations preserve signed-out semantics", async () => {
+      await expectSignedOutError(() => AuthService.requestScopes(["email"]));
+      await AuthService.revokeScopes(["email"]);
+      const result = await AuthService.revokeScopesWithResult(["email"]);
+      assert(
+        result.revokedScopes.length === 0 && result.revokedAtProvider === false,
+        "Invalid empty revocation result",
+      );
+      await expectSignedOutError(() => AuthService.revokeAccess());
+    }),
+    test("Signed-out access token is undefined", async () => {
+      assert(
+        (await AuthService.getAccessToken()) === undefined,
+        "Unexpected access token",
+      );
+    }),
+    test("Silent restore handles the empty example session", async () => {
+      try {
+        await AuthService.silentRestore();
+      } catch (error) {
+        assert(
+          error instanceof AuthError && error.code === "not_signed_in",
+          "Unexpected restore error",
+        );
+      }
+      assert(AuthService.currentUser === undefined, "Unexpected restored user");
+    }),
+    ...(["google", "apple", "microsoft"] as const).flatMap((provider) => [
+      test(`${provider}: login cancellation or explicit setup gate`, () =>
+        cancelProviderOperation(() => AuthService.login(provider))),
+      test(`${provider}: atomic login cancellation or explicit setup gate`, () =>
+        cancelProviderOperation(() => AuthService.loginAndGetUser(provider))),
+    ]),
+    ...(["google", "apple"] as const).map((provider) =>
+      test(`${provider}: credential cancellation never publishes a session`, () =>
+        cancelProviderOperation(() => AuthService.getCredential(provider))),
+    ),
+    test("useAuth actions expose typed signed-out behavior", async () => {
+      hookReturn.logout();
+      assert(
+        (await hookReturn.getAccessToken()) === undefined,
+        "Hook returned a signed-out token",
+      );
+      await expectSignedOutError(() => hookReturn.refreshToken());
+      await expectSignedOutError(() => hookReturn.requestScopes(["email"]));
+      await hookReturn.revokeScopes(["email"]);
+      const result = await hookReturn.revokeScopesWithResult(["email"]);
+      assert(
+        result.revokedScopes.length === 0,
+        "Hook returned revoked scopes without a session",
+      );
+      await expectSignedOutError(() => hookReturn.revokeAccess());
+      await hookReturn.silentRestore();
+    }),
+    test("All public error codes map deterministically", () => {
       const codes: AuthErrorCode[] = [
         "cancelled",
         "interaction_required",
@@ -199,89 +305,44 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
         "operation_in_progress",
         "unknown",
       ];
-      for (const code of codes) {
-        assert(isAuthErrorCode(code), `${code} should be valid`);
-      }
+      for (const code of codes)
+        assert(isAuthErrorCode(code), `Invalid code: ${code}`);
       assert(
         toAuthErrorCode("token_error: invalid_grant") === "token_error",
-        "prefixed native errors should map to token_error",
+        "Native error prefix was lost",
       );
       assert(
         AuthError.from("not_a_code").code === "unknown",
-        "unknown strings should map to unknown",
+        "Unknown error mapping failed",
       );
     }),
-    test("Google login method is available", () => {
-      const provider: AuthProvider = "google";
-      assert(provider === "google", "google provider literal mismatch");
+    test("Logging can be toggled", () => {
+      AuthService.setLoggingEnabled(true);
+      AuthService.setLoggingEnabled(false);
     }),
-    Platform.OS === "android"
-      ? unsupported(
-          "Apple login method is platform-gated",
-          "Unavailable on Android",
-        )
-      : test("Apple login method is available", () => {
-          const provider: AuthProvider = "apple";
-          assert(provider === "apple", "apple provider literal mismatch");
-        }),
-    test("Microsoft login method is available", () => {
-      const provider: AuthProvider = "microsoft";
-      assert(provider === "microsoft", "microsoft provider literal mismatch");
+    test("Dispose cancels pending work and the service recreates", async () => {
+      const pending = AuthService.getCredential("google");
+      AuthService.dispose();
+      try {
+        await pending;
+        throw new Error("Disposed operation succeeded");
+      } catch (error) {
+        assert(
+          error instanceof AuthError,
+          "Dispose did not return a typed failure",
+        );
+      }
+      const snapshot = AuthService.getSessionSnapshot();
+      assert(
+        snapshot.user === undefined && snapshot.scopes.length === 0,
+        "Recreated session is not empty",
+      );
+      assert(
+        (await AuthService.getAccessToken()) === undefined,
+        "Recreated adapter returned a token",
+      );
     }),
-    currentUser
-      ? test("refreshToken validates the active session", async () => {
-          await AuthService.refreshToken();
-        })
-      : unsupported(
-          "refreshToken validates the active session",
-          "Sign in first",
-        ),
-    currentUser && currentUser.provider !== "apple"
-      ? test("requestScopes validates the active provider", async () => {
-          await AuthService.requestScopes(["email"]);
-        })
-      : unsupported(
-          "requestScopes validates the active provider",
-          currentUser ? "Scopes are not supported for Apple" : "Sign in first",
-        ),
-    currentUser && currentUser.provider !== "apple"
-      ? test("revokeScopes validates the active provider", async () => {
-          await AuthService.revokeScopes(["email"]);
-        })
-      : unsupported(
-          "revokeScopes validates the active provider",
-          currentUser ? "Scopes are not supported for Apple" : "Sign in first",
-        ),
-    currentUser
-      ? unsupported(
-          "logout clears the active session",
-          "Manual destructive action",
-        )
-      : test("logout is idempotent when signed out", () => {
-          AuthService.logout();
-          assert(
-            AuthService.currentUser === undefined,
-            "logout must leave the session cleared",
-          );
-        }),
-    {
-      name: "Android Play Services is present",
-      unsupportedReason:
-        Platform.OS === "android" ? undefined : "Only runs on Android",
-      run: () => {
-        if (Platform.OS !== "android") {
-          return skip(
-            "Android Play Services is present",
-            "Only runs on Android",
-          );
-        }
-        assert(AuthService.hasPlayServices, "Play Services unavailable");
-        return pass("Android Play Services is present");
-      },
-    },
   ];
-
-  return tests;
 }
 
 export const SmokeTestCard = memo(function SmokeTestCard() {
@@ -331,7 +392,7 @@ export const SmokeTestCard = memo(function SmokeTestCard() {
           <Text style={styles.title}>Smoke Tests</Text>
           <Text testID="smoke-summary" style={styles.summary}>
             {results.length === 0
-              ? "Run lightweight runtime checks"
+              ? "Run signed-out API checks (clears example session)"
               : `${running ? "Running" : completionLabel}: ${counts.pass}/${results.length} passed, ${counts.fail} failed, ${counts.skip} skipped`}
           </Text>
           {counts.fail > 0 ? (

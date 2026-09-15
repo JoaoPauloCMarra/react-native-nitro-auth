@@ -34,20 +34,24 @@ const requiredFiles = [
   "cpp/HybridAuth.hpp",
   "cpp/AuthError.hpp",
   "cpp/PlatformAuth.hpp",
+  "cpp/PlatformAuth.cpp",
+  "nitrogen/generated/shared/c++/HybridNativeAuthAdapterSpec.hpp",
+  "nitrogen/generated/shared/c++/AuthSessionSnapshot.hpp",
+  "nitrogen/generated/shared/c++/AuthCredential.hpp",
   "ios/AuthAdapter.swift",
   "ios/AuthAdapter+Google.swift",
   "ios/AuthAdapter+Microsoft.swift",
   "ios/AuthAdapter+Helpers.swift",
-  "ios/AuthErrorCode.swift",
+  "ios/PlatformAuthErrorCode.swift",
   "ios/GeneratedOAuthErrorCodes.swift",
-  "ios/PlatformAuth+iOS.mm",
+  "ios/HybridNativeAuthAdapter.swift",
   "android/src/main/java/com/auth/AuthAdapter.kt",
   "android/src/main/java/com/auth/AuthErrorCode.kt",
   "android/src/main/java/com/auth/MicrosoftAuthConfig.kt",
   "android/src/main/java/com/auth/MicrosoftAuthTypes.kt",
   "android/src/main/java/com/auth/GoogleSessionStore.kt",
   "android/src/main/java/com/auth/OAuthErrorCodes.kt",
-  "android/src/main/cpp/PlatformAuth+Android.cpp",
+  "android/src/main/java/com/margelo/nitro/com/auth/HybridNativeAuthAdapter.kt",
   "src/generated/oauth-error-codes.ts",
   "android/src/main/java/com/auth/NitroAuthModule.kt",
   "app.plugin.js",
@@ -78,6 +82,16 @@ for (const provider of ["google", "apple"]) {
         }
       }
     }
+  }
+}
+
+for (const filename of [
+  "google-logo.png",
+  "apple-mark-light.png",
+  "apple-mark-dark.png",
+]) {
+  for (const base of ["src", "lib/module", "lib/commonjs"]) {
+    requiredFiles.push(`${base}/ui/assets/${filename}`);
   }
 }
 

@@ -111,8 +111,22 @@ describe("AuthError envelope", () => {
   });
 
   it("from() returns existing AuthError instances unchanged", () => {
-    const original = new AuthError("cancelled");
+    const original = new AuthError("cancelled", "getCredential");
     expect(AuthError.from(original, "login")).toBe(original);
+    expect(original.operation).toBe("getCredential");
+  });
+
+  it("fills a missing phase without mutating the original error or losing details", () => {
+    const original = new AuthError({
+      code: "network_error",
+      underlyingMessage: "provider detail",
+    });
+    const wrapped = AuthError.from(original, "refreshToken");
+    expect(wrapped.operation).toBe("refreshToken");
+    expect(wrapped.code).toBe("network_error");
+    expect(wrapped.underlyingMessage).toBe("provider detail");
+    expect(original.operation).toBeUndefined();
+    expect(AuthError.from(original)).toBe(original);
   });
 
   it("from() wraps the structured web envelope with an operation", () => {

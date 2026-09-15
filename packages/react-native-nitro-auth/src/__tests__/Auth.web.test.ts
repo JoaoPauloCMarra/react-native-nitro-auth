@@ -250,6 +250,10 @@ describe("AuthModule (web)", () => {
       nitroAuthPersistTokensOnWeb: true,
     });
 
+    const observedUsers: unknown[] = [];
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) observedUsers.push(user);
+    });
     const credentialPromise = auth.getCredential("google");
     await Promise.all([
       expect(credentialPromise).resolves.toMatchObject({
@@ -262,6 +266,8 @@ describe("AuthModule (web)", () => {
     const persistedAuthKeys = setItem.mock.calls
       .map(([key]) => key)
       .filter((key) => key === CACHE_KEY || key === SCOPES_KEY);
+    expect(observedUsers).toEqual([]);
+    unsubscribe();
     expect(persistedAuthKeys).toEqual([]);
     expect(sessionStorage.getItem(CACHE_KEY)).toBeNull();
     expect(sessionStorage.getItem(SCOPES_KEY)).toBeNull();
@@ -319,7 +325,10 @@ describe("AuthModule (web)", () => {
     expect(setItem).not.toHaveBeenCalled();
     expect(removeItem).not.toHaveBeenCalled();
     expect(userListener).not.toHaveBeenCalled();
-    expect(eventListener).not.toHaveBeenCalled();
+    expect(eventListener.mock.calls.map(([event]) => event.type)).toEqual([
+      "operation_started",
+      "operation_failed",
+    ]);
     unsubscribeUser();
     unsubscribeEvent();
   });
@@ -737,6 +746,55 @@ describe("AuthModule (web)", () => {
 
     auth.onTokensRefreshed(listenerA);
     unsubscribeB = auth.onTokensRefreshed(listenerB);
+
+    await auth.refreshToken();
+
+    expect(listenerA).toHaveBeenCalledTimes(1);
+    expect(listenerB).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates throwing token listeners after a successful refresh", async () => {
+    const expSoon = Date.now() + 60_000;
+
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "microsoft",
+        idToken: "cached-id-token",
+        expirationTime: expSoon,
+      }),
+    );
+    localStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
+
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: true,
+      microsoftClientId: "test-client-id",
+    });
+
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(
+        async () =>
+          ({
+            ok: true,
+            json: async () => ({
+              id_token: "cached-id-token",
+              access_token: "new-access-token",
+              expires_in: 3600,
+            }),
+          }) as Response,
+      ),
+    });
+
+    const listenerA = jest.fn(() => {
+      throw new Error("listener failed");
+    });
+    const listenerB = jest.fn();
+
+    auth.onTokensRefreshed(listenerA);
+    auth.onTokensRefreshed(listenerB);
 
     await auth.refreshToken();
 

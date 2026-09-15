@@ -25,6 +25,10 @@ std::shared_ptr<Promise<std::optional<AuthUser>>> lastSilentRestorePromise;
 std::shared_ptr<Promise<void>> lastRevokeAccessPromise;
 std::optional<AuthProvider> lastRevokedProvider;
 bool didLogout = false;
+bool failLogout = false;
+bool keepCancelledLoginPending = false;
+bool deferNonce = false;
+std::shared_ptr<Promise<AuthNonce>> lastNoncePromise;
 bool didRevokeAccess = false;
 int platformCancellationCount = 0;
 int platformInvalidationCount = 0;
@@ -75,6 +79,10 @@ void resetPlatformMocks() {
   lastRevokeAccessPromise = nullptr;
   lastRevokedProvider = std::nullopt;
   didLogout = false;
+  failLogout = false;
+  keepCancelledLoginPending = false;
+  deferNonce = false;
+  lastNoncePromise = nullptr;
   didRevokeAccess = false;
   platformCancellationCount = 0;
   platformInvalidationCount = 0;
@@ -89,9 +97,11 @@ std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider, const std::
 
 std::shared_ptr<Promise<AuthNonce>> PlatformAuth::createNonce() {
   auto promise = Promise<AuthNonce>::create();
+  lastNoncePromise = promise;
+  if (deferNonce) return promise;
   AuthNonce nonce;
   nonce.raw = "raw-test-nonce";
-  nonce.hashed = "hashed-test-nonce";
+  nonce.hashed = std::string(64, 'a');
   promise->resolve(nonce);
   return promise;
 }
@@ -122,7 +132,7 @@ void PlatformAuth::invalidatePendingOperations() {
 void PlatformAuth::cancelPendingOperations(AuthErrorCode reason) {
   platformCancellationCount++;
   const auto cancellation = makeAuthError(reason);
-  if (lastLoginPromise && lastLoginPromise->isPending()) lastLoginPromise->reject(cancellation);
+  if (!keepCancelledLoginPending && lastLoginPromise && lastLoginPromise->isPending()) lastLoginPromise->reject(cancellation);
   if (lastRequestScopesPromise && lastRequestScopesPromise->isPending()) lastRequestScopesPromise->reject(cancellation);
   if (lastRefreshPromise && lastRefreshPromise->isPending()) lastRefreshPromise->reject(cancellation);
   if (lastSilentRestorePromise && lastSilentRestorePromise->isPending()) lastSilentRestorePromise->reject(cancellation);
@@ -131,6 +141,7 @@ void PlatformAuth::cancelPendingOperations(AuthErrorCode reason) {
 
 void PlatformAuth::logout() {
   didLogout = true;
+  if (failLogout) throw AuthException(AuthErrorCode::CONFIGURATION_ERROR);
 }
 
 std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess(AuthProvider provider) {
@@ -197,7 +208,7 @@ void testNonceGenerationDelegatesToPlatform() {
   auto promise = auth->createNonce();
   assert(promise->isResolved());
   assert(promise->getResult().raw == "raw-test-nonce");
-  assert(promise->getResult().hashed == "hashed-test-nonce");
+  assert(promise->getResult().hashed == std::string(64, 'a'));
 }
 
 void testStructuredNamesRemainAvailableOnTheUser() {
@@ -755,7 +766,124 @@ void testSessionScenariosInterleaveWithoutUnresolvedPromises() {
 
 } // namespace
 
+void testCredentialTransactionDoesNotPublishSession() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  int states = 0;
+  auth->onAuthStateChanged([&](const std::optional<AuthUser>&) { states++; });
+  auto pending = auth->getCredential(CredentialProvider::GOOGLE, std::nullopt);
+  assert(pending->isPending());
+  auto duplicate = auth->getCredential(CredentialProvider::APPLE, std::nullopt);
+  assert(duplicate->isRejected());
+  auto login = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  assert(login->isRejected());
+  auto user = makeUser(std::vector<std::string>{"email"}, "access");
+  user.idToken = "provider-id-token";
+  lastLoginPromise->resolve(user);
+  assert(pending->isResolved());
+  assert(pending->getResult().idToken == "provider-id-token");
+  assert(pending->getResult().nonce == "raw-test-nonce");
+  assert(!auth->getCurrentUser());
+  assert(states == 0);
+  assert(didLogout);
+}
+
+void testCredentialCancellationAndActiveSession() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  auto credential = auth->getCredential(CredentialProvider::APPLE, std::nullopt);
+  auth->logout();
+  assert(credential->isRejected());
+  auto login = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"email"}, "session"));
+  auto rejected = auth->getCredential(CredentialProvider::GOOGLE, std::nullopt);
+  assert(rejected->isRejected());
+  assert(auth->getCurrentUser()->accessToken == "session");
+}
+
+void testAtomicResultsAndSnapshots() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  std::vector<AuthSessionSnapshot> snapshots;
+  auto remove = auth->onSessionChanged([&](const AuthSessionSnapshot& snapshot) { snapshots.push_back(snapshot); });
+  const auto initial = auth->getSessionSnapshot();
+  auto login = auth->loginAndGetUser(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"email", "profile"}, "original"));
+  assert(login->isResolved());
+  const auto signedIn = auth->getSessionSnapshot();
+  assert(signedIn.revision > initial.revision);
+  assert(signedIn.user->scopes == signedIn.scopes);
+  auto revoked = auth->revokeScopesWithResult({"email", "email", "absent"});
+  assert(revoked->getResult().revokedScopes == std::vector<std::string>{"email"});
+  assert(!revoked->getResult().revokedAtProvider);
+  auth->logout();
+  assert(login->getResult().accessToken == "original");
+  assert(!snapshots.back().user);
+  remove();
+  remove();
+}
+
+
+void testCredentialFailureCleanupAndStaleResults() {
+  for (bool cleanupFails : {false, true}) {
+    resetPlatformMocks();
+    auto auth = std::make_shared<HybridAuth>();
+    auto pending = auth->getCredential(CredentialProvider::GOOGLE, std::nullopt);
+    failLogout = cleanupFails;
+    lastLoginPromise->reject(makeAuthError(AuthErrorCode::NETWORK_ERROR));
+    assert(didLogout && pending->isRejected());
+    try { std::rethrow_exception(pending->getError()); }
+    catch (const AuthException& error) { assert(error.code() == AuthErrorCode::NETWORK_ERROR); }
+    assert(!auth->getCurrentUser());
+  }
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  auto missingToken = auth->getCredential(CredentialProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser());
+  assert(missingToken->isRejected() && didLogout);
+  auto cleanupFailure = auth->getCredential(CredentialProvider::GOOGLE, std::nullopt);
+  auto user = makeUser(); user.idToken = "test-id-token";
+  failLogout = true;
+  lastLoginPromise->resolve(user);
+  assert(cleanupFailure->isRejected());
+  failLogout = false;
+  auto stale = auth->getCredential(CredentialProvider::GOOGLE, std::nullopt);
+  auto oldProvider = lastLoginPromise;
+  keepCancelledLoginPending = true;
+  auth->logout();
+  auto session = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"email"}, "new-session"));
+  didLogout = false;
+  oldProvider->resolve(user);
+  assert(stale->isRejected() && session->isResolved());
+  assert(!didLogout && auth->getCurrentUser()->accessToken == "new-session");
+}
+
+void testCredentialNonceValidationAndCancellation() {
+  resetPlatformMocks();
+  deferNonce = true;
+  auto auth = std::make_shared<HybridAuth>();
+  auto invalid = auth->getCredential(CredentialProvider::GOOGLE, std::nullopt);
+  AuthNonce bad; bad.raw = "test"; bad.hashed = "invalid";
+  lastNoncePromise->resolve(bad);
+  assert(invalid->isRejected() && !lastLoginPromise && !didLogout);
+  auto cancelled = auth->getCredential(CredentialProvider::GOOGLE, std::nullopt);
+  auto nonce = lastNoncePromise;
+  auth->logout();
+  AuthNonce valid; valid.raw = "test"; valid.hashed = std::string(64, 'a');
+  nonce->resolve(valid);
+  assert(cancelled->isRejected() && !lastLoginPromise);
+  auto failed = auth->getCredential(CredentialProvider::GOOGLE, std::nullopt);
+  lastNoncePromise->reject(makeAuthError(AuthErrorCode::CONFIGURATION_ERROR));
+  assert(failed->isRejected() && !lastLoginPromise);
+}
+
 int main() {
+  testCredentialNonceValidationAndCancellation();
+  testCredentialFailureCleanupAndStaleResults();
+  testCredentialTransactionDoesNotPublishSession();
+  testCredentialCancellationAndActiveSession();
+  testAtomicResultsAndSnapshots();
   testAppleSessionNeverUsesAnotherProvidersRefreshOrScopeFlow();
   testNonceGenerationDelegatesToPlatform();
   testStructuredNamesRemainAvailableOnTheUser();

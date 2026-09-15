@@ -6,14 +6,14 @@ var contextProviderHandle: UInt8 = 0
 
 extension AuthAdapter {
   /// Maps OAuth 2.0 error codes (returned in query params or JSON) to
-  /// AuthErrorCode values, backed by the generated table from
+  /// PlatformAuthErrorCode values, backed by the generated table from
   /// `scripts/oauth-errors.json`; `docs/error-contract.md` is the documented
   /// contract and fixture corpus.
   ///
   /// `context` selects the operation bucket: "authorize"/"token" surface
   /// token/grant failures as `tokenError`; "refresh" surfaces them as
   /// `refreshFailed`.
-  static func mapOAuthError(_ oauthCode: String, context: String = "authorize") -> AuthErrorCode {
+  static func mapOAuthError(_ oauthCode: String, context: String = "authorize") -> PlatformAuthErrorCode {
     let normalized = oauthCode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     var code = oauthErrorCodes[normalized] ?? .unknown
     if context == "refresh" && code == .tokenError {
@@ -79,12 +79,12 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
       // replayed or swapped token from being accepted.
       if let expectedNonce = expectedNonce {
         guard let idToken = idToken, !idToken.isEmpty else {
-          completion(nil, NSNumber(value: AuthErrorCode.noIdToken.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.noIdToken.rawValue), nil)
           return
         }
         let claims = AuthAdapter.decodeJwt(idToken)
         guard claims["nonce"] == expectedNonce else {
-          completion(nil, NSNumber(value: AuthErrorCode.invalidNonce.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.invalidNonce.rawValue), nil)
           return
         }
       }
@@ -101,7 +101,7 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
       ]
       completion(data as NSDictionary, nil, nil)
     } else {
-      completion(nil, NSNumber(value: AuthErrorCode.unknown.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.unknown.rawValue), nil)
     }
   }
 

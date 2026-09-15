@@ -6,9 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
-## [Unreleased]
+## [0.11.0] - 2026-09-15
+
+### Breaking changes
+
+- Credential-only calls no longer publish temporary login/session/logout events.
+  Use `onAuthEvent` operation events and the returned credential promise instead.
+- Native binaries must be rebuilt because the generated Nitro contract changed.
 
 ### Added
+
+- Add atomic session snapshots and a shared snapshot subscription for `useAuth()`.
+- Add correlated async operation events with IDs, elapsed milliseconds, and typed
+  failure codes. Listener exceptions and queued unsubscribe delivery are isolated.
+- Return login users and local scope revocation results from the native mutation.
+- Replace manual native result bridges with a generated Swift/Kotlin Nitro adapter.
 
 - Apple Sign-In on Android through an HTTPS broker, using the same `login()`
   and `getCredential()` calls as iOS. The Expo plugin configures the callback;
@@ -20,9 +32,29 @@ Breaking changes are always listed first in each release section.
 - Add Google and Apple `SocialButton` custom, image, and SVG render modes,
   including official icon-only artwork, per-provider visual overrides, and
   controlled loading with async press handlers.
+- Add `SocialProviderIcon` and provider content exports for custom buttons,
+  a `loadingIndicator` override, and opt-in Google Sans through the Expo plugin's
+  `googleButtonFont` setting. No render mode requires the font.
+- Draw the official Google and Apple marks from images in every render mode,
+  including busy states and `SocialProviderIcon`.
 
 ### Fixed
 
+- Social buttons keep the provider mark, chrome, and size while loading, so
+  turning `loading` on or off never moves or resizes the control. Labeled
+  buttons place the indicator beside the mark; icon-only buttons dim the mark
+  and center the indicator over it.
+- Center marks and labels in custom mode, and size icon-only marks from the
+  official ratios instead of cropping them.
+- `svg` mode renders correctly on native. Apple's vector export nested `<svg>`
+  viewports that native renderers placed wrong, and Google's drew its mark with
+  a Figma conic gradient inside a `foreignObject` that no native renderer
+  supports. The artwork is flattened, and the Google mark image is drawn into
+  its box.
+- Custom mode no longer asks for a Google Sans family that the app may not
+  bundle; it uses the platform system font and accepts a family via `textStyle`.
+- Remove the placeholder text glyph from the Microsoft button and keep its label
+  in place while it is busy.
 - Android maps Apple's authorization code into `AuthUser.authorizationCode`.
 - Native Apple sessions reject unsupported refresh and scope upgrades without
   invoking another provider or changing the current session.

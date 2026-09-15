@@ -2,6 +2,8 @@
 
 package com.auth
 
+import com.margelo.nitro.com.auth.HybridNativeAuthAdapter
+
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -168,13 +170,9 @@ object AuthAdapter {
 
     private var moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    @JvmStatic
-    private external fun nativeInitialize(context: Context)
-    @JvmStatic
-    private external fun nativeDispose()
 
     @JvmStatic
-    private external fun nativeOnLoginSuccess(
+    private fun nativeOnLoginSuccess(
         origin: String,
         provider: String,
         email: String?,
@@ -191,10 +189,10 @@ object AuthAdapter {
         scopes: Array<String>?,
         expirationTime: Long?,
         generation: Long,
-    ): Boolean
+    ): Boolean = HybridNativeAuthAdapter.loginSuccess(origin, provider, email, name, firstName, lastName, photo, idToken, accessToken, serverAuthCode, userId, phoneNumber, hostedDomain, scopes, expirationTime, generation)
 
     @JvmStatic
-    private external fun nativeOnLoginError(origin: String, code: Int, underlyingError: String?, generation: Long): Boolean
+    private fun nativeOnLoginError(origin: String, code: Int, underlyingError: String?, generation: Long): Boolean = HybridNativeAuthAdapter.loginError(origin, code, underlyingError, generation)
 
     @JvmStatic
     fun createNonce(): Array<String> {
@@ -213,12 +211,12 @@ object AuthAdapter {
     }
 
     @JvmStatic
-    private external fun nativeOnRefreshSuccess(idToken: String?, accessToken: String?, expirationTime: Long?, generation: Long): Boolean
+    private fun nativeOnRefreshSuccess(idToken: String?, accessToken: String?, expirationTime: Long?, generation: Long): Boolean = HybridNativeAuthAdapter.refreshSuccess(idToken, accessToken, expirationTime, generation)
 
     @JvmStatic
-    private external fun nativeOnRefreshError(code: Int, underlyingError: String?, generation: Long): Boolean
+    private fun nativeOnRefreshError(code: Int, underlyingError: String?, generation: Long): Boolean = HybridNativeAuthAdapter.refreshError(code, underlyingError, generation)
     @JvmStatic
-    private external fun nativeOnRevokeAccessResult(code: Int?, underlyingError: String?, generation: Long): Boolean
+    private fun nativeOnRevokeAccessResult(code: Int?, underlyingError: String?, generation: Long): Boolean = HybridNativeAuthAdapter.revokeResult(code, underlyingError, generation)
 
     @Synchronized
     fun initialize(context: Context) {
@@ -336,14 +334,7 @@ object AuthAdapter {
         }
         activityTracker.seed(hostActivity)
 
-        try {
-            nativeInitialize(applicationContext)
-            isInitialized = true
-        } catch (error: Throwable) {
-            Log.e(TAG, "Failed to initialize NitroAuth native bridge", error)
-            dispose()
-            throw IllegalStateException("configuration_error", error)
-        }
+        isInitialized = true;
     }
 
     fun dispose() {
@@ -354,8 +345,7 @@ object AuthAdapter {
         }
         moduleScope.cancel()
         moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        runCatching { nativeDispose() }
-            .onFailure { Log.w(TAG, "Failed to dispose NitroAuth native bridge", it) }
+        HybridNativeAuthAdapter.cancelAll()
 
         val app = appContext as? Application
         lifecycleCallbacks?.let { app?.unregisterActivityLifecycleCallbacks(it) }

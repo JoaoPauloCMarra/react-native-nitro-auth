@@ -55,7 +55,47 @@ for (const entry of manifest.entries) {
       throw new Error(
         `Vector artwork must use local paths without fonts: ${entry.file}`,
       );
+    if (/<foreignObject\b|conic-gradient|data-figma/i.test(xml))
+      throw new Error(
+        `Vector artwork must avoid features native renderers drop: ${entry.file}`,
+      );
+    if (xml.indexOf("<svg", xml.indexOf("<svg") + 1) !== -1)
+      throw new Error(
+        `Vector artwork must not nest <svg> viewports: ${entry.file}`,
+      );
+    const inlined = readFileSync(
+      resolve(packageRoot, "src/ui/social-button-assets.ts"),
+      "utf8",
+    );
+    if (!inlined.includes(JSON.stringify(xml.trim())))
+      throw new Error(
+        `Inlined artwork differs from the file; run bun scripts/generate-social-button-assets.ts: ${entry.file}`,
+      );
   }
+}
+if (!("marks" in manifest) || !Array.isArray(manifest.marks))
+  throw new Error("Provider mark provenance is missing");
+if (manifest.marks.length !== 3)
+  throw new Error("Expected the Google mark and both Apple marks");
+for (const mark of manifest.marks) {
+  if (
+    !mark ||
+    typeof mark !== "object" ||
+    typeof mark.file !== "string" ||
+    typeof mark.sha256 !== "string" ||
+    typeof mark.width !== "number" ||
+    typeof mark.height !== "number"
+  )
+    throw new Error("Invalid mark provenance entry");
+  const bytes = readFileSync(resolve(assetRoot, mark.file));
+  if (createHash("sha256").update(bytes).digest("hex") !== mark.sha256)
+    throw new Error(`Mark changed without provenance: ${mark.file}`);
+  if (
+    bytes.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a" ||
+    bytes.readUInt32BE(16) !== mark.width ||
+    bytes.readUInt32BE(20) !== mark.height
+  )
+    throw new Error(`Invalid mark dimensions: ${mark.file}`);
 }
 for (const path of [
   "android/src/main/assets/fonts/GoogleSans-Medium.ttf",
@@ -69,5 +109,5 @@ for (const path of [
     );
 }
 console.log(
-  "Social button artwork verified: 64 checksums, dimensions, font-free vectors, optional native font",
+  "Social button artwork verified: 64 button checksums, 3 provider marks, dimensions, font-free vectors, optional native font",
 );

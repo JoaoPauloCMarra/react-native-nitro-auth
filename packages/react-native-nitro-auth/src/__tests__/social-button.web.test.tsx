@@ -17,6 +17,7 @@ type LoginFn = (
 const mockLogin = jest.fn<ReturnType<LoginFn>, Parameters<LoginFn>>();
 
 type MockHostProps = {
+  testID?: string;
   accessibilityLabel?: string;
   accessibilityRole?: string;
   accessibilityState?: { busy?: boolean; disabled?: boolean };
@@ -64,10 +65,12 @@ jest.mock("react-native", () => {
       onPress,
       pointerEvents: _pointerEvents,
       style,
+      testID,
       ...props
     }: MockHostProps) => {
       const domProps = {
         ...props,
+        "data-testid": testID,
         "aria-label": accessibilityLabel,
         "aria-busy": accessibilityState?.busy,
         "aria-disabled": accessibilityState?.disabled,
@@ -196,15 +199,11 @@ jest.mock("../ui/social-button-assets", () => {
   });
 
   return {
-    appleIconLogos: {
-      dark: '<svg data-id="apple-square-dark" />',
-      light: '<svg data-id="apple-square-light" />',
+    appleMarks: {
+      dark: { uri: "apple-mark-dark.png" },
+      light: { uri: "apple-mark-light.png" },
     },
-    appleLogos: {
-      dark: '<svg data-id="apple-horizontal-dark" />',
-      light: '<svg data-id="apple-horizontal-light" />',
-    },
-    googleLogo: { uri: "google-logo.png" },
+    googleMark: { uri: "google-mark.png" },
     iconOnlyArtwork: {
       apple: makeProviderArtwork("apple-icon", 40, 40, 44, 44),
       google: makeProviderArtwork("google-icon", 40, 40, 44, 44),
@@ -262,9 +261,10 @@ describe("SocialButton (web)", () => {
     expect((button as HTMLButtonElement).disabled).toBe(false);
     expect(button.getAttribute("aria-disabled")).toBe("false");
     expect(screen.queryByText("Sign in with Google")).toBeNull();
-    const logo = screen.getByTestId("google-logo.png");
+    const logo = screen.getByTestId("google-mark.png");
     expect((logo as HTMLImageElement).style.height).toBe("24px");
-    expect((logo as HTMLImageElement).style.width).toBe("24px");
+    expect(button.style.width).toBe("48px");
+    expect(button.style.height).toBe("48px");
   });
 
   it("uses the dedicated square asset for image-mode icon-only buttons", () => {
@@ -349,7 +349,7 @@ describe("SocialButton (web)", () => {
     ).toBeTruthy();
   });
 
-  it("keeps branded artwork visible while an async press is busy and blocks reentry", async () => {
+  it("preserves the artwork layout while an async press is busy and blocks reentry", async () => {
     let resolvePress: (() => void) | undefined;
     const pendingPress = new Promise<void>((resolve) => {
       resolvePress = resolve;
@@ -373,7 +373,9 @@ describe("SocialButton (web)", () => {
     });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     expect(button.getAttribute("aria-busy")).toBe("true");
-    expect(screen.getByTestId("google-logo.png")).toBeTruthy();
+    expect(screen.getAllByTestId("google-mark.png").length).toBeGreaterThan(0);
+    expect(button.style.width).toBe("48px");
+    expect(button.style.height).toBe("48px");
 
     resolvePress?.();
     await waitFor(() => {
@@ -381,6 +383,40 @@ describe("SocialButton (web)", () => {
     });
     expect((button as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it.each(["custom", "image", "svg"] as const)(
+    "keeps the provider mark and the indicator inside %s buttons",
+    (renderMode) => {
+      const { unmount } = render(
+        React.createElement(SocialButton, {
+          provider: "google",
+          renderMode,
+        }),
+      );
+      const idle = screen.getByRole("button", { name: "Sign in with Google" });
+      const idleSize = [idle.style.width, idle.style.height];
+      unmount();
+
+      render(
+        React.createElement(SocialButton, {
+          provider: "google",
+          renderMode,
+          loading: true,
+          loadingIndicator: React.createElement("span", {
+            "data-testid": "busy-indicator",
+          }),
+        }),
+      );
+      const button = screen.getByRole("button", {
+        name: "Sign in with Google",
+      });
+      const indicator = screen.getByTestId("busy-indicator").parentElement;
+      expect(button.contains(indicator)).toBe(true);
+      expect(button.contains(screen.getByTestId("google-mark.png"))).toBe(true);
+      expect([button.style.width, button.style.height]).toEqual(idleSize);
+      expect(button.style.marginBottom || "0px").toBe("0px");
+    },
+  );
 
   it("lets custom content own loading without a second indicator or reserved gap", () => {
     render(
@@ -395,8 +431,8 @@ describe("SocialButton (web)", () => {
     expect(button.getAttribute("aria-busy")).toBe("true");
     expect((button as HTMLButtonElement).disabled).toBe(true);
     expect(button.querySelector("span")).toBeNull();
-    expect(button.style.marginBottom).toBe("0px");
-    expect(screen.getByTestId("google-logo.png")).toBeTruthy();
+    expect(button.style.marginBottom || "0px").toBe("0px");
+    expect(screen.getByTestId("google-mark.png")).toBeTruthy();
   });
 
   it.each(["ios", "android"] as const)(
@@ -417,10 +453,10 @@ describe("SocialButton (web)", () => {
           }),
         ),
       );
-      expect(screen.getByTestId("google-logo.png").style.width).toBe("24px");
-      expect(
-        screen.getByTestId("apple-square-light").getAttribute("width"),
-      ).toBe("24");
+      expect(screen.getByTestId("google-mark.png").style.height).toBe("24px");
+      expect(screen.getByTestId("apple-mark-light.png").style.height).toBe(
+        "24px",
+      );
       expect(screen.queryByRole("button")).toBeNull();
     },
   );

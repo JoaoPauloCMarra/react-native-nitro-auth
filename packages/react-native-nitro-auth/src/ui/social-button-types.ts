@@ -27,6 +27,8 @@ export type SocialButtonContentComponent =
   ComponentType<SocialButtonContentProps>;
 
 type SocialButtonCommonProps = {
+  /** Test identifier for the package-owned Pressable. */
+  testID?: string;
   /**
    * `custom` renders provider-aware React Native content; `image` and `svg`
    * render official Google or Apple artwork. Defaults to `custom`.
@@ -52,7 +54,7 @@ type SocialButtonCommonProps = {
   iconOnly?: boolean;
   /** External busy state, combined with package-managed login progress. */
   loading?: boolean;
-  /** Google/Apple indicator override; null lets custom content own busy visuals and spacing. */
+  /** Google/Apple in-button indicator override; null lets custom content own busy visuals. */
   loadingIndicator?: ReactNode;
   disabled?: boolean;
   onSuccess?: (user: AuthUser) => void;

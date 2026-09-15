@@ -33,18 +33,18 @@ extension AuthAdapter {
     }
 
     guard let user = result?.user else {
-      completion(nil, NSNumber(value: AuthErrorCode.unknown.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.unknown.rawValue), nil)
       return
     }
 
     let idToken = user.idToken?.tokenString
     if let expectedNonce = expectedNonce {
       guard let idToken = idToken, !idToken.isEmpty else {
-        completion(nil, NSNumber(value: AuthErrorCode.noIdToken.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.noIdToken.rawValue), nil)
         return
       }
       guard AuthAdapter.decodeJwt(idToken)["nonce"] == expectedNonce else {
-        completion(nil, NSNumber(value: AuthErrorCode.invalidNonce.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.invalidNonce.rawValue), nil)
         return
       }
     }
@@ -53,11 +53,11 @@ extension AuthAdapter {
     guard commitCurrentOperation(operation, {
       inMemoryGoogleServerAuthCode = serverAuthCode.isEmpty ? nil : serverAuthCode
     }) else {
-      completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
       return
     }
     guard isCurrentOperation(operation) else {
-      completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
       return
     }
 
@@ -85,17 +85,17 @@ extension AuthAdapter {
   ) {
     let operation = beginOperation()
     guard provider == "google" else {
-      completion(NSNumber(value: AuthErrorCode.unsupportedProvider.rawValue), nil)
+      completion(NSNumber(value: PlatformAuthErrorCode.unsupportedProvider.rawValue), nil)
       return
     }
     guard GIDSignIn.sharedInstance.currentUser != nil else {
-      completion(NSNumber(value: AuthErrorCode.notSignedIn.rawValue), nil)
+      completion(NSNumber(value: PlatformAuthErrorCode.notSignedIn.rawValue), nil)
       return
     }
 
     GIDSignIn.sharedInstance.disconnect { error in
       guard self.isCurrentOperation(operation) else {
-        completion(NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        completion(NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
       if let error = error {
@@ -105,14 +105,14 @@ extension AuthAdapter {
       guard self.commitCurrentOperation(operation, {
         inMemoryGoogleServerAuthCode = nil
       }) else {
-        completion(NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        completion(NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
       completion(nil, nil)
     }
   }
 
-  static func mapError(_ error: Error) -> AuthErrorCode {
+  static func mapError(_ error: Error) -> PlatformAuthErrorCode {
     let nsError = error as NSError
     if nsError.domain == NSURLErrorDomain {
       return .networkError

@@ -1,4 +1,5 @@
 import type {
+  AuthLifecycleEvent,
   AuthLogin,
   AuthLoginAndGetUser,
   AuthGetCredential,
@@ -211,3 +212,21 @@ void (0 as unknown as NativeSocialButtonAcceptsBroadError);
 void (0 as unknown as WebSocialButtonError);
 void (0 as unknown as WebSocialButtonAcceptsAuthError);
 void (0 as unknown as WebSocialButtonAcceptsBroadError);
+
+function checkEventNarrowing(event: AuthLifecycleEvent) {
+  if (event.type === "operation_failed") {
+    const code: import("../index").AuthErrorCode = event.errorCode;
+    const duration: number = event.elapsedMilliseconds;
+    void code;
+    void duration;
+    // @ts-expect-error Lifecycle metadata must not expose credentials.
+    void event.idToken;
+  }
+  if (event.type === "operation_started") {
+    const id: number = event.operationId;
+    void id;
+    // @ts-expect-error Start events have no terminal timing.
+    void event.elapsedMilliseconds;
+  }
+}
+void checkEventNarrowing;

@@ -1,12 +1,7 @@
 import Foundation
 
-/**
- * Mirror of the generated C++ `AuthErrorCode` enum
- * (nitrogen/generated/shared/c++/AuthErrorCode.hpp). The raw integer value is
- * the wire value passed to `PlatformAuth+iOS.mm`; both must stay aligned with
- * the generated enum.
- */
-enum AuthErrorCode: Int {
+// Provider SDK error mapping. HybridNativeAuthAdapter converts to the generated enum.
+enum PlatformAuthErrorCode: Int {
     case refreshFailed = 0
     case cancelled = 1
     case interactionRequired = 2
@@ -24,7 +19,7 @@ enum AuthErrorCode: Int {
     case parseError = 14
     case unknown = 15
 
-    static func fromRawValue(_ value: Int) -> AuthErrorCode {
-        return AuthErrorCode(rawValue: value) ?? .unknown
+    static func fromRawValue(_ value: Int) -> PlatformAuthErrorCode {
+        return PlatformAuthErrorCode(rawValue: value) ?? .unknown
     }
 }

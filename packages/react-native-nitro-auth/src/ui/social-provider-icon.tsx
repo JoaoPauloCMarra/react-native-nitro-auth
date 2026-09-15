@@ -1,11 +1,10 @@
 import React from "react";
-import { Image } from "react-native";
-import { SvgXml } from "react-native-svg";
-import { appleIconLogos, googleLogo } from "./social-button-assets";
+import { ProviderMark } from "./social-button-renderer";
+import type { BrandedProvider } from "./social-button-renderer";
 import type { SocialButtonAppearance } from "./social-button-types";
 
 export type SocialProviderIconProps = {
-  provider: "google" | "apple";
+  provider: BrandedProvider;
   appearance?: SocialButtonAppearance;
   size?: number;
 };
@@ -16,20 +15,7 @@ export function SocialProviderIcon({
   appearance = "light",
   size = 24,
 }: SocialProviderIconProps): React.ReactElement {
-  return provider === "google" ? (
-    <Image
-      accessible={false}
-      source={googleLogo}
-      resizeMode="contain"
-      style={{ width: size, height: size }}
-    />
-  ) : (
-    <SvgXml
-      xml={appleIconLogos[appearance]}
-      width={size}
-      height={size}
-      viewBox="20.5 16 15 19"
-      accessible={false}
-    />
+  return (
+    <ProviderMark provider={provider} appearance={appearance} height={size} />
   );
 }

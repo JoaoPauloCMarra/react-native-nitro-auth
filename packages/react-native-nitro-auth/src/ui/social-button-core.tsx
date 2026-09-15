@@ -8,8 +8,13 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { socialButtonArtwork } from "./social-button-assets";
-import { SocialButtonRenderer } from "./social-button-renderer";
+import {
+  SocialButtonBusyContent,
+  SocialButtonIndicator,
+  SocialButtonRenderer,
+  getArtworkAspect,
+} from "./social-button-renderer";
+import type { BrandedProvider } from "./social-button-renderer";
 import type {
   SocialButtonAppearance,
   SocialButtonContentProps,
@@ -28,6 +33,13 @@ const PROVIDER_LABELS: Record<AuthProvider, string> = {
   microsoft: "Microsoft",
 };
 
+/** Above the 44pt and 48dp minimum touch targets of both platforms. */
+const BUTTON_HEIGHT = 48;
+/** Fits "Sign in with Microsoft" at the default type size in custom mode. */
+const CUSTOM_BUTTON_WIDTH = 264;
+const ICON_BUTTON_SIZE = 48;
+const VIEWPORT_MARGIN = 64;
+
 type Props = SocialButtonProps & {
   login: (provider: AuthProvider) => Promise<void>;
   currentUser: () => AuthUser | undefined;
@@ -41,25 +53,29 @@ function resolveAppearance(
   return variant === "black" ? "dark" : "light";
 }
 
+/**
+ * Keeps every render mode at one height so a screen can mix them. Image and SVG
+ * modes take their width from the official artwork ratio for the platform.
+ */
 function getButtonDimensions(
-  fontScale: number,
-  viewportWidth: number,
+  provider: BrandedProvider,
   renderMode: SocialButtonRenderMode,
   iconOnly: boolean,
+  fontScale: number,
+  viewportWidth: number,
 ) {
-  if (iconOnly) return { width: 48, height: 48 };
-  const platform = Platform.OS === "ios" ? "ios" : "android";
-  const reference = socialButtonArtwork.google[platform].light.pill;
-  const baseWidth = renderMode === "custom" ? 264 : 216;
-  const baseHeight =
+  if (iconOnly) {
+    return { width: ICON_BUTTON_SIZE, height: ICON_BUTTON_SIZE };
+  }
+  const baseWidth =
     renderMode === "custom"
-      ? 48
-      : (baseWidth * reference.height) / reference.width;
+      ? CUSTOM_BUTTON_WIDTH
+      : BUTTON_HEIGHT * getArtworkAspect(provider, false);
   const scale = Math.min(
     Math.max(1, fontScale),
-    Math.max(48, viewportWidth - 64) / baseWidth,
+    Math.max(ICON_BUTTON_SIZE, viewportWidth - VIEWPORT_MARGIN) / baseWidth,
   );
-  return { width: baseWidth * scale, height: baseHeight * scale };
+  return { width: baseWidth * scale, height: BUTTON_HEIGHT * scale };
 }
 
 function getMicrosoftBackground(
@@ -82,6 +98,7 @@ function getMicrosoftTextColor(
 }
 
 export function SocialButtonCore({
+  testID,
   provider,
   renderMode = "custom",
   iconOnly = false,
@@ -149,7 +166,7 @@ export function SocialButtonCore({
       disabled: isDisabled,
       loading: isLoading,
       width: viewportWidth,
-      height: 48,
+      height: BUTTON_HEIGHT,
       ...(renderMode === "custom" && textStyle !== undefined
         ? { textStyle }
         : {}),
@@ -157,8 +174,10 @@ export function SocialButtonCore({
         ? { borderRadius }
         : {}),
     };
+    const textColor = getMicrosoftTextColor(isDisabled, legacyVariant);
     return (
       <Pressable
+        testID={testID}
         accessibilityLabel={label}
         accessibilityRole="button"
         accessibilityState={{ busy: isLoading, disabled: isDisabled }}
@@ -179,28 +198,27 @@ export function SocialButtonCore({
           React.createElement(customComponent, contentProps)
         ) : (
           <View style={styles.microsoftContent}>
-            {isLoading ? (
-              <ActivityIndicator
-                size="small"
-                color={getMicrosoftTextColor(isDisabled, legacyVariant)}
-              />
-            ) : (
-              <>
-                {variant !== undefined && variant !== "primary" ? (
-                  <Text style={styles.microsoftIconText}>⊞</Text>
-                ) : null}
-                <Text
-                  allowFontScaling
-                  style={[
-                    styles.microsoftLabel,
-                    { color: getMicrosoftTextColor(isDisabled, legacyVariant) },
-                    textStyle,
-                  ]}
-                >
-                  {label}
-                </Text>
-              </>
-            )}
+            <Text
+              allowFontScaling
+              numberOfLines={1}
+              style={[
+                styles.microsoftLabel,
+                { color: textColor },
+                textStyle,
+                isLoading ? styles.hidden : null,
+              ]}
+            >
+              {label}
+            </Text>
+            {isLoading && loadingIndicator !== null ? (
+              <View pointerEvents="none" style={styles.overlay}>
+                {loadingIndicator === undefined ? (
+                  <ActivityIndicator size="small" color={textColor} />
+                ) : (
+                  loadingIndicator
+                )}
+              </View>
+            ) : null}
           </View>
         )}
       </Pressable>
@@ -208,10 +226,11 @@ export function SocialButtonCore({
   }
 
   const { width, height } = getButtonDimensions(
-    fontScale,
-    viewportWidth,
+    provider,
     renderMode,
     iconOnly,
+    fontScale,
+    viewportWidth,
   );
   const customContentProps: SocialButtonContentProps = {
     provider,
@@ -232,21 +251,18 @@ export function SocialButtonCore({
   };
   const customComponent =
     renderMode === "custom" ? customComponents?.[provider] : undefined;
-  const spinnerColor = resolvedAppearance === "light" ? "#3C4043" : "#FFFFFF";
+  const showBusyContent = isLoading && loadingIndicator !== null;
 
   return (
     <Pressable
+      testID={testID}
       accessibilityLabel={label}
       accessibilityRole="button"
       accessibilityState={{ busy: isLoading, disabled: isDisabled }}
       disabled={isDisabled}
       onPress={handlePress}
-      style={[
-        style,
-        styles.brandedButton,
-        { width, height: Math.max(48, height) },
-        loadingIndicator === null ? { marginBottom: 0 } : undefined,
-      ]}
+      hitSlop={8}
+      style={[styles.brandedButton, { width, height }, style]}
     >
       <View
         pointerEvents="none"
@@ -254,27 +270,37 @@ export function SocialButtonCore({
         importantForAccessibility="no-hide-descendants"
         style={[styles.artwork, { width, height }]}
       >
-        <SocialButtonRenderer
-          {...customContentProps}
-          provider={provider}
-          renderMode={renderMode}
-          {...(customComponent ? { customComponent } : {})}
-        />
+        {showBusyContent ? (
+          <SocialButtonBusyContent
+            provider={provider}
+            appearance={resolvedAppearance}
+            shape={resolvedShape}
+            iconOnly={iconOnly}
+            width={width}
+            height={height}
+            {...(renderMode === "custom" && borderRadius !== undefined
+              ? { borderRadius }
+              : {})}
+            indicator={
+              loadingIndicator === undefined ? (
+                <SocialButtonIndicator
+                  provider={provider}
+                  appearance={resolvedAppearance}
+                />
+              ) : (
+                loadingIndicator
+              )
+            }
+          />
+        ) : (
+          <SocialButtonRenderer
+            {...customContentProps}
+            provider={provider}
+            renderMode={renderMode}
+            {...(customComponent ? { customComponent } : {})}
+          />
+        )}
       </View>
-      {isLoading && loadingIndicator !== null ? (
-        <View
-          pointerEvents="none"
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          style={styles.loadingIndicator}
-        >
-          {loadingIndicator === undefined ? (
-            <ActivityIndicator size="small" color={spinnerColor} />
-          ) : (
-            loadingIndicator
-          )}
-        </View>
-      ) : null}
     </Pressable>
   );
 }
@@ -282,31 +308,30 @@ export function SocialButtonCore({
 const styles = StyleSheet.create({
   brandedButton: {
     alignSelf: "center",
-    justifyContent: "center",
     alignItems: "center",
+    justifyContent: "center",
     padding: 0,
-    overflow: "visible",
-    marginBottom: 28,
   },
   artwork: {
-    width: "100%",
-    height: "100%",
     alignItems: "center",
     justifyContent: "center",
   },
-  loadingIndicator: {
+  overlay: {
     position: "absolute",
-    left: 0,
+    top: 0,
     right: 0,
-    bottom: -28,
-    height: 20,
+    bottom: 0,
+    left: 0,
     alignItems: "center",
     justifyContent: "center",
+  },
+  hidden: {
+    opacity: 0,
   },
   microsoftButton: {
     paddingVertical: 12,
     paddingHorizontal: 16,
-    minHeight: 48,
+    minHeight: BUTTON_HEIGHT,
     justifyContent: "center",
     alignItems: "center",
     width: "100%",
@@ -320,9 +345,5 @@ const styles = StyleSheet.create({
   microsoftLabel: {
     fontSize: 16,
     fontWeight: "600",
-  },
-  microsoftIconText: {
-    fontSize: 16,
-    marginRight: 10,
   },
 });

@@ -3,11 +3,12 @@
 ## Tooling Baseline
 
 - Use `eslint-config-expo-magic` flat config.
-- Keep these scripts available in Turbo workspaces when relevant:
-  - `format`
-  - `format:check`
-  - `lint`
-  - `typecheck`
+- This repository uses Bun workspaces, without Turborepo. Use its declared
+  `format:check`, `lint`, `typecheck`, `check:ci`, and `release:preflight` scripts.
+- Native builds and runtime checks run locally; CI does not build example apps.
+- Run `bun run sync-package-docs` after editing root README, CHANGELOG, or
+  SECURITY. Docs are copied into the package by the pack lifecycle; do not
+  maintain a separate handwritten package-doc tree.
 
 ## Monorepo Update Scope
 

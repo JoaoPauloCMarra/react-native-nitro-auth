@@ -19,6 +19,10 @@ uses configurable browser storage, with token persistence disabled by default.
 Your backend remains responsible for validating tokens and creating application
 sessions.
 
+This development README includes the Unreleased changes in PR #38: credential
+acquisition, Android Apple sign-in, and expanded social buttons. Check the
+[changelog](CHANGELOG.md) for the APIs included in your installed version.
+
 ## Install
 
 ```sh
@@ -48,7 +52,7 @@ bare app.
 | React Native               | `>=0.75.0`; runtime gate `0.86.3`, RN `0.87` Strict TypeScript compatibility check |
 | React                      | Validated with `19.2.3`                                                            |
 | React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                                 |
-| Expo                       | SDK `57.0.22` development builds; RN `0.86.3`                                      |
+| Expo                       | SDK `57.0.23` development builds; RN `0.86.3`                                      |
 | iOS                        | `16.4` or later                                                                    |
 
 iOS static frameworks are supported with source-built React Native. After
@@ -277,8 +281,8 @@ async function signInWithMicrosoft() {
 ```
 
 `login()` still returns `Promise<void>` and leaves the session on
-`AuthService.currentUser`. `loginAndGetUser()` runs the same native login, then
-returns that user or rejects with `not_signed_in`. `logout()` is synchronous and
+`AuthService.currentUser`. `loginAndGetUser()` returns the user captured by its
+own login completion, even if a later operation replaces the session. `logout()` is synchronous and
 returns `void`.
 
 Use `getCredential()` when the app sends an identity-provider token to its own
@@ -302,10 +306,15 @@ await fetch(yourAuthEndpoint, {
 
 `getCredential()` supports Google and Apple. It creates a random nonce, sends
 its SHA-256 hex value to the provider, returns the raw nonce for backend
-verification, and clears the temporary package session before resolving.
+verification, and clears provider state before resolving without publishing a
+package session.
 If a package session is already active, it rejects with `invalid_state` before
 provider setup or session changes; call `logout()` before requesting a separate
 credential.
+While acquisition is pending, another credential or session operation rejects
+with `operation_in_progress`; `logout()` and `dispose()` can cancel it. Cleanup
+preserves the original acquisition error if cleanup also fails. Credential acquisition emits correlated operation events without temporary
+login, state, or logout events.
 Google defaults to `openid`, `email`, and `profile`; Apple defaults to `email`
 and `fullName` (`name` in Apple's web SDK). Explicit `scopes` replace those defaults. Caller-supplied `nonce`
 and Android `useLegacyGoogleSignIn` are not accepted. Android nonce-bound Google
@@ -418,19 +427,19 @@ renderer. `appearance` accepts `light` or `dark`; `shape` accepts `pill` or
 Set `iconOnly` to render the provider's official square icon without cropping
 the full button. It defaults to `false`; icon-only buttons remain 48 × 48 dp
 targets and keep the accessible label “Sign in with Google” or “Sign in with
-Apple”. The visual busy indicator sits below the branded control, so it does
-not cover the mark. The outer control owns press handling, disabled/busy state,
-and accessibility. A `customComponents` entry can replace one provider's
-visual content; it receives `SocialButtonContentProps` and cannot replace the
-outer press or accessibility behavior. Custom visual overrides and style
-changes are the app's responsibility to keep within provider requirements.
+Apple”.
+
+While a login runs, every render mode keeps the provider mark, the button
+chrome, and the button size. Labeled buttons show the mark with the indicator
+beside it; icon-only buttons dim the mark and center the indicator over it.
+Turning `loading` on or off never moves or resizes the control.
 
 Custom content can use the exported `SocialProviderIcon` for Google or Apple
 artwork without copying assets or loading a font. Set `loadingIndicator={null}`
 when that content renders its own loading state; this removes the default
-indicator and its reserved bottom gap while preserving the outer button's
+indicator while preserving the outer button's
 busy state and duplicate-press protection. A React element passed as
-`loadingIndicator` replaces the default indicator below the button.
+`loadingIndicator` replaces the default indicator inside the button.
 
 ```tsx
 <SocialButton provider="google" appearance="light" shape="pill" />
@@ -442,10 +451,11 @@ promise. The component disables itself and reports progress while it settles;
 `loading` adds a controlled busy state. Rejections are normalized and passed to
 `onError` as `AuthError`.
 
-The Google custom text button requests Google Sans Medium. The Expo config
-plugin's `googleButtonFont` option defaults to `false`; set it to `true` in the
-existing `react-native-nitro-auth` plugin options only when using custom Google
-text:
+Custom mode draws its label in the platform system font, which is Roboto on
+Android and San Francisco on iOS, and needs no bundled font. To use Google Sans
+Medium instead, set the Expo config plugin's `googleButtonFont` option to `true`
+in the existing `react-native-nitro-auth` plugin options and pass the family
+through `textStyle`:
 
 ```js
 [
@@ -454,8 +464,12 @@ text:
 ];
 ```
 
-Image and SVG modes, custom icon-only buttons, and the Apple custom button do
-not use this font. For a bare React Native app without the Expo plugin, copy
+```tsx
+<SocialButton provider="google" textStyle={{ fontFamily: googleSansFamily }} />
+```
+
+No render mode requires this font. For a bare React Native app without the Expo
+plugin, copy
 `node_modules/react-native-nitro-auth/assets/fonts/GoogleSans-Medium.ttf` to
 Android as `android/app/src/main/assets/fonts/NitroAuthGoogleSans-Medium.ttf`.
 On iOS, add `NitroAuthGoogleSans-Medium.ttf` to the app bundle and list it under
@@ -463,6 +477,13 @@ On iOS, add `NitroAuthGoogleSans-Medium.ttf` to the app bundle and list it under
 `NitroAuthGoogleSans-Medium` on Android and `GoogleSans-Medium` on iOS; web apps
 must register `GoogleSans-Medium` themselves. After changing native font
 configuration, regenerate and rebuild the app.
+
+The package ships the official Google and Apple marks as images and draws them
+unaltered in every mode. `svg` mode uses vector button artwork; Google's vector
+export draws its mark with a Figma conic gradient inside a `foreignObject`,
+which no native SVG renderer supports, so the package draws the mark image into
+that box instead. Run `bun scripts/generate-social-button-assets.ts` after
+changing any artwork file, then refresh `src/ui/assets/provenance.json`.
 
 The layouts follow the [Google Sign-In branding
 guidelines](https://developers.google.com/identity/branding-guidelines) and
@@ -512,7 +533,37 @@ const unsubscribe = AuthService.onAuthEvent((event) => {
     report(event.provider, event.errorCode);
   }
 });
+
+// Call when the subscriber is no longer needed.
+unsubscribe();
 ```
+
+Async service calls also emit `operation_started` followed by one
+`operation_succeeded` or `operation_failed`. These events carry `operationId`,
+`operation`, an optional `provider`, and terminal `elapsedMilliseconds`.
+Failures include `errorCode`. Timing covers the complete service call, including
+validation. Concurrent callers receive distinct IDs even when native refresh is
+deduplicated. Use `AuthLifecycleEvent` for the full discriminated event union.
+Synchronous logout/dispose retain their named lifecycle events.
+
+`onAuthStateChanged`, `onTokensRefreshed`, and `onSessionChanged` can carry
+credentials and profile data; never forward them to analytics. Listener failures
+are isolated. Unsubscribe is idempotent and suppresses queued JS delivery.
+Web legacy state registration sends an initial value; native registration waits
+for a change. Use `getSessionSnapshot()` for an atomic current value:
+
+```ts
+const snapshot = AuthService.getSessionSnapshot(); // { revision, user?, scopes }
+const remove = AuthService.onSessionChanged((next) => {
+  // Consume the snapshot; do not log user or token fields.
+});
+```
+
+`useAuth()` shares one native snapshot subscription across mounted consumers.
+Snapshot observers remain usable after service disposal and reattach when the
+service recreates. Other subscriptions end on disposal. Refresh publishes state,
+then token data, then its named lifecycle event. Do not infer ordering between
+async native callbacks and the service promise's operation events.
 
 ## Storage and Security
 
@@ -552,17 +603,21 @@ import {
   AuthError,
   AuthService,
   type AuthErrorCode,
+  type AuthOperation,
 } from "react-native-nitro-auth";
 
 async function signIn(
-  reportFailure: (code: AuthErrorCode, detail: string | undefined) => void,
+  reportFailure: (
+    code: AuthErrorCode,
+    operation: AuthOperation | undefined,
+  ) => void,
 ) {
   try {
     await AuthService.login("google");
   } catch (error) {
     if (error instanceof AuthError) {
       if (error.code === "cancelled") return;
-      reportFailure(error.code, error.underlyingMessage);
+      reportFailure(error.code, error.operation);
       return;
     }
     throw error;
@@ -575,6 +630,10 @@ Error codes are `cancelled`, `interaction_required`, `timeout`,
 `operation_in_progress`, `unsupported_provider`, `invalid_state`,
 `invalid_nonce`, `token_error`, `no_id_token`, `parse_error`,
 `refresh_failed`, and `unknown`.
+
+Treat `underlyingMessage` as untrusted diagnostic text that may contain provider
+details. Prefer `code` and `operation` for telemetry and user-facing decisions;
+do not forward raw details automatically.
 
 ## Platform Support
 
@@ -589,7 +648,7 @@ The native package gate and Expo example use React Native `0.86.3`. The
 `check:ci` workflow also compiles the public source against React Native
 `0.87.0`'s Strict TypeScript API to catch declaration and callback regressions;
 that compatibility check does not change the runtime baseline. Expo SDK
-`57.0.22` selects React Native `0.86.3`; do not override it in an Expo app.
+`57.0.23` selects React Native `0.86.3`; do not override it in an Expo app.
 
 Package peer range: `>=0.37.0 <0.38.0`.
 
@@ -625,6 +684,10 @@ bun run example:ios
 Run native example builds locally before release when changing plugin, native,
 Nitro, or packaging files. GitHub CI does not build the Android or iOS example;
 use the commands above for local validation.
+
+The [native performance investigation](docs/native-performance-plan.md) maps
+current C++ ownership and implemented credential, event, error, and snapshot
+improvements. It describes future work, not new APIs or measured speedups.
 
 ## Links
 

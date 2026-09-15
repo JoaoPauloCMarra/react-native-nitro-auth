@@ -1,6 +1,7 @@
 import type { HybridObject } from "react-native-nitro-modules";
 
 export type AuthProvider = "google" | "apple" | "microsoft";
+export type CredentialProvider = "google" | "apple";
 
 export type AuthErrorCode =
   | "cancelled"
@@ -92,6 +93,20 @@ export interface ScopeRevocationResult {
   revokedScopes: string[];
 }
 
+export interface AuthCredential {
+  provider: CredentialProvider;
+  idToken: string;
+  /** Raw nonce for the server's credential verification. */
+  nonce: string;
+  user: AuthUser;
+}
+
+export interface AuthSessionSnapshot {
+  revision: number;
+  user?: AuthUser;
+  scopes: string[];
+}
+
 export type AuthEventType =
   | "login_started"
   | "login_succeeded"
@@ -114,9 +129,22 @@ export interface Auth extends HybridObject<{ ios: "c++"; android: "c++" }> {
   readonly hasPlayServices: boolean;
 
   createNonce(): Promise<AuthNonce>;
+  getCredential(
+    provider: CredentialProvider,
+    options?: LoginOptions,
+  ): Promise<AuthCredential>;
+  getSessionSnapshot(): AuthSessionSnapshot;
+  onSessionChanged(
+    callback: (snapshot: AuthSessionSnapshot) => void,
+  ): () => void;
   login(provider: AuthProvider, options?: LoginOptions): Promise<void>;
+  loginAndGetUser(
+    provider: AuthProvider,
+    options?: LoginOptions,
+  ): Promise<AuthUser>;
   requestScopes(scopes: string[]): Promise<void>;
   revokeScopes(scopes: string[]): Promise<void>;
+  revokeScopesWithResult(scopes: string[]): Promise<ScopeRevocationResult>;
   revokeAccess(): Promise<void>;
   getAccessToken(): Promise<string | undefined>;
   refreshToken(): Promise<AuthTokens>;

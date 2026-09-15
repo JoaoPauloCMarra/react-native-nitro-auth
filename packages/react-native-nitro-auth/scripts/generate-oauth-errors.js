@@ -99,7 +99,7 @@ function emitSwift() {
   return `// GENERATED FILE - DO NOT EDIT
 // Source: scripts/oauth-errors.json
 // Regenerate with: bun scripts/generate-oauth-errors.js
-let oauthErrorCodes: [String: AuthErrorCode] = [
+let oauthErrorCodes: [String: PlatformAuthErrorCode] = [
 ${lines.join("\n")}
 ]
 `;

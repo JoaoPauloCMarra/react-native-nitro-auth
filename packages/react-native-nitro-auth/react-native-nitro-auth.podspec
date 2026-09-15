@@ -4,6 +4,7 @@ package = JSON.parse(File.read(File.join(__dir__, "package.json")))
 
 Pod::Spec.new do |s|
   s.name         = "react-native-nitro-auth"
+  s.module_name  = "NitroAuthPlatform"
   s.version      = package["version"]
   s.summary      = package["description"]
   s.homepage     = package["homepage"]
@@ -38,7 +39,7 @@ Pod::Spec.new do |s|
   s.dependency "React-Core"
   s.dependency "GoogleSignIn", "~> 9.1"
   
-  load 'nitrogen/generated/ios/NitroAuth+autolinking.rb'
+  load 'nitrogen/generated/ios/NitroAuthPlatform+autolinking.rb'
   add_nitrogen_files(s)
   install_modules_dependencies(s)
 end
