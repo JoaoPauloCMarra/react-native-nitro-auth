@@ -13,7 +13,10 @@ const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const packageDir = path.resolve(__dirname, "../packages/react-native-nitro-auth");
+const packageDir = path.resolve(
+  __dirname,
+  "../packages/react-native-nitro-auth",
+);
 const projectRoot = path.resolve(__dirname, "..");
 const docsSyncScript = path.join(projectRoot, "scripts/sync-package-docs.ts");
 
@@ -55,7 +58,28 @@ const requiredFiles = [
   "CHANGELOG.md",
   "SECURITY.md",
   "LICENSE",
+  "assets/fonts/GoogleSans-Medium.ttf",
+  "assets/fonts/GoogleSans-OFL.txt",
+  "src/ui/social-button-core.tsx",
+  "src/ui/social-button-renderer.tsx",
+  "src/ui/assets/provenance.json",
 ];
+
+for (const provider of ["google", "apple"]) {
+  for (const platform of ["android", "ios"]) {
+    for (const appearance of ["light", "dark"]) {
+      for (const shape of ["pill", "rectangular"]) {
+        const filename = `${provider}-${platform}-${appearance}-${shape}.png`;
+        for (const base of ["src", "lib/module", "lib/commonjs"]) {
+          requiredFiles.push(`${base}/ui/assets/${filename}`);
+          requiredFiles.push(
+            `${base}/ui/assets/${filename.replace(".png", "-icon.png")}`,
+          );
+        }
+      }
+    }
+  }
+}
 
 function parsePackedFiles(stdout) {
   try {
@@ -133,7 +157,9 @@ function main() {
     process.exit(1);
   }
 
-  const manifest = JSON.parse(fs.readFileSync(path.join(packageDir, "package.json"), "utf8"));
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(packageDir, "package.json"), "utf8"),
+  );
   const exportsMap = manifest.exports ?? {};
   const declaredSubpaths = Object.keys(exportsMap).filter(
     (subpath) => subpath !== "./package.json",
@@ -144,14 +170,23 @@ function main() {
     if (typeof target === "string") {
       candidates.push(target);
     } else if (target && typeof target === "object") {
-      for (const condition of ["import", "require", "react-native", "browser", "default"]) {
+      for (const condition of [
+        "import",
+        "require",
+        "react-native",
+        "browser",
+        "default",
+      ]) {
         const value = target[condition];
         if (typeof value === "string") {
           candidates.push(value);
         }
       }
     }
-    if (candidates.length === 0 || !candidates.some((file) => files.has(file.replace(/^\.\//, "")))) {
+    if (
+      candidates.length === 0 ||
+      !candidates.some((file) => files.has(file.replace(/^\.\//, "")))
+    ) {
       console.error(
         `Package content audit failed. Subpath export ${subpath} resolves to "${JSON.stringify(target)}" but none of its targets are packed.`,
       );
@@ -159,7 +194,9 @@ function main() {
     }
   }
 
-  console.log(`Package content audit passed (${requiredFiles.length} required files, ${declaredSubpaths.length} subpath exports).`);
+  console.log(
+    `Package content audit passed (${requiredFiles.length} required files, ${declaredSubpaths.length} subpath exports).`,
+  );
 }
 
 main();

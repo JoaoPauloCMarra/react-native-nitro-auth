@@ -1,13 +1,44 @@
+const fs = require("fs/promises");
+const path = require("path");
 const { withBuildProperties } = require("expo-build-properties");
 const {
   withInfoPlist,
   withEntitlementsPlist,
   withStringsXml,
   withAndroidManifest,
+  withDangerousMod,
+  withXcodeProject,
+  IOSConfig,
   AndroidConfig,
   createRunOncePlugin,
 } = require("@expo/config-plugins");
 const pkg = require("./package.json");
+const PACKAGE_ROOT = path.dirname(require.resolve("./package.json"));
+
+const GOOGLE_BUTTON_FONT_SOURCE = path.join(
+  PACKAGE_ROOT,
+  "assets",
+  "fonts",
+  "GoogleSans-Medium.ttf",
+);
+const GOOGLE_BUTTON_FONT_LICENSE_SOURCE = path.join(
+  PACKAGE_ROOT,
+  "assets",
+  "fonts",
+  "GoogleSans-OFL.txt",
+);
+const GOOGLE_BUTTON_FONT_ANDROID_PATH = path.join(
+  "app",
+  "src",
+  "main",
+  "assets",
+  "fonts",
+);
+const GOOGLE_BUTTON_FONT_ANDROID_FILENAME = "NitroAuthGoogleSans-Medium.ttf";
+const GOOGLE_BUTTON_FONT_ANDROID_LICENSE_FILENAME =
+  "NitroAuthGoogleSans-OFL.txt";
+const GOOGLE_BUTTON_FONT_IOS_FILENAME = "NitroAuthGoogleSans-Medium.ttf";
+const GOOGLE_BUTTON_FONT_IOS_LICENSE_FILENAME = "NitroAuthGoogleSans-OFL.txt";
 
 const googleSignInIosPods = [
   { name: "AppCheckCore", modular_headers: true },
@@ -128,9 +159,126 @@ function resolveAppleAndroid(android) {
   return { brokerUrl: brokerUrl.replace(/\/+$/, ""), callbackScheme };
 }
 
+function resolveGoogleButtonFont(value) {
+  if (value === undefined) {
+    return false;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error("googleButtonFont must be a boolean.");
+  }
+  return value;
+}
+
+async function syncFontFile(source, destination, enabled) {
+  if (enabled) {
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.copyFile(source, destination);
+    return;
+  }
+  await fs.rm(destination, { force: true });
+}
+
+function withGoogleButtonFont(config, enabled) {
+  config = withDangerousMod(config, [
+    "android",
+    async (config) => {
+      const fontDirectory = path.join(
+        config.modRequest.platformProjectRoot,
+        GOOGLE_BUTTON_FONT_ANDROID_PATH,
+      );
+      await syncFontFile(
+        GOOGLE_BUTTON_FONT_SOURCE,
+        path.join(fontDirectory, GOOGLE_BUTTON_FONT_ANDROID_FILENAME),
+        enabled,
+      );
+      await syncFontFile(
+        GOOGLE_BUTTON_FONT_LICENSE_SOURCE,
+        path.join(fontDirectory, GOOGLE_BUTTON_FONT_ANDROID_LICENSE_FILENAME),
+        enabled,
+      );
+      return config;
+    },
+  ]);
+
+  config = withDangerousMod(config, [
+    "ios",
+    async (config) => {
+      const platformProjectRoot = config.modRequest.platformProjectRoot;
+      await syncFontFile(
+        GOOGLE_BUTTON_FONT_SOURCE,
+        path.join(platformProjectRoot, GOOGLE_BUTTON_FONT_IOS_FILENAME),
+        enabled,
+      );
+      await syncFontFile(
+        GOOGLE_BUTTON_FONT_LICENSE_SOURCE,
+        path.join(platformProjectRoot, GOOGLE_BUTTON_FONT_IOS_LICENSE_FILENAME),
+        enabled,
+      );
+      return config;
+    },
+  ]);
+
+  config = withInfoPlist(config, (config) => {
+    const existingFonts = Array.isArray(config.modResults.UIAppFonts)
+      ? config.modResults.UIAppFonts
+      : [];
+    if (enabled) {
+      config.modResults.UIAppFonts = Array.from(
+        new Set([...existingFonts, GOOGLE_BUTTON_FONT_IOS_FILENAME]),
+      );
+    } else {
+      const remainingFonts = existingFonts.filter(
+        (font) => font !== GOOGLE_BUTTON_FONT_IOS_FILENAME,
+      );
+      if (remainingFonts.length > 0) {
+        config.modResults.UIAppFonts = remainingFonts;
+      } else {
+        delete config.modResults.UIAppFonts;
+      }
+    }
+    return config;
+  });
+
+  config = withXcodeProject(config, (config) => {
+    const project = config.modResults;
+    const resourceFiles = [
+      GOOGLE_BUTTON_FONT_IOS_FILENAME,
+      GOOGLE_BUTTON_FONT_IOS_LICENSE_FILENAME,
+    ];
+    if (enabled) {
+      IOSConfig.XcodeUtils.ensureGroupRecursively(project, "Resources");
+      for (const filepath of resourceFiles) {
+        if (!project.hasFile(filepath)) {
+          config.modResults = IOSConfig.XcodeUtils.addResourceFileToGroup({
+            filepath,
+            groupName: "Resources",
+            project: config.modResults,
+            isBuildFile: true,
+          });
+        }
+      }
+    } else {
+      const appTarget = project.getTarget("com.apple.product-type.application");
+      if (appTarget) {
+        for (const filepath of resourceFiles) {
+          if (project.hasFile(filepath)) {
+            project.removeResourceFile(filepath, { target: appTarget.uuid });
+          }
+        }
+      }
+    }
+    return config;
+  });
+
+  return config;
+}
+
 const withNitroAuth = (config, props = {}) => {
   const { ios = {}, android = {} } = props;
   const appleAndroid = resolveAppleAndroid(android);
+  const googleButtonFont = resolveGoogleButtonFont(props.googleButtonFont);
+
+  config = withGoogleButtonFont(config, googleButtonFont);
 
   config = withBuildProperties(config, {
     ios: {
@@ -380,4 +528,5 @@ module.exports._internal = {
   googleSignInIosPods,
   googleIosUrlSchemeFromClientId,
   resolveGoogleUrlScheme,
+  resolveGoogleButtonFont,
 };

@@ -405,6 +405,59 @@ Supported login options:
 `error instanceof AuthError` when handling an error value that came from
 outside the package.
 
+### Social buttons
+
+`SocialButton` renders Google and Apple controls in `custom` mode by default.
+Set `renderMode` to `image` or `svg` to use the package's official full-button
+artwork. Those modes preserve the platform artwork's aspect ratio and do not
+apply `textStyle` or `borderRadius`. Microsoft keeps its existing custom
+renderer. `appearance` accepts `light` or `dark`; `shape` accepts `pill` or
+`rectangular`. For Google and Apple, the deprecated `variant` values `primary`,
+`outline`, and `white` map to `light`; `black` maps to `dark`.
+
+Set `iconOnly` to render the provider's official square icon without cropping
+the full button. It defaults to `false`; icon-only buttons remain 48 × 48 dp
+targets and keep the accessible label “Sign in with Google” or “Sign in with
+Apple”. The visual busy indicator sits below the branded control, so it does
+not cover the mark. The outer control owns press handling, disabled/busy state,
+and accessibility. A `customComponents` entry can replace one provider's
+visual content; it receives `SocialButtonContentProps` and cannot replace the
+outer press or accessibility behavior. Custom visual overrides and style
+changes are the app's responsibility to keep within provider requirements.
+
+```tsx
+<SocialButton provider="google" appearance="light" shape="pill" />
+<SocialButton provider="apple" renderMode="svg" iconOnly />
+```
+
+When provided, `onPress` replaces the package-managed login and may return a
+promise. The component disables itself and reports progress while it settles;
+`loading` adds a controlled busy state. Rejections are normalized and passed to
+`onError` as `AuthError`.
+
+The Google custom text button requests Google Sans Medium. The Expo config
+plugin's `googleButtonFont` option defaults to `false`; set it to `true` in the
+existing `react-native-nitro-auth` plugin options only when using custom Google
+text:
+
+```js
+["react-native-nitro-auth", { googleButtonFont: true /* keep other options */ }]
+```
+
+Image and SVG modes, custom icon-only buttons, and the Apple custom button do
+not use this font. For a bare React Native app without the Expo plugin, copy
+`node_modules/react-native-nitro-auth/assets/fonts/GoogleSans-Medium.ttf` to
+Android as `android/app/src/main/assets/fonts/NitroAuthGoogleSans-Medium.ttf`.
+On iOS, add `NitroAuthGoogleSans-Medium.ttf` to the app bundle and list it under
+`UIAppFonts` in `Info.plist`. The registered font families are
+`NitroAuthGoogleSans-Medium` on Android and `GoogleSans-Medium` on iOS; web apps
+must register `GoogleSans-Medium` themselves. After changing native font
+configuration, regenerate and rebuild the app.
+
+The layouts follow the [Google Sign-In branding
+guidelines](https://developers.google.com/identity/branding-guidelines) and
+[Apple's Sign in with Apple HIG](https://developer.apple.com/design/human-interface-guidelines/sign-in-with-apple).
+
 ### Token semantics and capabilities
 
 `expirationTime` is the access-token expiry in epoch milliseconds on every

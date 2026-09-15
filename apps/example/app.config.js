@@ -41,6 +41,7 @@ const appConfig = {
       [
         "react-native-nitro-auth",
         {
+          googleButtonFont: true,
           ios: {
             googleClientId: process.env.GOOGLE_IOS_CLIENT_ID,
             googleServerClientId: process.env.GOOGLE_SERVER_CLIENT_ID,

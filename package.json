@@ -58,7 +58,7 @@
     "test:cpp": "bun run --cwd packages/react-native-nitro-auth test:cpp",
     "check": "bun run lint && bun run test:types && bun run test && bun run test:lifecycle",
     "check:ci": "bun run verify:core-versions && bun run verify:codegen && bun run build && bun run check && bun run test:cpp && bun run typecheck:rn087",
-    "audit:package": "bun scripts/sync-package-docs.ts --check && bun scripts/check-pack-contents.js",
+    "audit:package": "bun scripts/sync-package-docs.ts --check && bun scripts/check-social-button-assets.ts && bun scripts/check-pack-contents.js",
     "example:lint": "bun run --cwd apps/example lint",
     "example:typecheck": "bun run --cwd apps/example typecheck",
     "example:check": "bun run example:lint && bun run example:typecheck && bun run example:install-check && bun run example:doctor && bun run example:config",

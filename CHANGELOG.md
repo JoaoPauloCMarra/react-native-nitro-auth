@@ -17,6 +17,9 @@ Breaking changes are always listed first in each release section.
 - Add `AuthService.getCredential()` for nonce-bound Google and Apple ID tokens,
   with native OS nonce generation and no retained package session.
 - Add optional structured `firstName` and `lastName` fields to `AuthUser`.
+- Add Google and Apple `SocialButton` custom, image, and SVG render modes,
+  including official icon-only artwork, per-provider visual overrides, and
+  controlled loading with async press handlers.
 
 ### Fixed
 

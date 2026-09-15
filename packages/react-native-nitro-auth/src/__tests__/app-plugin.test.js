@@ -1,4 +1,76 @@
+const fs = require("fs/promises");
+const os = require("os");
+const path = require("path");
+const { IOSConfig } = require("@expo/config-plugins");
 const { _internal, withNitroAuth } = require("../../app.plugin.js");
+const PACKAGE_ROOT = path.dirname(require.resolve("../../package.json"));
+
+const GOOGLE_BUTTON_FONT_IOS_FILENAME = "NitroAuthGoogleSans-Medium.ttf";
+const GOOGLE_BUTTON_FONT_IOS_LICENSE_FILENAME = "NitroAuthGoogleSans-OFL.txt";
+
+let temporaryProjects = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryProjects.map((projectRoot) =>
+      fs.rm(projectRoot, { recursive: true, force: true }),
+    ),
+  );
+  temporaryProjects = [];
+  jest.restoreAllMocks();
+});
+
+async function makeNativeProjectFixture() {
+  const projectRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), "nitro-auth-google-font-"),
+  );
+  const androidRoot = path.join(projectRoot, "android");
+  const iosRoot = path.join(projectRoot, "ios");
+  await fs.mkdir(androidRoot, { recursive: true });
+  await fs.mkdir(path.join(androidRoot, "app"), { recursive: true });
+  await fs.writeFile(path.join(androidRoot, "app/proguard-rules.pro"), "");
+  await fs.mkdir(iosRoot, { recursive: true });
+  temporaryProjects.push(projectRoot);
+  return { projectRoot, androidRoot, iosRoot };
+}
+
+function makeFontPluginConfig(googleButtonFont) {
+  const props = {};
+  if (googleButtonFont !== undefined) {
+    props.googleButtonFont = googleButtonFont;
+  }
+  return withNitroAuth({ name: "Example", slug: "example" }, props);
+}
+
+async function applyExpoMod(
+  config,
+  platform,
+  modName,
+  modResults,
+  { projectRoot, platformProjectRoot },
+) {
+  const result = await config.mods[platform][modName]({
+    ...config,
+    modResults,
+    modRequest: {
+      platform,
+      modName,
+      projectRoot,
+      platformProjectRoot,
+    },
+  });
+  return result.modResults;
+}
+
+function makeXcodeProjectFixture() {
+  const files = new Set();
+  return {
+    files,
+    hasFile: (filepath) => files.has(filepath),
+    getTarget: () => ({ uuid: "EXAMPLE_APP_TARGET" }),
+    removeResourceFile: jest.fn((filepath) => files.delete(filepath)),
+  };
+}
 
 const appleAndroid = {
   appleAndroidBrokerUrl: "https://auth.example.com/apple/",
@@ -228,5 +300,233 @@ describe("Expo config plugin", () => {
         googleUrlScheme: "  ",
       }),
     ).toBe("com.googleusercontent.apps.123-abc");
+  });
+});
+
+describe("optional Google button font", () => {
+  it("keeps the bundled font out of a fresh native project by default", async () => {
+    const fixture = await makeNativeProjectFixture();
+    const androidFontsDirectory = path.join(
+      fixture.androidRoot,
+      "app/src/main/assets/fonts",
+    );
+    await fs.mkdir(androidFontsDirectory, { recursive: true });
+    await fs.writeFile(
+      path.join(androidFontsDirectory, "GoogleSans-Medium.ttf"),
+      "host-owned font",
+    );
+    const config = makeFontPluginConfig();
+    const xcodeProject = makeXcodeProjectFixture();
+
+    await applyExpoMod(
+      config,
+      "android",
+      "dangerous",
+      {},
+      {
+        projectRoot: fixture.projectRoot,
+        platformProjectRoot: fixture.androidRoot,
+      },
+    );
+    await applyExpoMod(
+      config,
+      "ios",
+      "dangerous",
+      {},
+      {
+        projectRoot: fixture.projectRoot,
+        platformProjectRoot: fixture.iosRoot,
+      },
+    );
+    const infoPlist = await applyExpoMod(
+      config,
+      "ios",
+      "infoPlist",
+      { UIAppFonts: ["Existing-Regular.ttf"] },
+      fixture,
+    );
+    const addResource = jest.spyOn(
+      IOSConfig.XcodeUtils,
+      "addResourceFileToGroup",
+    );
+    await applyExpoMod(config, "ios", "xcodeproj", xcodeProject, fixture);
+
+    await expect(
+      fs.access(
+        path.join(
+          fixture.androidRoot,
+          "app/src/main/assets/fonts/NitroAuthGoogleSans-Medium.ttf",
+        ),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      fs.access(path.join(fixture.iosRoot, GOOGLE_BUTTON_FONT_IOS_FILENAME)),
+    ).rejects.toThrow();
+    expect(infoPlist.UIAppFonts).toEqual(["Existing-Regular.ttf"]);
+    expect(xcodeProject.files.size).toBe(0);
+    expect(addResource).not.toHaveBeenCalled();
+    expect(
+      await fs.readFile(
+        path.join(androidFontsDirectory, "GoogleSans-Medium.ttf"),
+        "utf8",
+      ),
+    ).toBe("host-owned font");
+    expect(_internal.resolveGoogleButtonFont(undefined)).toBe(false);
+  });
+
+  it("copies fonts only when enabled and cleans its native files when disabled", async () => {
+    const fixture = await makeNativeProjectFixture();
+    const androidFontsDirectory = path.join(
+      fixture.androidRoot,
+      "app/src/main/assets/fonts",
+    );
+    await fs.mkdir(androidFontsDirectory, { recursive: true });
+    await fs.writeFile(path.join(androidFontsDirectory, "Custom.ttf"), "keep");
+    await fs.writeFile(
+      path.join(androidFontsDirectory, "GoogleSans-Medium.ttf"),
+      "host-owned font",
+    );
+
+    const xcodeProject = makeXcodeProjectFixture();
+    jest
+      .spyOn(IOSConfig.XcodeUtils, "ensureGroupRecursively")
+      .mockReturnValue({});
+    jest
+      .spyOn(IOSConfig.XcodeUtils, "addResourceFileToGroup")
+      .mockImplementation(({ project, filepath }) => {
+        project.files.add(filepath);
+        return project;
+      });
+
+    const enabled = makeFontPluginConfig(true);
+    await applyExpoMod(
+      enabled,
+      "android",
+      "dangerous",
+      {},
+      {
+        projectRoot: fixture.projectRoot,
+        platformProjectRoot: fixture.androidRoot,
+      },
+    );
+    await applyExpoMod(
+      enabled,
+      "ios",
+      "dangerous",
+      {},
+      {
+        projectRoot: fixture.projectRoot,
+        platformProjectRoot: fixture.iosRoot,
+      },
+    );
+    const enabledPlist = await applyExpoMod(
+      enabled,
+      "ios",
+      "infoPlist",
+      { UIAppFonts: ["Existing-Regular.ttf"] },
+      fixture,
+    );
+    await applyExpoMod(enabled, "ios", "xcodeproj", xcodeProject, fixture);
+
+    const sourceFont = path.join(
+      PACKAGE_ROOT,
+      "assets/fonts/GoogleSans-Medium.ttf",
+    );
+    const sourceLicense = path.join(
+      PACKAGE_ROOT,
+      "assets/fonts/GoogleSans-OFL.txt",
+    );
+    expect(
+      await fs.readFile(
+        path.join(androidFontsDirectory, "NitroAuthGoogleSans-Medium.ttf"),
+      ),
+    ).toEqual(await fs.readFile(sourceFont));
+    expect(
+      await fs.readFile(
+        path.join(fixture.iosRoot, GOOGLE_BUTTON_FONT_IOS_FILENAME),
+      ),
+    ).toEqual(await fs.readFile(sourceFont));
+    expect(
+      await fs.readFile(
+        path.join(fixture.iosRoot, GOOGLE_BUTTON_FONT_IOS_LICENSE_FILENAME),
+      ),
+    ).toEqual(await fs.readFile(sourceLicense));
+    expect(enabledPlist.UIAppFonts).toEqual([
+      "Existing-Regular.ttf",
+      GOOGLE_BUTTON_FONT_IOS_FILENAME,
+    ]);
+    expect(xcodeProject.files).toEqual(
+      new Set([
+        GOOGLE_BUTTON_FONT_IOS_FILENAME,
+        GOOGLE_BUTTON_FONT_IOS_LICENSE_FILENAME,
+      ]),
+    );
+
+    const disabled = makeFontPluginConfig(false);
+    await applyExpoMod(
+      disabled,
+      "android",
+      "dangerous",
+      {},
+      {
+        projectRoot: fixture.projectRoot,
+        platformProjectRoot: fixture.androidRoot,
+      },
+    );
+    await applyExpoMod(
+      disabled,
+      "ios",
+      "dangerous",
+      {},
+      {
+        projectRoot: fixture.projectRoot,
+        platformProjectRoot: fixture.iosRoot,
+      },
+    );
+    const disabledPlist = await applyExpoMod(
+      disabled,
+      "ios",
+      "infoPlist",
+      enabledPlist,
+      fixture,
+    );
+    await applyExpoMod(disabled, "ios", "xcodeproj", xcodeProject, fixture);
+
+    await expect(
+      fs.access(
+        path.join(androidFontsDirectory, "NitroAuthGoogleSans-Medium.ttf"),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      fs.access(
+        path.join(androidFontsDirectory, "NitroAuthGoogleSans-OFL.txt"),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      fs.access(path.join(fixture.iosRoot, GOOGLE_BUTTON_FONT_IOS_FILENAME)),
+    ).rejects.toThrow();
+    await expect(
+      fs.access(
+        path.join(fixture.iosRoot, GOOGLE_BUTTON_FONT_IOS_LICENSE_FILENAME),
+      ),
+    ).rejects.toThrow();
+    expect(
+      await fs.readFile(path.join(androidFontsDirectory, "Custom.ttf"), "utf8"),
+    ).toBe("keep");
+    expect(
+      await fs.readFile(
+        path.join(androidFontsDirectory, "GoogleSans-Medium.ttf"),
+        "utf8",
+      ),
+    ).toBe("host-owned font");
+    expect(disabledPlist.UIAppFonts).toEqual(["Existing-Regular.ttf"]);
+    expect(xcodeProject.files.size).toBe(0);
+    expect(xcodeProject.removeResourceFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("requires a boolean when explicitly configured", () => {
+    expect(() => makeFontPluginConfig("true")).toThrow(
+      "googleButtonFont must be a boolean.",
+    );
   });
 });
