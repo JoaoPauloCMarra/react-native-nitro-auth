@@ -40,6 +40,8 @@ Breaking changes are always listed first in each release section.
 
 ### Fixed
 
+- Accept fractional-millisecond provider expiry timestamps on native platforms,
+  preventing valid iOS Google and Microsoft results from failing with `parse_error`.
 - Failed event subscriptions release their listeners, and snapshot dispatch
   skips listeners unsubscribed earlier in the same dispatch.
 - Social buttons keep the provider mark, chrome, and size while loading, so

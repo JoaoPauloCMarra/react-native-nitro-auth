@@ -1,8 +1,8 @@
 #include "PlatformAuth.hpp"
 #include "AuthError.hpp"
+#include "TokenExpiration.hpp"
 #include "HybridNativeAuthAdapterSpec.hpp"
 #include <NitroModules/HybridObjectRegistry.hpp>
-#include <cmath>
 #include <mutex>
 #include <type_traits>
 
@@ -21,12 +21,6 @@ std::shared_ptr<HybridNativeAuthAdapterSpec> adapter() {
 
 void validateFailure(const std::optional<ProviderFailure>& failure) {
   if (failure) std::rethrow_exception(makeAuthError(failure->code, failure->detail));
-}
-
-void validateExpiration(const std::optional<double>& expiration) {
-  if (expiration && (!std::isfinite(*expiration) || *expiration < 0 || std::floor(*expiration) != *expiration)) {
-    throw AuthException(AuthErrorCode::PARSE_ERROR);
-  }
 }
 
 template <typename T, typename Start, typename Convert>

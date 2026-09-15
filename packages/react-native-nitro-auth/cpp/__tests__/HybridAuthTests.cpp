@@ -9,8 +9,23 @@
 #include "../HybridAuth.hpp"
 #include "../PlatformAuth.hpp"
 #include "../AuthError.hpp"
+#include "../TokenExpiration.hpp"
+#include <limits>
 
 using namespace margelo::nitro::NitroAuth;
+
+void testProviderExpirationTimestamps() {
+  validateExpiration(std::nullopt);
+  validateExpiration(0);
+  validateExpiration(1789500000123.456);
+  for (double invalid : {-1.0, std::numeric_limits<double>::infinity(),
+                         -std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    bool rejected = false;
+    try { validateExpiration(invalid); }
+    catch (const AuthException& error) { rejected = std::string(error.what()).find("parse_error") != std::string::npos; }
+    assert(rejected);
+  }
+}
 
 namespace margelo::nitro::NitroAuth {
 
@@ -879,6 +894,7 @@ void testCredentialNonceValidationAndCancellation() {
 }
 
 int main() {
+  testProviderExpirationTimestamps();
   testCredentialNonceValidationAndCancellation();
   testCredentialFailureCleanupAndStaleResults();
   testCredentialTransactionDoesNotPublishSession();
