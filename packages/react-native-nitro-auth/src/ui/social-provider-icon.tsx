@@ -15,7 +15,7 @@ export function SocialProviderIcon({
   provider,
   appearance = "light",
   size = 24,
-}: SocialProviderIconProps) {
+}: SocialProviderIconProps): React.ReactElement {
   return provider === "google" ? (
     <Image
       accessible={false}
