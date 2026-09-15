@@ -93,6 +93,7 @@ export function SocialButtonCore({
   textStyle,
   borderRadius,
   loading = false,
+  loadingIndicator,
   disabled = false,
   onSuccess,
   onError,
@@ -244,6 +245,7 @@ export function SocialButtonCore({
         style,
         styles.brandedButton,
         { width, height: Math.max(48, height) },
+        loadingIndicator === null ? { marginBottom: 0 } : undefined,
       ]}
     >
       <View
@@ -259,14 +261,18 @@ export function SocialButtonCore({
           {...(customComponent ? { customComponent } : {})}
         />
       </View>
-      {isLoading ? (
+      {isLoading && loadingIndicator !== null ? (
         <View
           pointerEvents="none"
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
           style={styles.loadingIndicator}
         >
-          <ActivityIndicator size="small" color={spinnerColor} />
+          {loadingIndicator === undefined ? (
+            <ActivityIndicator size="small" color={spinnerColor} />
+          ) : (
+            loadingIndicator
+          )}
         </View>
       ) : null}
     </Pressable>

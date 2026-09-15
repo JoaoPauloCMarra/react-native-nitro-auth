@@ -4,6 +4,9 @@ import type { SocialButtonProps } from "./social-button-types";
 import { AuthService } from "../service";
 import type { AuthProvider } from "../Auth.nitro";
 
+export { SocialProviderIcon } from "./social-provider-icon";
+export type { SocialProviderIconProps } from "./social-provider-icon";
+
 export {
   AppleSocialButtonContent,
   GoogleSocialButtonContent,

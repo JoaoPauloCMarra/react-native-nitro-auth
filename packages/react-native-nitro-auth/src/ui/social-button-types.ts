@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import type { AuthProvider, AuthUser } from "../Auth.nitro";
 import type { AuthError } from "../utils/auth-error";
@@ -52,6 +52,8 @@ type SocialButtonCommonProps = {
   iconOnly?: boolean;
   /** External busy state, combined with package-managed login progress. */
   loading?: boolean;
+  /** Google/Apple indicator override; null lets custom content own busy visuals and spacing. */
+  loadingIndicator?: ReactNode;
   disabled?: boolean;
   onSuccess?: (user: AuthUser) => void;
   /** Receives the normalized runtime error as an AuthError instance. */

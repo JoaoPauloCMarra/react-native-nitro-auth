@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { SocialButton } from "../ui/social-button.web";
+import { SocialButton, SocialProviderIcon } from "../ui/social-button.web";
 import { AuthError } from "../utils/auth-error";
 import type { AuthProvider, AuthUser, LoginOptions } from "../Auth.nitro";
 
@@ -381,6 +381,49 @@ describe("SocialButton (web)", () => {
     });
     expect((button as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it("lets custom content own loading without a second indicator or reserved gap", () => {
+    render(
+      React.createElement(SocialButton, {
+        provider: "google",
+        iconOnly: true,
+        loading: true,
+        loadingIndicator: null,
+      }),
+    );
+    const button = screen.getByRole("button", { name: "Sign in with Google" });
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(button.querySelector("span")).toBeNull();
+    expect(button.style.marginBottom).toBe("0px");
+    expect(screen.getByTestId("google-logo.png")).toBeTruthy();
+  });
+
+  it.each(["ios", "android"] as const)(
+    "renders font-free provider icons on %s",
+    (platform) => {
+      mockPlatformOS = platform;
+      render(
+        React.createElement(
+          "div",
+          null,
+          React.createElement(SocialProviderIcon, {
+            provider: "google",
+            size: 24,
+          }),
+          React.createElement(SocialProviderIcon, {
+            provider: "apple",
+            size: 24,
+          }),
+        ),
+      );
+      expect(screen.getByTestId("google-logo.png").style.width).toBe("24px");
+      expect(
+        screen.getByTestId("apple-square-light").getAttribute("width"),
+      ).toBe("24");
+      expect(screen.queryByRole("button")).toBeNull();
+    },
+  );
 
   it("passes normalized AuthError to onError for a rejected custom press", async () => {
     const onError = jest.fn();
