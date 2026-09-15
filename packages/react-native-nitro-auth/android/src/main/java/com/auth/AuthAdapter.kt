@@ -19,6 +19,8 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.NoCredentialException
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.common.LifecycleState
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
@@ -67,8 +69,9 @@ object AuthAdapter {
     private var isInitialized = false
 
     private var appContext: Context? = null
-    @Volatile
-    private var currentActivity: Activity? = null
+    private val activityTracker = AuthActivityTracker()
+    private val currentActivity: Activity?
+        get() = activityTracker.currentActivity()
     private var googleSignInClient: GoogleSignInClient? = null
     private var lifecycleCallbacks: Application.ActivityLifecycleCallbacks? = null
     private var pendingMicrosoftScopes: List<String> = emptyList()
@@ -202,10 +205,10 @@ object AuthAdapter {
         val app = applicationContext as? Application
         if (app != null && lifecycleCallbacks == null) {
             lifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
-                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) { currentActivity = activity }
-                override fun onActivityStarted(activity: Activity) { currentActivity = activity }
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) { activityTracker.onActivityCreated(activity) }
+                override fun onActivityStarted(activity: Activity) { activityTracker.onActivityStarted(activity) }
                 override fun onActivityResumed(activity: Activity) {
-                    currentActivity = activity
+                    activityTracker.onActivityResumed(activity)
                     val isRedirectHandler = activity is MicrosoftAuthActivity
                     val suppressed = synchronized(this@AuthAdapter) {
                         val generation = pendingMicrosoftGeneration
@@ -253,14 +256,21 @@ object AuthAdapter {
                 }
                 override fun onActivityPaused(activity: Activity) {
                     if (microsoftAuthInProgress) microsoftBrowserWasOpened = true
-                    if (currentActivity == activity) currentActivity = null
+                    activityTracker.onActivityPaused(activity)
                 }
-                override fun onActivityStopped(activity: Activity) { if (currentActivity == activity) currentActivity = null }
+                override fun onActivityStopped(activity: Activity) { activityTracker.onActivityStopped(activity) }
                 override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
-                override fun onActivityDestroyed(activity: Activity) { if (currentActivity == activity) currentActivity = null }
+                override fun onActivityDestroyed(activity: Activity) { activityTracker.onActivityDestroyed(activity) }
             }
             app.registerActivityLifecycleCallbacks(lifecycleCallbacks)
         }
+        val reactContext = context as? ReactApplicationContext
+        val hostActivity = if (reactContext?.lifecycleState == LifecycleState.RESUMED) {
+            reactContext.currentActivity
+        } else {
+            null
+        }
+        activityTracker.seed(hostActivity)
 
         try {
             nativeInitialize(applicationContext)
@@ -286,7 +296,7 @@ object AuthAdapter {
         val app = appContext as? Application
         lifecycleCallbacks?.let { app?.unregisterActivityLifecycleCallbacks(it) }
         lifecycleCallbacks = null
-        currentActivity = null
+        activityTracker.clear()
         appContext = null
         googleSignInClient = null
         hasLegacyGoogleSession = false

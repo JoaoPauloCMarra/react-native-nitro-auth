@@ -16,6 +16,8 @@ Breaking changes are always listed first in each release section.
 
 ### Fixed
 
+- Android registers the native Auth module eagerly and resolves an already
+  resumed Activity when initialization happens after app launch.
 - Credential acquisition now rejects before provider setup when a package
   session is already active, preserving that session and its listeners.
 - Android nonce-bearing Google sign-in now stays on Credential Manager and
