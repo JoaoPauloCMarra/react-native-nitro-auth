@@ -5,6 +5,7 @@ import type {
   CredentialOptions,
   CredentialProvider,
   AuthError,
+  AppleAndroidLoginOptions,
   AppleIOSLoginOptions,
   AppleLoginOptions,
   AppleWebLoginOptions,
@@ -23,6 +24,9 @@ type IsAssignable<Source, Target> = Source extends Target ? true : false;
 
 type AppleTenant = AssertNever<NonNullable<AppleLoginOptions["tenant"]>>;
 type ApplePrompt = AssertNever<NonNullable<AppleLoginOptions["prompt"]>>;
+type AppleAndroidNameScope = AssertNever<
+  Extract<NonNullable<AppleAndroidLoginOptions["scopes"]>[number], "name">
+>;
 type AppleIOSLoginHint = AssertNever<
   NonNullable<AppleIOSLoginOptions["loginHint"]>
 >;
@@ -147,6 +151,11 @@ const googleAndroidOptions = {
   requestVerifiedPhoneNumber: true,
 } satisfies GoogleAndroidLoginOptions;
 
+const appleAndroidOptions = {
+  scopes: ["email", "fullName"],
+  nonce: "nonce",
+} satisfies AppleAndroidLoginOptions;
+
 const googleIOSOptions = {
   hostedDomain: "company.com",
   openIDRealm: "https://example.com",
@@ -161,6 +170,7 @@ const login: AuthLogin = async () => {};
 
 test("provider login option types compile", () => {
   expect(googleAndroidOptions.useOneTap).toBe(true);
+  expect(appleAndroidOptions.scopes).toEqual(["email", "fullName"]);
   expect(googleIOSOptions.openIDRealm).toBe("https://example.com");
   expect(microsoftOptions.prompt).toBe("select_account");
 });
@@ -170,6 +180,7 @@ void login("apple", { nonce: "nonce" });
 void login("microsoft", microsoftOptions);
 
 void (0 as unknown as AppleTenant);
+void (0 as unknown as AppleAndroidNameScope);
 void (0 as unknown as ApplePrompt);
 void (0 as unknown as AppleIOSLoginHint);
 void (0 as unknown as AppleWebHostedDomain);

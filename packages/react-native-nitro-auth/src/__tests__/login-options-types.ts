@@ -1,4 +1,5 @@
 import type {
+  AppleAndroidLoginOptions,
   AuthLogin,
   GoogleAndroidLoginOptions,
   GoogleIOSLoginOptions,
@@ -38,6 +39,11 @@ const appleOptions = {
   nonce: "nonce",
 } satisfies ProviderLoginOptions<"apple">;
 
+const appleAndroidOptions = {
+  scopes: ["email", "fullName"],
+  nonce: "nonce",
+} satisfies AppleAndroidLoginOptions;
+
 const microsoftOptions = {
   scopes: ["openid", "profile", "email", "offline_access", "User.Read"],
   loginHint: "user@example.com",
@@ -50,6 +56,7 @@ declare const login: AuthLogin;
 void login("google", googleAndroidOptions);
 void login("google", googleIOSOptions);
 void login("apple", appleOptions);
+void login("apple", appleAndroidOptions);
 void login("microsoft", microsoftOptions);
 
 export type AppleRejectsTenant = Expect<
@@ -57,6 +64,9 @@ export type AppleRejectsTenant = Expect<
 >;
 export type AppleRejectsLoginHint = Expect<
   IsRejected<{ loginHint: "user@example.com" }, ProviderLoginOptions<"apple">>
+>;
+export type AppleAndroidRejectsWebNameScope = Expect<
+  IsRejected<{ scopes: ["name"] }, AppleAndroidLoginOptions>
 >;
 export type MicrosoftRejectsNonce = Expect<
   IsRejected<{ nonce: "nonce" }, ProviderLoginOptions<"microsoft">>

@@ -144,6 +144,30 @@ std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess(AuthProvider provider)
 
 namespace {
 
+void testAppleSessionNeverUsesAnotherProvidersRefreshOrScopeFlow() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  auto login = auth->login(AuthProvider::APPLE, std::nullopt);
+  auto apple = makeUser(std::vector<std::string>{"email"});
+  apple.provider = AuthProvider::APPLE;
+  apple.idToken = "apple-id-token";
+  apple.authorizationCode = "apple-authorization-code";
+  lastLoginPromise->resolve(apple);
+  assert(login->isResolved());
+  const auto cancellations = platformCancellationCount;
+  const auto invalidations = platformInvalidationCount;
+
+  assert(auth->refreshToken()->isRejected());
+  assert(auth->requestScopes({"fullName"})->isRejected());
+  assert(lastRefreshPromise == nullptr);
+  assert(lastRequestScopesPromise == nullptr);
+  assert(platformCancellationCount == cancellations);
+  assert(platformInvalidationCount == invalidations);
+  assert(auth->getCurrentUser()->provider == AuthProvider::APPLE);
+  assert(auth->getCurrentUser()->authorizationCode == apple.authorizationCode);
+  assert(auth->getCurrentUser()->idToken == apple.idToken);
+}
+
 void testScopeMergesAndRemovals() {
   resetPlatformMocks();
   auto auth = std::make_shared<HybridAuth>();
@@ -732,6 +756,7 @@ void testSessionScenariosInterleaveWithoutUnresolvedPromises() {
 } // namespace
 
 int main() {
+  testAppleSessionNeverUsesAnotherProvidersRefreshOrScopeFlow();
   testNonceGenerationDelegatesToPlatform();
   testStructuredNamesRemainAvailableOnTheUser();
   testScopeMergesAndRemovals();

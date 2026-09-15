@@ -83,6 +83,8 @@ export default {
           },
           android: {
             googleClientId: process.env.GOOGLE_WEB_CLIENT_ID,
+            appleAndroidBrokerUrl: "https://auth.example.com/apple",
+            appleAndroidCallbackScheme: "myapp-auth",
             microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
             microsoftTenant: process.env.MICROSOFT_TENANT,
             microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,
@@ -104,19 +106,21 @@ export default {
 
 Plugin options:
 
-| Option                       | Platform | Required for                                                                     |
-| ---------------------------- | -------- | -------------------------------------------------------------------------------- |
-| `ios.googleClientId`         | iOS      | Google Sign-In on iOS.                                                           |
-| `ios.googleServerClientId`   | iOS      | Google server auth code flow.                                                    |
-| `ios.googleUrlScheme`        | iOS      | Optional Google redirect scheme. Derived from `ios.googleClientId` when omitted. |
-| `ios.appleSignIn`            | iOS      | Apple Sign-In entitlement.                                                       |
-| `ios.microsoftClientId`      | iOS      | Microsoft Entra ID native login.                                                 |
-| `ios.microsoftTenant`        | iOS      | Microsoft tenant override.                                                       |
-| `ios.microsoftB2cDomain`     | iOS      | Microsoft B2C hostname.                                                          |
-| `android.googleClientId`     | Android  | Google Sign-In on Android.                                                       |
-| `android.microsoftClientId`  | Android  | Microsoft Entra ID native login.                                                 |
-| `android.microsoftTenant`    | Android  | Microsoft tenant override.                                                       |
-| `android.microsoftB2cDomain` | Android  | Microsoft B2C hostname.                                                          |
+| Option                               | Platform | Required for                                                                     |
+| ------------------------------------ | -------- | -------------------------------------------------------------------------------- |
+| `ios.googleClientId`                 | iOS      | Google Sign-In on iOS.                                                           |
+| `ios.googleServerClientId`           | iOS      | Google server auth code flow.                                                    |
+| `ios.googleUrlScheme`                | iOS      | Optional Google redirect scheme. Derived from `ios.googleClientId` when omitted. |
+| `ios.appleSignIn`                    | iOS      | Apple Sign-In entitlement.                                                       |
+| `ios.microsoftClientId`              | iOS      | Microsoft Entra ID native login.                                                 |
+| `ios.microsoftTenant`                | iOS      | Microsoft tenant override.                                                       |
+| `ios.microsoftB2cDomain`             | iOS      | Microsoft B2C hostname.                                                          |
+| `android.googleClientId`             | Android  | Google Sign-In on Android.                                                       |
+| `android.appleAndroidBrokerUrl`      | Android  | HTTPS base URL of your Apple broker. Required together with the callback scheme. |
+| `android.appleAndroidCallbackScheme` | Android  | App-specific lowercase custom scheme, such as `myapp-auth`.                      |
+| `android.microsoftClientId`          | Android  | Microsoft Entra ID native login.                                                 |
+| `android.microsoftTenant`            | Android  | Microsoft tenant override.                                                       |
+| `android.microsoftB2cDomain`         | Android  | Microsoft B2C hostname.                                                          |
 
 When `ios.googleUrlScheme` is omitted, the plugin derives
 `com.googleusercontent.apps.<id>` from an iOS client ID that ends in
@@ -142,6 +146,58 @@ Web options in `expo.extra`:
 Web reads `expo-constants` for these options. `expo-constants` is an optional
 peer dependency: without it, web falls back to defaults and provider client
 IDs must be configured another way.
+
+### Apple on Android
+
+Google and Apple use the same calls on Android and iOS:
+
+```ts
+const credential = await AuthService.getCredential("apple");
+```
+
+Android Apple opens a Custom Tab and requires a server broker. Configure the two
+Android plugin options above, then prebuild and rebuild. The plugin installs
+the resources and callback Activity; the app needs no browser or deep-link
+handler. Use a callback scheme distinct from the app's other auth links.
+Broker URLs must use HTTPS without credentials, query parameters, or fragments.
+For bare Android, define `nitro_auth_apple_android_broker_url` and
+`nitro_auth_apple_android_callback_scheme` string resources and register a VIEW,
+DEFAULT, BROWSABLE intent filter on `com.auth.AppleAuthCallbackActivity` for the
+configured scheme, host `apple`, and exact path `/callback`.
+
+The broker is hosted by your backend; it has no
+Supabase dependency. Register an Apple Services ID associated with your Sign in
+with Apple App ID, and an HTTPS return URL pointing to the broker. Keep Apple
+signing keys and client secrets on the server. Native iOS continues using the
+App ID and native Apple authorization UI.
+
+Implement these endpoints relative to `appleAndroidBrokerUrl`:
+
+1. `POST /start` accepts `{nonce, codeChallenge, scopes?}`. Nonce and challenge
+   are lowercase SHA-256 hex. Scopes contain only `email` and `fullName`; map
+   `fullName` to Apple's OAuth `name` scope. Return
+   `{data:{attemptId, authorizationUrl}}`, where `attemptId` is a canonical UUID
+   and the URL starts at `https://appleid.apple.com/auth/authorize`.
+2. Your HTTPS Apple callback verifies state and the Apple token's signature,
+   issuer, audience, expiry, and nonce. Store the result privately and redirect
+   to `myapp-auth://apple/callback?attemptId=<UUID>`. Do not put credentials or
+   the proof verifier in this URL.
+3. `POST /complete` accepts `{attemptId, codeVerifier}`. The verifier is 32 random
+   bytes encoded as 64 lowercase hex characters; its SHA-256 hex digest must
+   equal the stored challenge. Atomically consume the matching unexpired
+   attempt and return
+   `{data:{idToken, authorizationCode, user:{id,email?,name?,firstName?,lastName?}}}`.
+   Required fields must be nonempty strings. Optional names/email may be absent
+   or null. Derive `user.id` from the verified Apple subject.
+
+Use no-store responses, encrypted credential storage, short attempt expiry,
+request limits, and single-use proof consumption. Return failures as
+`{error:{code,message}}`; Apple cancellation uses HTTP 409 with
+`APPLE_AUTHORIZATION_CANCELLED`. The package exposes fixed error descriptions,
+rejects redirects and oversized responses, and accepts only the active attempt's
+callback. The package manages nonce/proof generation, browser cancellation,
+request deadlines, and transient cleanup. It returns the original nonce with
+`getCredential()` for your application's final server session exchange.
 
 ### Web OAuth redirects
 
@@ -259,13 +315,13 @@ of retrying through legacy Google Sign-In.
 
 ## Providers
 
-| Provider  | Native       | Web | Notes                                                                 |
-| --------- | ------------ | --- | --------------------------------------------------------------------- |
-| Google    | iOS, Android | Yes | Supports account picker, login hint, refresh, and incremental scopes. |
-| Apple     | iOS          | Yes | Returns name and email only on first authorization.                   |
-| Microsoft | iOS, Android | Yes | Supports tenant, B2C, refresh, and incremental scopes.                |
+| Provider  | Native       | Web | Notes                                                                                  |
+| --------- | ------------ | --- | -------------------------------------------------------------------------------------- |
+| Google    | iOS, Android | Yes | Supports account picker, login hint, refresh, and incremental scopes.                  |
+| Apple     | iOS, Android | Yes | Native iOS; HTTPS broker on Android. Name/email may be absent on repeat authorization. |
+| Microsoft | iOS, Android | Yes | Supports tenant, B2C, refresh, and incremental scopes.                                 |
 
-Apple Sign-In is unavailable on Android. Use `expo-auth-session`,
+Use `expo-auth-session`,
 `react-native-app-auth`, Auth0, Firebase Auth, or your identity provider SDK
 when you need generic OAuth/OIDC providers, password authentication, MFA,
 hosted user management, or server session management.
@@ -333,7 +389,8 @@ Supported login options:
 - `getAccessToken()` returns the current access token and refreshes near-expiry
   Google or Microsoft credentials when supported.
 - `refreshToken()` supports Google and Microsoft. Apple token exchange and
-  refresh belong on your backend.
+  refresh belong on your backend. Native Apple sessions reject `refreshToken()`
+  and `requestScopes()` with `unsupported_provider` while preserving the session.
 - `revokeAccess()` clears local state only after provider revocation succeeds.
   Client-side revocation supports Google web and iOS sessions, plus Android
   sessions created through legacy Google Sign-In. Unsupported providers reject
@@ -371,13 +428,13 @@ const androidGoogle = getProviderTokenCapabilities("google", "android");
 // { supportsAccessToken: false, accessTokenExpirySource: "id_token", ... }
 ```
 
-| Provider  | Platform | Access token | Client-side refresh | Server auth code | Expiry source  |
-| --------- | -------- | ------------ | ------------------- | ---------------- | -------------- |
-| Google    | iOS      | yes          | yes                 | yes              | access token   |
-| Google    | Android  | no           | yes (silent)        | yes (legacy)     | ID-token `exp` |
-| Google    | Web      | yes          | yes                 | yes              | access token   |
-| Apple     | iOS/Web  | no           | no                  | no               | —              |
-| Microsoft | all      | yes          | yes                 | no               | access token   |
+| Provider  | Platform        | Access token | Client-side refresh | Server auth code | Expiry source  |
+| --------- | --------------- | ------------ | ------------------- | ---------------- | -------------- |
+| Google    | iOS             | yes          | yes                 | yes              | access token   |
+| Google    | Android         | no           | yes (silent)        | yes (legacy)     | ID-token `exp` |
+| Google    | Web             | yes          | yes                 | yes              | access token   |
+| Apple     | iOS/Android/Web | no           | no                  | no               | —              |
+| Microsoft | all             | yes          | yes                 | no               | access token   |
 
 ## Events
 
@@ -458,12 +515,12 @@ Error codes are `cancelled`, `interaction_required`, `timeout`,
 
 ## Platform Support
 
-| Platform | Status                                                      |
-| -------- | ----------------------------------------------------------- |
-| iOS      | Google, Apple, Microsoft native flows.                      |
-| Android  | Google and Microsoft native flows.                          |
-| Web      | Google, Apple, and Microsoft OAuth through Expo web config. |
-| Expo     | Development builds with the config plugin.                  |
+| Platform | Status                                                            |
+| -------- | ----------------------------------------------------------------- |
+| iOS      | Google, Apple, Microsoft native flows.                            |
+| Android  | Google and Microsoft native flows; Apple through an HTTPS broker. |
+| Web      | Google, Apple, and Microsoft OAuth through Expo web config.       |
+| Expo     | Development builds with the config plugin.                        |
 
 The native package gate and Expo example use React Native `0.86.3`. The
 `check:ci` workflow also compiles the public source against React Native

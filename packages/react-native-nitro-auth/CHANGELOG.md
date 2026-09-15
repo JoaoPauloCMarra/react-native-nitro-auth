@@ -10,12 +10,21 @@ Breaking changes are always listed first in each release section.
 
 ### Added
 
+- Apple Sign-In on Android through an HTTPS broker, using the same `login()`
+  and `getCredential()` calls as iOS. The Expo plugin configures the callback;
+  nonce, proof, browser lifecycle, and credential exchange stay in the package.
+- Export `AppleAndroidLoginOptions` and `AppleAndroidScope` for Android callers.
 - Add `AuthService.getCredential()` for nonce-bound Google and Apple ID tokens,
   with native OS nonce generation and no retained package session.
 - Add optional structured `firstName` and `lastName` fields to `AuthUser`.
 
 ### Fixed
 
+- Android maps Apple's authorization code into `AuthUser.authorizationCode`.
+- Native Apple sessions reject unsupported refresh and scope upgrades without
+  invoking another provider or changing the current session.
+- Android registers the native Auth module eagerly and resolves an already
+  resumed Activity when initialization happens after app launch.
 - Credential acquisition now rejects before provider setup when a package
   session is already active, preserving that session and its listeners.
 - Android nonce-bearing Google sign-in now stays on Credential Manager and

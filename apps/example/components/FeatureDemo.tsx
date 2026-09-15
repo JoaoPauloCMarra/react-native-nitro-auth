@@ -41,7 +41,7 @@ const PROVIDERS: readonly {
   {
     id: "apple",
     title: "Apple",
-    subtitle: "Native Apple Sign-In on iOS and Apple JS on web.",
+    subtitle: "Apple Sign-In on iOS, Android, and web.",
   },
   {
     id: "microsoft",
@@ -374,20 +374,6 @@ export function FeatureDemo() {
     updateAuthSnapshot,
   ]);
 
-  function getProviderDisabled(provider: AuthProvider): boolean {
-    return provider === "apple" && Platform.OS === "android";
-  }
-
-  function getProviderUnavailableText(
-    provider: AuthProvider,
-  ): string | undefined {
-    if (provider === "apple" && Platform.OS === "android") {
-      return "Unavailable on Android";
-    }
-
-    return undefined;
-  }
-
   const getGoogleLoginOptions =
     useCallback((): ProviderLoginOptions<"google"> => {
       const scopes = parseScopes(extraScopes);
@@ -475,11 +461,6 @@ export function FeatureDemo() {
 
   const loginWithProvider = useCallback(
     async (provider: AuthProvider) => {
-      if (getProviderDisabled(provider)) {
-        setNotice("Apple Sign-In is unavailable on Android", "error");
-        return;
-      }
-
       await runAuthAction(
         `Signing in with ${formatProvider(provider)}`,
         async () => {
@@ -488,7 +469,7 @@ export function FeatureDemo() {
         },
       );
     },
-    [runAuthAction, runProviderLogin, setNotice, updateAuthSnapshot],
+    [runAuthAction, runProviderLogin, updateAuthSnapshot],
   );
 
   const cycleButtonVariant = useCallback(() => {
@@ -666,39 +647,28 @@ export function FeatureDemo() {
             </Pressable>
           </View>
 
-          {PROVIDERS.map((provider) => {
-            const unavailableText = getProviderUnavailableText(provider.id);
-
-            return (
-              <View
-                key={provider.id}
-                style={[
-                  styles.providerCard,
-                  unavailableText ? styles.providerCardDisabled : null,
-                ]}
-              >
-                <View style={styles.providerCopy}>
-                  <Text style={styles.providerTitle}>{provider.title}</Text>
+          {PROVIDERS.map((provider) => (
+            <View key={provider.id} style={styles.providerCard}>
+              <View style={styles.providerCopy}>
+                <Text style={styles.providerTitle}>{provider.title}</Text>
+                <Text style={styles.providerSubtitle}>{provider.subtitle}</Text>
+                {provider.id === "apple" && Platform.OS === "android" ? (
                   <Text style={styles.providerSubtitle}>
-                    {provider.subtitle}
+                    Set APPLE_ANDROID_BROKER_URL and run prebuild before signing
+                    in.
                   </Text>
-                  {unavailableText ? (
-                    <Text style={styles.unavailableText}>
-                      {unavailableText}
-                    </Text>
-                  ) : null}
-                </View>
-                <SocialButton
-                  provider={provider.id}
-                  variant={provider.id === "apple" ? "black" : buttonVariant}
-                  disabled={Boolean(unavailableText) || auth.loading}
-                  onPress={() => {
-                    void loginWithProvider(provider.id);
-                  }}
-                />
+                ) : null}
               </View>
-            );
-          })}
+              <SocialButton
+                provider={provider.id}
+                variant={provider.id === "apple" ? "black" : buttonVariant}
+                disabled={auth.loading}
+                onPress={() => {
+                  void loginWithProvider(provider.id);
+                }}
+              />
+            </View>
+          ))}
         </View>
 
         <View style={styles.section}>
@@ -927,9 +897,7 @@ export function FeatureDemo() {
                   onChange={setOpenIDRealm}
                 />
               ) : null}
-              <Text style={styles.optionGroupTitle}>
-                {Platform.OS === "android" ? "Google" : "Apple and Google"}
-              </Text>
+              <Text style={styles.optionGroupTitle}>Apple and Google</Text>
               <TextInputRow
                 label="Nonce"
                 placeholder="Opaque nonce"
@@ -945,9 +913,7 @@ export function FeatureDemo() {
                 keyboardType="email-address"
               />
               <Text style={styles.optionGroupTitle}>
-                {Platform.OS === "android"
-                  ? "Google and Microsoft"
-                  : "All supported providers"}
+                All supported providers
               </Text>
               <TextInputRow
                 label="Extra scopes"
@@ -1345,10 +1311,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 12,
   },
-  providerCardDisabled: {
-    backgroundColor: "#f8fafc",
-    borderColor: "#e2e8f0",
-  },
   providerCopy: {
     marginBottom: 12,
   },
@@ -1362,12 +1324,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
-  },
-  unavailableText: {
-    color: "#92400e",
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 6,
   },
   sessionCard: {
     alignItems: "center",

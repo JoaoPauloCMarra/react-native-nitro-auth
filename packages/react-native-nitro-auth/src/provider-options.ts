@@ -40,8 +40,15 @@ export type GoogleLoginOptions =
   GoogleIOSLoginOptions | GoogleAndroidLoginOptions | GoogleWebLoginOptions;
 
 export type AppleIOSLoginOptions = StrictLoginOptions<"scopes" | "nonce">;
+export type AppleAndroidScope = "email" | "fullName";
+export type AppleAndroidLoginOptions = StrictLoginOptions<
+  "scopes" | "nonce"
+> & {
+  scopes?: AppleAndroidScope[];
+};
 export type AppleWebLoginOptions = AppleIOSLoginOptions;
-export type AppleLoginOptions = AppleIOSLoginOptions | AppleWebLoginOptions;
+export type AppleLoginOptions =
+  AppleIOSLoginOptions | AppleAndroidLoginOptions | AppleWebLoginOptions;
 
 export type MicrosoftLoginOptions = StrictLoginOptions<
   "scopes" | "loginHint" | "tenant" | "prompt"

@@ -856,6 +856,8 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuc
     env->ReleaseStringUTFChars(provider, providerCStr);
     if (providerStr == "google") {
         user.provider = AuthProvider::GOOGLE;
+    } else if (providerStr == "apple") {
+        user.provider = AuthProvider::APPLE;
     } else if (providerStr == "microsoft") {
         user.provider = AuthProvider::MICROSOFT;
     } else {
@@ -903,7 +905,11 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_auth_AuthAdapter_nativeOnLoginSuc
     }
     if (serverAuthCode) {
         const char* s = env->GetStringUTFChars(serverAuthCode, nullptr);
-        user.serverAuthCode = std::string(s);
+        if (user.provider == AuthProvider::APPLE) {
+            user.authorizationCode = std::string(s);
+        } else {
+            user.serverAuthCode = std::string(s);
+        }
         env->ReleaseStringUTFChars(serverAuthCode, s);
     }
     if (userId) {

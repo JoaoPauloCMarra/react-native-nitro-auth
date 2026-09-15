@@ -32,9 +32,11 @@ import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancel
@@ -48,6 +50,7 @@ import java.util.UUID
 
 object AuthAdapter {
     private const val TAG = "AuthAdapter"
+    private const val APPLE_AUTH_TIMEOUT_MS = 180_000L
     private val nonceRandom = SecureRandom()
     private val defaultMicrosoftScopes =
         listOf("openid", "email", "profile", "offline_access", "User.Read")
@@ -56,6 +59,23 @@ object AuthAdapter {
         val credential: GoogleIdTokenCredential,
         val scopes: List<String>,
         val hostedDomain: String?,
+    )
+
+    private data class PendingAppleAuth(
+        val origin: String,
+        val generation: Long,
+        val config: AppleAndroidBrokerConfig,
+        val codeVerifier: String,
+        val scopes: List<String>,
+        var attemptId: String? = null,
+        var browserWasOpened: Boolean = false,
+        var callbackReceived: Boolean = false,
+    )
+
+    private data class ClearedAppleAuth(
+        val pending: PendingAppleAuth,
+        val job: Job?,
+        val timeoutRunnable: Runnable?,
     )
 
     private data class GoogleCredentialCleanup(
@@ -120,6 +140,12 @@ object AuthAdapter {
     private var googleAuthStateEpoch = 1L
     private val googlePickerOperationState = GooglePickerOperationState()
     private val googlePickerRetryHandler by lazy { Handler(Looper.getMainLooper()) }
+    private val appleAuthTimeoutHandler by lazy { Handler(Looper.getMainLooper()) }
+    @Volatile
+    private var pendingAppleAuth: PendingAppleAuth? = null
+    private var appleBrokerJob: Job? = null
+    private var appleAuthTimeoutRunnable: Runnable? = null
+    private var appleResumeSuppressionGeneration: Long? = null
     private var googleLegacyAccountNeedsRevalidation = false
     private val googleRevokeState = GoogleRevokeState()
     @JvmField
@@ -209,6 +235,27 @@ object AuthAdapter {
                 override fun onActivityStarted(activity: Activity) { activityTracker.onActivityStarted(activity) }
                 override fun onActivityResumed(activity: Activity) {
                     activityTracker.onActivityResumed(activity)
+                    val isAppleRedirectHandler = activity is AppleAuthCallbackActivity
+                    val appleSuppressed = synchronized(this@AuthAdapter) {
+                        val generation = pendingAppleAuth?.generation
+                        when {
+                            isAppleRedirectHandler && generation != null -> {
+                                appleResumeSuppressionGeneration = generation
+                                true
+                            }
+                            shouldConsumeAppleResumeSuppression(
+                                resumeSuppressionGeneration = appleResumeSuppressionGeneration,
+                                currentGeneration = generation,
+                                resumingActivityIsCallbackHandler = isAppleRedirectHandler,
+                            ) -> {
+                                appleResumeSuppressionGeneration = null
+                                true
+                            }
+                            else -> false
+                        }
+                    }
+                    if (appleSuppressed) return
+
                     val isRedirectHandler = activity is MicrosoftAuthActivity
                     val suppressed = synchronized(this@AuthAdapter) {
                         val generation = pendingMicrosoftGeneration
@@ -252,6 +299,23 @@ object AuthAdapter {
                             "Microsoft sign-in was dismissed",
                             generation,
                         )
+                    }
+
+                    val appleCancellationGeneration = synchronized(this@AuthAdapter) {
+                        val pending = pendingAppleAuth
+                        if (pending != null &&
+                            shouldCancelAppleAuth(
+                                authInProgress = pendingAppleAuth != null,
+                                browserWasOpened = pending.browserWasOpened,
+                                callbackReceived = pending.callbackReceived,
+                                resumingActivityIsCallbackHandler = isAppleRedirectHandler,
+                                resumeSuppressionGeneration = appleResumeSuppressionGeneration,
+                                currentGeneration = pending.generation,
+                            )
+                        ) pending.generation else null
+                    }
+                    appleCancellationGeneration?.let {
+                        failAppleAuth(it, AuthErrorCode.CANCELLED, "Apple sign-in was dismissed")
                     }
                 }
                 override fun onActivityPaused(activity: Activity) {
@@ -499,7 +563,7 @@ object AuthAdapter {
     ) {
         val cleanupBarrier = beginGoogleAuthStateTransition(clearPendingCallbacks = true)
         if (provider == "apple") {
-            nativeOnLoginError("login", AuthErrorCode.UNSUPPORTED_PROVIDER.code, "Apple Sign-In is not supported on Android.", generation)
+            loginApple(context, scopes, nonce, generation, cleanupBarrier)
             return
         }
         if (provider == "microsoft") {
@@ -545,6 +609,242 @@ object AuthAdapter {
                 startLogin()
             }
         }
+    }
+
+    private fun loginApple(
+        context: Context,
+        scopes: Array<String>?,
+        nonce: String?,
+        generation: Long,
+        cleanupBarrier: Deferred<Unit>?,
+    ) {
+        val ctx = appContext ?: context.applicationContext
+        val brokerUrlResource = ctx.resources.getIdentifier(
+            "nitro_auth_apple_android_broker_url",
+            "string",
+            ctx.packageName,
+        )
+        val callbackSchemeResource = ctx.resources.getIdentifier(
+            "nitro_auth_apple_android_callback_scheme",
+            "string",
+            ctx.packageName,
+        )
+        val config = AppleAndroidBrokerConfig.parse(
+            baseUrl = brokerUrlResource.takeIf { it != 0 }?.let(ctx::getString),
+            callbackScheme = callbackSchemeResource.takeIf { it != 0 }?.let(ctx::getString),
+        )
+        if (config == null) {
+            nativeOnLoginError(
+                "login",
+                AuthErrorCode.CONFIGURATION_ERROR.code,
+                "Apple Android broker URL and callback scheme are required. Set them in app.json plugins.",
+                generation,
+            )
+            return
+        }
+
+        val hashedNonce = nonce ?: createNonce()[1]
+        if (!Regex("^[a-f0-9]{64}$").matches(hashedNonce)) {
+            nativeOnLoginError(
+                "login",
+                AuthErrorCode.INVALID_NONCE.code,
+                "Apple nonce must be a 64-character SHA-256 hex value",
+                generation,
+            )
+            return
+        }
+
+        val code = try {
+            createAppleCodePair()
+        } catch (_: Exception) {
+            nativeOnLoginError(
+                "login",
+                AuthErrorCode.UNKNOWN.code,
+                "Could not create Apple PKCE challenge",
+                generation,
+            )
+            return
+        }
+        val pending = PendingAppleAuth(
+            origin = "login",
+            generation = generation,
+            config = config,
+            codeVerifier = code.verifier,
+            scopes = scopes?.toList() ?: listOf("email", "fullName"),
+        )
+        val timeoutRunnable = Runnable {
+            failAppleAuth(generation, AuthErrorCode.TIMEOUT, "Apple sign-in timed out")
+        }
+        synchronized(this) {
+            if (pendingAppleAuth != null) {
+                nativeOnLoginError(
+                    "login",
+                    AuthErrorCode.OPERATION_IN_PROGRESS.code,
+                    "Apple authentication is already in progress",
+                    generation,
+                )
+                return
+            }
+            pendingAppleAuth = pending
+            appleResumeSuppressionGeneration = null
+            appleAuthTimeoutRunnable = timeoutRunnable
+        }
+        appleAuthTimeoutHandler.postDelayed(timeoutRunnable, APPLE_AUTH_TIMEOUT_MS)
+
+        val job = moduleScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+            try {
+                cleanupBarrier?.await()
+                if (!isCurrentAppleAuth(pending)) return@launch
+
+                val broker = AppleAndroidBroker(config)
+                val attempt = broker.start(hashedNonce, code.challenge, pending.scopes)
+                val launched = withContext(Dispatchers.Main) {
+                    val activity = currentActivity
+                        ?: throw AppleAndroidBrokerException(
+                            AuthErrorCode.CONFIGURATION_ERROR,
+                            "An Activity is required for Apple sign-in",
+                        )
+                    val shouldLaunch = synchronized(this@AuthAdapter) {
+                        if (pendingAppleAuth === pending && !pending.callbackReceived) {
+                            pending.attemptId = attempt.attemptId
+                            pending.browserWasOpened = true
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    if (!shouldLaunch) return@withContext false
+                    try {
+                        CustomTabsIntent.Builder().build().launchUrl(activity, Uri.parse(attempt.authorizationUrl))
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        throw AppleAndroidBrokerException(
+                            AuthErrorCode.POPUP_BLOCKED,
+                            "Could not open Apple sign-in in a browser",
+                        )
+                    }
+                    true
+                }
+                if (!launched) return@launch
+            } catch (_: CancellationException) {
+                // Cancellation and timeout have already cleared this attempt.
+            } catch (error: AppleAndroidBrokerException) {
+                withContext(Dispatchers.Main) {
+                    failAppleAuth(pending.generation, error.authErrorCode, error.message)
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    failAppleAuth(pending.generation, AuthErrorCode.NETWORK_ERROR, "Apple sign-in failed")
+                }
+            }
+        }
+        synchronized(this) {
+            if (pendingAppleAuth === pending) {
+                appleBrokerJob = job
+            } else {
+                job.cancel()
+            }
+        }
+        job.start()
+    }
+
+    private fun isCurrentAppleAuth(pending: PendingAppleAuth): Boolean = synchronized(this) {
+        pendingAppleAuth === pending
+    }
+
+    private fun clearPendingAppleAuth(
+        generation: Long? = null,
+        cancelNetwork: Boolean = true,
+    ): PendingAppleAuth? {
+        val cleared = synchronized(this) {
+            val pending = pendingAppleAuth ?: return null
+            if (generation != null && pending.generation != generation) return null
+            ClearedAppleAuth(pending, appleBrokerJob, appleAuthTimeoutRunnable).also {
+                pendingAppleAuth = null
+                appleBrokerJob = null
+                appleAuthTimeoutRunnable = null
+                appleResumeSuppressionGeneration = null
+            }
+        }
+        cleared.timeoutRunnable?.let(appleAuthTimeoutHandler::removeCallbacks)
+        if (cancelNetwork) cleared.job?.cancel()
+        return cleared.pending
+    }
+
+    private fun failAppleAuth(generation: Long, code: AuthErrorCode, message: String?) {
+        val pending = clearPendingAppleAuth(generation) ?: return
+        nativeOnLoginError(pending.origin, code.code, message, pending.generation)
+    }
+
+    @JvmStatic
+    fun handleAppleRedirect(uri: Uri): Boolean {
+        val current = synchronized(this) {
+            val pending = pendingAppleAuth ?: return false
+            val decision = classifyAppleCallback(
+                callbackUrl = uri.toString(),
+                expectedScheme = pending.config.callbackScheme,
+                currentAttemptId = pending.attemptId,
+                alreadyHandled = pending.callbackReceived,
+            )
+            if (decision == AppleCallbackDecision.CURRENT) {
+                pending.callbackReceived = true
+                pending to pending.attemptId!!
+            } else {
+                null
+            }
+        } ?: return false
+
+        val (pending, attemptId) = current
+        val job = moduleScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+            try {
+                val credential = AppleAndroidBroker(pending.config)
+                    .complete(attemptId, pending.codeVerifier)
+                withContext(Dispatchers.Main) {
+                    val active = synchronized(this@AuthAdapter) {
+                        pendingAppleAuth === pending && pending.callbackReceived
+                    }
+                    if (!active) return@withContext
+                    val completed = clearPendingAppleAuth(pending.generation, cancelNetwork = false)
+                        ?: return@withContext
+                    nativeOnLoginSuccess(
+                        completed.origin,
+                        "apple",
+                        credential.email,
+                        credential.name,
+                        credential.firstName,
+                        credential.lastName,
+                        null,
+                        credential.idToken,
+                        null,
+                        credential.authorizationCode,
+                        credential.userId,
+                        null,
+                        null,
+                        completed.scopes.toTypedArray(),
+                        null,
+                        completed.generation,
+                    )
+                }
+            } catch (_: CancellationException) {
+                // Cancellation and timeout have already cleared this attempt.
+            } catch (error: AppleAndroidBrokerException) {
+                withContext(Dispatchers.Main) {
+                    failAppleAuth(pending.generation, error.authErrorCode, error.message)
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    failAppleAuth(pending.generation, AuthErrorCode.NETWORK_ERROR, "Apple sign-in failed")
+                }
+            }
+        }
+        synchronized(this) {
+            if (pendingAppleAuth === pending) {
+                appleBrokerJob = job
+            } else {
+                job.cancel()
+            }
+        }
+        job.start()
+        return true
     }
 
     private fun loginMicrosoft(context: Context, scopes: Array<String>?, loginHint: String?, tenant: String?, prompt: String?, origin: String = "login", generation: Long) {
@@ -1135,6 +1435,7 @@ object AuthAdapter {
     }
 
     private fun beginGoogleAuthStateTransition(clearPendingCallbacks: Boolean = false): Deferred<Unit>? {
+        if (clearPendingCallbacks) clearPendingAppleAuth()
         var cancelledCleanup: CompletableDeferred<Unit>? = null
         var pickerActivityToFinish: Activity? = null
         var pickerCleanupBarrier: Deferred<Unit>? = null

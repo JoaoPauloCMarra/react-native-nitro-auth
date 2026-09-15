@@ -168,3 +168,24 @@ parse identical responses; the fixture corpus in
 When a nonce is provided, the returned Apple identity token's `nonce` claim
 must match on iOS (`AppleSignInDelegate`) and web; mismatches reject with
 `invalid_nonce`. The web flow always generates a nonce when none is provided.
+
+Android Apple uses the HTTPS broker contract in the README. `getCredential()`
+supplies the hashed nonce and returns its raw counterpart to the caller. Direct
+`login("apple", {nonce})` accepts a 64-character lowercase SHA-256 hex nonce;
+omitting it generates one. The broker must verify the returned identity token's
+signature, issuer, audience, expiry, and nonce before returning credentials.
+
+Missing/invalid Android broker configuration rejects with `configuration_error`.
+Invalid nonce or scopes reject before browser launch. Broker JSON with missing,
+empty, non-string required credentials, or a response above 64 KiB rejects with
+`parse_error`. HTTP redirects are never followed. Transport failures use
+`network_error`; request and interactive deadlines use `timeout`. An Apple
+`APPLE_AUTHORIZATION_CANCELLED` response and browser dismissal map to `cancelled`.
+Raw server error messages never reach the public error detail.
+
+Only the current attempt's exact callback scheme, host `apple`, path `/callback`,
+and single UUID `attemptId` are accepted. Unexpected, duplicate, and stale
+callbacks cannot consume credentials. Logout, disposal, and replacement requests
+invalidate the pending attempt. Native Apple `refreshToken()` and
+`requestScopes()` reject with `unsupported_provider` without changing the session
+or invoking another provider.

@@ -55,8 +55,82 @@ function resolveGoogleUrlScheme(ios = {}) {
   return googleIosUrlSchemeFromClientId(ios.googleClientId);
 }
 
+function resolveAppleAndroid(android) {
+  const brokerUrl = android.appleAndroidBrokerUrl;
+  const callbackScheme = android.appleAndroidCallbackScheme;
+  if (!brokerUrl && !callbackScheme) {
+    return undefined;
+  }
+  if (typeof brokerUrl !== "string" || typeof callbackScheme !== "string") {
+    throw new Error(
+      "Apple Android requires appleAndroidBrokerUrl and appleAndroidCallbackScheme.",
+    );
+  }
+  let parsed;
+  try {
+    parsed = new URL(brokerUrl);
+  } catch {
+    throw new Error("Apple Android broker URL must be an absolute HTTPS URL.");
+  }
+  if (
+    !/^https:\/\//i.test(brokerUrl) ||
+    parsed.protocol !== "https:" ||
+    !parsed.hostname ||
+    parsed.port === "0" ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    brokerUrl.includes("?") ||
+    brokerUrl.includes("#") ||
+    brokerUrl !== brokerUrl.trim() ||
+    brokerUrl.includes("\\")
+  ) {
+    throw new Error(
+      "Apple Android broker URL must use HTTPS without credentials, a query, or a fragment.",
+    );
+  }
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(
+      brokerUrl.replace(/^https:\/\/[^/]+/i, ""),
+    );
+  } catch {
+    throw new Error(
+      "Apple Android broker URL contains an invalid encoded path.",
+    );
+  }
+  if (
+    decodedPath.includes("\\") ||
+    decodedPath.split("/").some((part) => part === "." || part === "..")
+  ) {
+    throw new Error(
+      "Apple Android broker URL must not contain relative path segments.",
+    );
+  }
+  if (
+    !/^[a-z][a-z0-9+.-]{0,63}$/.test(callbackScheme) ||
+    [
+      "http",
+      "https",
+      "javascript",
+      "data",
+      "file",
+      "content",
+      "intent",
+      "about",
+    ].includes(callbackScheme)
+  ) {
+    throw new Error(
+      "Apple Android callback scheme must be a lowercase custom URL scheme.",
+    );
+  }
+  return { brokerUrl: brokerUrl.replace(/\/+$/, ""), callbackScheme };
+}
+
 const withNitroAuth = (config, props = {}) => {
   const { ios = {}, android = {} } = props;
+  const appleAndroid = resolveAppleAndroid(android);
 
   config = withBuildProperties(config, {
     ios: {
@@ -121,6 +195,38 @@ const withNitroAuth = (config, props = {}) => {
   }
 
   config = withStringsXml(config, (config) => {
+    if (config.modResults.resources.string) {
+      config.modResults.resources.string =
+        config.modResults.resources.string.filter(
+          (entry) =>
+            ![
+              "nitro_auth_apple_android_broker_url",
+              "nitro_auth_apple_android_callback_scheme",
+            ].includes(entry.$?.name),
+        );
+    }
+    if (appleAndroid) {
+      config.modResults = AndroidConfig.Strings.setStringItem(
+        [
+          {
+            $: {
+              name: "nitro_auth_apple_android_broker_url",
+              translatable: "false",
+              formatted: "false",
+            },
+            _: appleAndroid.brokerUrl,
+          },
+          {
+            $: {
+              name: "nitro_auth_apple_android_callback_scheme",
+              translatable: "false",
+            },
+            _: appleAndroid.callbackScheme,
+          },
+        ],
+        config.modResults,
+      );
+    }
     if (android.googleClientId) {
       config.modResults = AndroidConfig.Strings.setStringItem(
         [
@@ -165,6 +271,56 @@ const withNitroAuth = (config, props = {}) => {
         config.modResults,
       );
     }
+    return config;
+  });
+
+  config = withAndroidManifest(config, (config) => {
+    const application = config.modResults.manifest.application?.[0];
+    if (!application) {
+      if (!appleAndroid) {
+        return config;
+      }
+      throw new Error(
+        "Apple Android requires an application entry in AndroidManifest.xml.",
+      );
+    }
+    application.activity = application.activity || [];
+    if (!appleAndroid) {
+      application.activity = application.activity.filter(
+        (entry) =>
+          entry.$?.["android:name"] !== "com.auth.AppleAuthCallbackActivity",
+      );
+      return config;
+    }
+    let activity = application.activity.find(
+      (entry) =>
+        entry.$?.["android:name"] === "com.auth.AppleAuthCallbackActivity",
+    );
+    if (!activity) {
+      activity = {
+        $: { "android:name": "com.auth.AppleAuthCallbackActivity" },
+      };
+      application.activity.push(activity);
+    }
+    activity.$["android:exported"] = "true";
+    activity["intent-filter"] = [
+      {
+        action: [{ $: { "android:name": "android.intent.action.VIEW" } }],
+        category: [
+          { $: { "android:name": "android.intent.category.DEFAULT" } },
+          { $: { "android:name": "android.intent.category.BROWSABLE" } },
+        ],
+        data: [
+          {
+            $: {
+              "android:scheme": appleAndroid.callbackScheme,
+              "android:host": "apple",
+              "android:path": "/callback",
+            },
+          },
+        ],
+      },
+    ];
     return config;
   });
 

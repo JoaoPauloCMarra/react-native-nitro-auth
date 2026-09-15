@@ -439,6 +439,13 @@ std::shared_ptr<Promise<void>> HybridAuth::login(AuthProvider provider, const st
 std::shared_ptr<Promise<void>> HybridAuth::requestScopes(const std::vector<std::string>& scopes) {
   log("requestScopes start");
   auto promise = Promise<void>::create();
+  {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    if (_currentUser && _currentUser->provider == AuthProvider::APPLE) {
+      promise->reject(makeAuthError(AuthErrorCode::UNSUPPORTED_PROVIDER));
+      return promise;
+    }
+  }
   PlatformAuth::invalidatePendingOperations();
   uint64_t generation;
   std::shared_ptr<Promise<AuthTokens>> refreshInFlight;
@@ -626,6 +633,11 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
   uint64_t generation;
   {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
+    if (_currentUser && _currentUser->provider == AuthProvider::APPLE) {
+      promise = Promise<AuthTokens>::create();
+      promise->reject(makeAuthError(AuthErrorCode::UNSUPPORTED_PROVIDER));
+      return promise;
+    }
     if (_refreshInFlight) {
       return _refreshInFlight;
     }
