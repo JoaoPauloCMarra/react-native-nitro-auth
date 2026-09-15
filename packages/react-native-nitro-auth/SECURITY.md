@@ -15,16 +15,26 @@ while the release train is actively publishing them.
 
 - Native token fields (including Microsoft refresh tokens) stay in process
   memory. Provider SDKs may retain their own sign-in state.
-- On web, tokens stay memory-only unless `nitroAuthPersistTokensOnWeb` is
-  explicitly enabled. Enabling it places credentials in the configured browser
-  storage and widens the XSS exposure — review before enabling.
+- With default web storage, tokens stay memory-only unless
+  `nitroAuthPersistTokensOnWeb` is explicitly enabled. A custom storage adapter
+  retains legacy token persistence when the option is omitted; set it
+  explicitly in new integrations. Persistence places credentials in browser
+  storage and widens the XSS exposure.
 - Profile metadata (email, name, photo) is persisted in browser storage by
   default on web; set `nitroAuthPersistProfileOnWeb: false` to keep profile
   PII out of storage.
-- Never log tokens, authorization codes, or full provider payloads. The
-  package logs operation-level detail only.
+- Never log tokens, authorization codes, nonce values, or full provider payloads.
+  Lifecycle events contain typed metadata only; user/token listeners and
+  `AuthError.underlyingMessage` must not be forwarded to telemetry automatically.
 - OAuth redirects are verified against the exact registered origin/path, and
   state/nonce values are required before provider responses are parsed.
+- Android Apple sign-in requires an HTTPS broker that validates the Apple ID
+  token's signature, issuer, audience, expiry, and nonce, then releases the
+  credential only with the one-time proof described in the README. Credentials
+  must never be placed in the callback URL.
+- `getCredential()` clears its temporary package session before resolving but
+  returns sensitive credentials to the caller. The application server must
+  verify them before creating its own session.
 
 ## Reporting A Vulnerability
 

@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-auth",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "description": "High-performance authentication library for React Native with Google Sign-In, Apple Sign-In, and Microsoft Sign-In support, powered by Nitro Modules (JSI)",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -11,6 +11,7 @@
   "app": "app.plugin.js",
   "files": [
     "src",
+    "assets",
     "lib",
     "cpp",
     "android",
@@ -70,7 +71,7 @@
     "login"
   ],
   "author": {
-    "name": "Jo\u00e3o Paulo C. Marra",
+    "name": "João Paulo C. Marra",
     "url": "https://github.com/JoaoPauloCMarra"
   },
   "license": "MIT",
@@ -87,7 +88,8 @@
     "access": "public"
   },
   "dependencies": {
-    "expo-build-properties": "~57.0.17"
+    "expo-build-properties": "~57.0.18",
+    "react-native-svg": "15.15.5"
   },
   "devDependencies": {
     "@expo/config-plugins": "^57.0.6",

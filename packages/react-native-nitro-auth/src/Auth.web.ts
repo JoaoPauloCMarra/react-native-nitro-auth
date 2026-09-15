@@ -1,5 +1,10 @@
 import type {
   Auth,
+  AuthNonce,
+  AuthCredential,
+  CredentialProvider,
+  AuthSessionSnapshot,
+  ScopeRevocationResult,
   AuthUser,
   AuthProvider,
   LoginOptions,
@@ -178,6 +183,8 @@ const parseAuthUser = (value: unknown): AuthUser | undefined => {
   };
   setIfDefined(user, "email", getOptionalString(value, "email"));
   setIfDefined(user, "name", getOptionalString(value, "name"));
+  setIfDefined(user, "firstName", getOptionalString(value, "firstName"));
+  setIfDefined(user, "lastName", getOptionalString(value, "lastName"));
   setIfDefined(user, "photo", getOptionalString(value, "photo"));
   setIfDefined(user, "idToken", getOptionalString(value, "idToken"));
   setIfDefined(user, "accessToken", getOptionalString(value, "accessToken"));
@@ -307,6 +314,43 @@ class AuthWeb implements Auth {
   private _refreshReject: ((error: unknown) => void) | undefined;
   private _loginReject: ((error: unknown) => void) | undefined;
   private _pendingGoogleNonce: string | undefined;
+  private _credentialOnlyLogin = false;
+  private _captureLoginUser: ((user: AuthUser) => void) | undefined;
+  private _snapshotRevision = 0;
+  private readonly _snapshotListeners = new Set<
+    (snapshot: AuthSessionSnapshot) => void
+  >();
+
+  getSessionSnapshot(): AuthSessionSnapshot {
+    return {
+      revision: this._snapshotRevision,
+      scopes: [...this._grantedScopes],
+      ...(this._currentUser
+        ? {
+            user: {
+              ...this._currentUser,
+              ...(this._currentUser.scopes
+                ? { scopes: [...this._currentUser.scopes] }
+                : {}),
+            },
+          }
+        : {}),
+    };
+  }
+
+  onSessionChanged(
+    callback: (snapshot: AuthSessionSnapshot) => void,
+  ): () => void {
+    this._snapshotListeners.add(callback);
+    return () => {
+      this._snapshotListeners.delete(callback);
+    };
+  }
+
+  private assertNoCredential(): void {
+    if (this._credentialOnlyLogin)
+      throw new AuthWebError("operation_in_progress");
+  }
   private _loginInFlight: boolean = false;
   private _sessionGeneration = 0;
   private _disposed = false;
@@ -474,6 +518,8 @@ class AuthWeb implements Auth {
     if (!this.shouldPersistProfile()) {
       delete safeUser.email;
       delete safeUser.name;
+      delete safeUser.firstName;
+      delete safeUser.lastName;
       delete safeUser.photo;
     }
     return safeUser;
@@ -519,6 +565,8 @@ class AuthWeb implements Auth {
         if (!this.shouldPersistProfile()) {
           delete this._currentUser.email;
           delete this._currentUser.name;
+          delete this._currentUser.firstName;
+          delete this._currentUser.lastName;
           delete this._currentUser.photo;
         }
       } catch (error) {
@@ -576,8 +624,8 @@ class AuthWeb implements Auth {
     this._listeners.push(callback);
     try {
       callback(this._currentUser);
-    } catch (error) {
-      logger.warn("Auth state listener failed", { error: String(error) });
+    } catch {
+      logger.warn("Auth state listener failed");
     }
     return () => {
       this._listeners = this._listeners.filter((l) => l !== callback);
@@ -609,18 +657,27 @@ class AuthWeb implements Auth {
     for (const listener of [...this._eventListeners]) {
       try {
         listener(event);
-      } catch (error) {
-        logger.warn("Auth event listener failed", { error: String(error) });
+      } catch {
+        logger.warn("Auth event listener failed");
       }
     }
   }
 
   private notify() {
+    this._snapshotRevision++;
+    const snapshot = this.getSessionSnapshot();
+    for (const listener of [...this._snapshotListeners]) {
+      try {
+        listener(snapshot);
+      } catch {
+        logger.warn("Auth snapshot listener failed");
+      }
+    }
     for (const listener of [...this._listeners]) {
       try {
         listener(this._currentUser);
-      } catch (error) {
-        logger.warn("Auth state listener failed", { error: String(error) });
+      } catch {
+        logger.warn("Auth state listener failed");
       }
     }
     this.emitEvent("session_changed", this._currentUser?.provider);
@@ -628,13 +685,17 @@ class AuthWeb implements Auth {
 
   private notifyTokenListeners(tokens: AuthTokens): void {
     for (const listener of [...this._tokenListeners]) {
-      listener(tokens);
+      try {
+        listener(tokens);
+      } catch {
+        logger.warn("Auth token listener failed");
+      }
     }
   }
 
   private async runLoginOperation(
     operation: () => Promise<void>,
-  ): Promise<void> {
+  ): Promise<AuthUser | undefined> {
     if (this._disposed) {
       throw new AuthWebError("cancelled", "Auth module disposed");
     }
@@ -646,6 +707,14 @@ class AuthWeb implements Auth {
     }
 
     this._loginInFlight = true;
+    let completedUser: AuthUser | undefined;
+    const capture = (user: AuthUser) => {
+      completedUser = {
+        ...user,
+        ...(user.scopes ? { scopes: [...user.scopes] } : {}),
+      };
+    };
+    this._captureLoginUser = capture;
     let rejectLogin: ((error: unknown) => void) | undefined;
     const operationPromise = Promise.resolve().then(operation);
     const cancellable = new Promise<void>((resolve, reject) => {
@@ -655,7 +724,10 @@ class AuthWeb implements Auth {
     this._loginReject = rejectLogin;
     try {
       await cancellable;
+      return completedUser;
     } finally {
+      if (this._captureLoginUser === capture)
+        this._captureLoginUser = undefined;
       this._loginInFlight = false;
       this._loginReject = undefined;
     }
@@ -674,12 +746,80 @@ class AuthWeb implements Auth {
     }
   }
 
+  async createNonce(): Promise<AuthNonce> {
+    const randomBytes = crypto.getRandomValues(new Uint8Array(32));
+    const raw = this.base64UrlEncode(randomBytes);
+    const hash = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(raw),
+    );
+    const hashed = Array.from(new Uint8Array(hash), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+    return { raw, hashed };
+  }
+
+  async getCredential(
+    provider: CredentialProvider,
+    options?: LoginOptions,
+  ): Promise<AuthCredential> {
+    if (provider !== "google" && provider !== "apple")
+      throw new AuthWebError("unsupported_provider");
+    this.assertNoCredential();
+    if (this._loginInFlight || this._refreshPromise)
+      throw new AuthWebError("operation_in_progress");
+    if (this._currentUser) throw new AuthWebError("invalid_state");
+    const generation = this._sessionGeneration;
+    this._credentialOnlyLogin = true;
+    try {
+      const nonce = await this.createNonce();
+      this.assertActiveGeneration(generation);
+      if (!nonce.raw || !/^[a-f0-9]{64}$/.test(nonce.hashed))
+        throw new AuthWebError("invalid_nonce");
+      const loginOptions: LoginOptions = {
+        ...options,
+        nonce: nonce.hashed,
+        scopes:
+          options?.scopes ??
+          (provider === "google"
+            ? ["openid", "email", "profile"]
+            : ["email", "fullName"]),
+      };
+      delete loginOptions.useLegacyGoogleSignIn;
+      const user = await this.runLoginOperation(() =>
+        provider === "google"
+          ? this.loginGoogle(
+              loginOptions.scopes ?? [],
+              loginOptions.loginHint,
+              loginOptions,
+              generation,
+            )
+          : this.loginApple(loginOptions, generation),
+      );
+      this.assertActiveGeneration(generation);
+      if (user?.provider !== provider) throw new AuthWebError("invalid_state");
+      if (!user.idToken) throw new AuthWebError("no_id_token");
+      return { provider, idToken: user.idToken, nonce: nonce.raw, user };
+    } finally {
+      this._credentialOnlyLogin = false;
+      this._pendingGoogleNonce = undefined;
+    }
+  }
+
   async login(provider: AuthProvider, options?: LoginOptions): Promise<void> {
+    await this.loginAndGetUser(provider, options);
+  }
+
+  async loginAndGetUser(
+    provider: AuthProvider,
+    options?: LoginOptions,
+  ): Promise<AuthUser> {
+    this.assertNoCredential();
     const loginHint = options?.loginHint;
     const generation = this._sessionGeneration;
     logger.log(`Starting login with ${provider}`, { scopes: options?.scopes });
     try {
-      await this.runLoginOperation(async () => {
+      const user = await this.runLoginOperation(async () => {
         // Only emit after the in-flight guard: a rejected duplicate login
         // must not claim it "started".
         this.emitEvent("login_started", provider);
@@ -713,6 +853,8 @@ class AuthWeb implements Auth {
       });
       this.emitEvent("login_succeeded", provider);
       logger.log(`Login successful with ${provider}`);
+      if (!user) throw new AuthWebError("not_signed_in");
+      return user;
     } catch (e: unknown) {
       const error = this.mapError(e);
       this.emitEvent("login_failed", provider, error.code);
@@ -722,6 +864,7 @@ class AuthWeb implements Auth {
   }
 
   async requestScopes(scopes: string[]): Promise<void> {
+    this.assertNoCredential();
     if (!this._currentUser) {
       throw new AuthWebError("not_signed_in", "No user logged in");
     }
@@ -758,6 +901,16 @@ class AuthWeb implements Auth {
   }
 
   async revokeScopes(scopes: string[]): Promise<void> {
+    await this.revokeScopesWithResult(scopes);
+  }
+
+  async revokeScopesWithResult(
+    scopes: string[],
+  ): Promise<ScopeRevocationResult> {
+    this.assertNoCredential();
+    const revokedScopes = this._grantedScopes.filter((scope) =>
+      scopes.includes(scope),
+    );
     logger.log("Revoking scopes:", scopes);
     const scopesToRevoke = new Set(scopes);
     this._grantedScopes = this._grantedScopes.filter(
@@ -768,9 +921,11 @@ class AuthWeb implements Auth {
       this._currentUser.scopes = this._grantedScopes;
       this.updateUser(this._currentUser);
     }
+    return { revokedAtProvider: false, revokedScopes };
   }
 
   async revokeAccess(): Promise<void> {
+    this.assertNoCredential();
     const user = this._currentUser;
     if (!user) {
       throw new AuthWebError("not_signed_in", "No user logged in");
@@ -812,6 +967,7 @@ class AuthWeb implements Auth {
   }
 
   async getAccessToken(): Promise<string | undefined> {
+    this.assertNoCredential();
     if (this._currentUser?.expirationTime) {
       const now = Date.now();
       if (now + 300000 > this._currentUser.expirationTime) {
@@ -823,6 +979,7 @@ class AuthWeb implements Auth {
   }
 
   async refreshToken(): Promise<AuthTokens> {
+    this.assertNoCredential();
     if (this._refreshPromise) {
       return this._refreshPromise;
     }
@@ -943,8 +1100,8 @@ class AuthWeb implements Auth {
       setIfDefined(tokens, "idToken", effectiveIdToken);
       setIfDefined(tokens, "refreshToken", newRefreshToken);
       setIfDefined(tokens, "expirationTime", expirationTime);
-      this.emitEvent("tokens_refreshed", "microsoft");
       this.notifyTokenListeners(tokens);
+      this.emitEvent("tokens_refreshed", "microsoft");
       return tokens;
     }
 
@@ -969,8 +1126,8 @@ class AuthWeb implements Auth {
     setIfDefined(tokens, "idToken", this._currentUser.idToken);
     setIfDefined(tokens, "refreshToken", this._currentUser.refreshToken);
     setIfDefined(tokens, "expirationTime", this._currentUser.expirationTime);
-    this.emitEvent("tokens_refreshed", "google");
     this.notifyTokenListeners(tokens);
+    this.emitEvent("tokens_refreshed", "google");
     return tokens;
   }
 
@@ -1275,8 +1432,10 @@ class AuthWeb implements Auth {
           this.assertActiveGeneration(generation);
         }
 
-        this._grantedScopes = scopes;
-        this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
+        if (!this._credentialOnlyLogin) {
+          this._grantedScopes = scopes;
+          this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
+        }
 
         const user: AuthUser = {
           provider: "google",
@@ -1310,6 +1469,8 @@ class AuthWeb implements Auth {
       const user: Partial<AuthUser> = {};
       setIfDefined(user, "email", getOptionalString(decoded, "email"));
       setIfDefined(user, "name", getOptionalString(decoded, "name"));
+      setIfDefined(user, "firstName", getOptionalString(decoded, "given_name"));
+      setIfDefined(user, "lastName", getOptionalString(decoded, "family_name"));
       setIfDefined(user, "photo", getOptionalString(decoded, "picture"));
       setIfDefined(user, "userId", getOptionalString(decoded, "sub"));
       setIfDefined(user, "hostedDomain", getOptionalString(decoded, "hd"));
@@ -1701,10 +1862,9 @@ class AuthWeb implements Auth {
     const nonce = options?.nonce ?? crypto.randomUUID();
     const appleAuthConfig: AppleAuthInitConfig = {
       clientId,
-      scope: (options?.scopes?.length
-        ? options.scopes
-        : ["name", "email"]
-      ).join(" "),
+      scope: (options?.scopes?.length ? options.scopes : ["name", "email"])
+        .map((scope) => (scope === "fullName" ? "name" : scope))
+        .join(" "),
       redirectURI: window.location.origin,
       usePopup: true,
     };
@@ -1730,6 +1890,8 @@ class AuthWeb implements Auth {
       };
       setIfDefined(user, "authorizationCode", response.authorization.code);
       setIfDefined(user, "email", response.user?.email);
+      setIfDefined(user, "firstName", response.user?.name?.firstName);
+      setIfDefined(user, "lastName", response.user?.name?.lastName);
       setIfDefined(
         user,
         "name",
@@ -1751,6 +1913,7 @@ class AuthWeb implements Auth {
   }
 
   async silentRestore(): Promise<void> {
+    this.assertNoCredential();
     logger.log("Attempting silent restore...");
     this.loadFromCache();
     const user = this._currentUser;
@@ -1803,14 +1966,20 @@ class AuthWeb implements Auth {
     this.removeFromCache(CACHE_KEY);
     this.removeFromCache(SCOPES_KEY);
     this.removeFromCache(MS_REFRESH_TOKEN_KEY);
-    this.notify();
-    this.emitEvent("logout", provider);
+    if (!this._disposed) {
+      this.notify();
+      this.emitEvent("logout", provider);
+    }
   }
 
   private updateUser(user: AuthUser) {
+    this._captureLoginUser?.(user);
+    if (this._credentialOnlyLogin) return;
     this._currentUser = user;
-    const userToPersist = this.sanitizeUserForPersistence(user);
-    this.saveValue(CACHE_KEY, JSON.stringify(userToPersist));
+    if (!this._credentialOnlyLogin) {
+      const userToPersist = this.sanitizeUserForPersistence(user);
+      this.saveValue(CACHE_KEY, JSON.stringify(userToPersist));
+    }
     this.notify();
   }
 
@@ -1835,6 +2004,7 @@ class AuthWeb implements Auth {
     this._listeners = [];
     this._tokenListeners = [];
     this._eventListeners = [];
+    this._snapshotListeners.clear();
   }
   equals(other: unknown) {
     return other === this;

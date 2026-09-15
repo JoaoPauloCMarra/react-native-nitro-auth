@@ -2,7 +2,7 @@ import { NitroModules } from "react-native-nitro-modules";
 import { createAuthService } from "../create-auth-service";
 import { AuthService } from "../service";
 import { AuthError } from "../utils/auth-error";
-import type { AuthTokens, AuthUser } from "../Auth.nitro";
+import type { AuthSessionSnapshot, AuthTokens, AuthUser } from "../Auth.nitro";
 
 let mockCurrentUser: AuthUser | undefined;
 const mockGetCurrentUser = jest.fn(() => mockCurrentUser);
@@ -13,6 +13,12 @@ type MockHybridObject = {
   readonly currentUser: AuthUser | undefined;
   grantedScopes: string[];
   hasPlayServices: boolean;
+  createNonce: jest.Mock;
+  getCredential: jest.Mock;
+  getSessionSnapshot: jest.Mock;
+  onSessionChanged: jest.Mock;
+  loginAndGetUser: jest.Mock;
+  revokeScopesWithResult: jest.Mock;
   login: jest.Mock;
   logout: jest.Mock;
   requestScopes: jest.Mock;
@@ -29,11 +35,6 @@ type MockHybridObject = {
   equals: jest.Mock;
 };
 
-// eslint-disable-next-line no-var
-var mockState: { hybridObject: MockHybridObject | undefined } = {
-  hybridObject: undefined,
-};
-
 jest.mock("react-native-nitro-modules", () => {
   const hybridObject: MockHybridObject = {
     name: "Auth",
@@ -42,6 +43,12 @@ jest.mock("react-native-nitro-modules", () => {
     },
     grantedScopes: [],
     hasPlayServices: true,
+    createNonce: jest.fn(),
+    getCredential: jest.fn(),
+    getSessionSnapshot: jest.fn(),
+    onSessionChanged: jest.fn(() => jest.fn()),
+    loginAndGetUser: jest.fn(),
+    revokeScopesWithResult: jest.fn(),
     login: jest.fn(),
     logout: jest.fn(),
     requestScopes: jest.fn(),
@@ -64,8 +71,6 @@ jest.mock("react-native-nitro-modules", () => {
     dispose: jest.fn(),
     equals: jest.fn(),
   };
-  mockState = { hybridObject };
-
   return {
     NitroModules: {
       createHybridObject: jest.fn(() => hybridObject),
@@ -75,8 +80,8 @@ jest.mock("react-native-nitro-modules", () => {
 
 describe("AuthService", () => {
   function native() {
-    const [result] = (NitroModules.createHybridObject as jest.Mock).mock
-      .results;
+    const results = (NitroModules.createHybridObject as jest.Mock).mock.results;
+    const result = results.at(-1);
 
     if (!result) {
       throw new Error("Auth hybrid object was not created");
@@ -91,9 +96,15 @@ describe("AuthService", () => {
     mockGetCurrentUser.mockReset();
     mockGetCurrentUser.mockImplementation(() => mockCurrentUser);
     onAuthStateChangedCallback = null;
-    const hybridObject = mockState.hybridObject;
+    const hybridObject = native();
     if (hybridObject) {
       hybridObject.login.mockReset();
+      hybridObject.getCredential.mockReset();
+      hybridObject.getSessionSnapshot.mockReset();
+      hybridObject.onSessionChanged.mockReset();
+      hybridObject.loginAndGetUser.mockReset();
+      hybridObject.revokeScopesWithResult.mockReset();
+      hybridObject.createNonce.mockReset();
       hybridObject.logout.mockReset();
       hybridObject.requestScopes.mockReset();
       hybridObject.revokeScopes.mockReset();
@@ -133,6 +144,7 @@ describe("AuthService", () => {
   it("should have all required methods", () => {
     expect(AuthService.login).toBeDefined();
     expect(AuthService.loginAndGetUser).toBeDefined();
+    expect(AuthService.getCredential).toBeDefined();
     expect(AuthService.logout).toBeDefined();
     expect(AuthService.requestScopes).toBeDefined();
     expect(AuthService.revokeScopes).toBeDefined();
@@ -169,22 +181,27 @@ describe("AuthService", () => {
       expect((error as AuthError).code).toBe("network_error");
     });
 
-    it("loginAndGetUser returns currentUser after login", async () => {
+    it("loginAndGetUser returns the atomic native result without reading currentUser", async () => {
       const user: AuthUser = {
         provider: "google",
         idToken: "id-token",
       };
-      native().login.mockResolvedValueOnce(undefined);
-      mockCurrentUser = user;
+      native().loginAndGetUser.mockResolvedValueOnce(user);
+      mockCurrentUser = { provider: "apple" };
 
       await expect(AuthService.loginAndGetUser("google")).resolves.toEqual(
         user,
       );
-      expect(native().login).toHaveBeenCalledWith("google", undefined);
+      expect(native().loginAndGetUser).toHaveBeenCalledWith(
+        "google",
+        undefined,
+      );
     });
 
-    it("loginAndGetUser throws not_signed_in when login leaves currentUser empty", async () => {
-      native().login.mockResolvedValueOnce(undefined);
+    it("loginAndGetUser preserves a native not_signed_in rejection", async () => {
+      native().loginAndGetUser.mockRejectedValueOnce(
+        new Error("not_signed_in"),
+      );
       mockCurrentUser = undefined;
 
       const error = await AuthService.loginAndGetUser("google").catch(
@@ -196,7 +213,7 @@ describe("AuthService", () => {
     });
 
     it("loginAndGetUser wraps native login errors in AuthError", async () => {
-      native().login.mockRejectedValueOnce(new Error("cancelled"));
+      native().loginAndGetUser.mockRejectedValueOnce(new Error("cancelled"));
       const error = await AuthService.loginAndGetUser("google").catch(
         (e: unknown) => e,
       );
@@ -252,8 +269,8 @@ describe("AuthService", () => {
       expect((error as AuthError).code).toBe("configuration_error");
     });
 
-    it("does not double-wrap existing AuthError", async () => {
-      const original = new AuthError(new Error("cancelled"));
+    it("does not double-wrap an existing phased AuthError", async () => {
+      const original = new AuthError(new Error("cancelled"), "login");
       native().login.mockRejectedValueOnce(original);
       const error = await AuthService.login("google").catch((e: unknown) => e);
       expect(error).toBe(original);
@@ -387,8 +404,8 @@ describe("AuthService", () => {
     expect(service.currentUser).toBeUndefined();
     expect(service.grantedScopes).toEqual(["email"]);
     expect(service.hasPlayServices).toBe(false);
-    expect(service.onAuthStateChanged(authCallback)).toBe(unsubscribeAuth);
-    expect(service.onTokensRefreshed(tokenCallback)).toBe(unsubscribeTokens);
+    service.onAuthStateChanged(authCallback);
+    service.onTokensRefreshed(tokenCallback);
     service.logout();
     void service.revokeAccess();
     service.setLoggingEnabled(true);
@@ -480,6 +497,70 @@ describe("AuthService", () => {
     });
   });
 
+  describe("getCredential", () => {
+    it("delegates one native transaction and preserves its result", async () => {
+      const value = {
+        provider: "google",
+        idToken: "id",
+        nonce: "raw",
+        user: { provider: "google" },
+      };
+      native().getCredential.mockResolvedValueOnce(value);
+      await expect(
+        AuthService.getCredential("google", { forceAccountPicker: true }),
+      ).resolves.toBe(value);
+      expect(native().getCredential).toHaveBeenCalledWith("google", {
+        forceAccountPicker: true,
+      });
+      expect(native().createNonce).not.toHaveBeenCalled();
+      expect(native().login).not.toHaveBeenCalled();
+      expect(native().logout).not.toHaveBeenCalled();
+      expect(mockGetCurrentUser).not.toHaveBeenCalled();
+    });
+    it.each([
+      "invalid_state",
+      "invalid_nonce",
+      "no_id_token",
+      "cancelled",
+      "network_error",
+    ])("preserves native %s failures", async (code) => {
+      native().getCredential.mockRejectedValueOnce(new Error(code));
+      await expect(AuthService.getCredential("apple")).rejects.toMatchObject({
+        code,
+        operation: "getCredential",
+      });
+    });
+    it("blocks overlapping session work until the native transaction settles", async () => {
+      let finish: ((value: unknown) => void) | undefined;
+      native().getCredential.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const pending = AuthService.getCredential("google");
+      await expect(AuthService.login("google")).rejects.toMatchObject({
+        code: "operation_in_progress",
+      });
+      await expect(AuthService.getCredential("apple")).rejects.toMatchObject({
+        code: "operation_in_progress",
+      });
+      finish?.({
+        provider: "google",
+        idToken: "id",
+        nonce: "raw",
+        user: { provider: "google" },
+      });
+      await pending;
+    });
+    it("rejects unsupported providers before the native call", async () => {
+      await expect(
+        AuthService.getCredential("microsoft" as never),
+      ).rejects.toMatchObject({ code: "unsupported_provider" });
+      expect(native().getCredential).not.toHaveBeenCalled();
+    });
+  });
+
   describe("onAuthEvent", () => {
     it("forwards the typed event callback to the native module", () => {
       const unsubscribe = jest.fn();
@@ -488,8 +569,15 @@ describe("AuthService", () => {
 
       const result = AuthService.onAuthEvent(callback);
 
-      expect(result).toBe(unsubscribe);
-      expect(native().onAuthEvent).toHaveBeenCalledWith(callback);
+      const deliver = native().onAuthEvent.mock.calls.at(-1)?.[0];
+      deliver({ type: "login_started", provider: "google" });
+      expect(callback).toHaveBeenCalledWith({
+        type: "login_started",
+        provider: "google",
+      });
+      result();
+      result();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -503,14 +591,138 @@ describe("AuthService", () => {
 
     it("exposes the typed result through the additive method", async () => {
       native().grantedScopes = ["email", "profile"];
-      native().revokeScopes.mockResolvedValueOnce(undefined);
+      native().revokeScopesWithResult.mockResolvedValueOnce({
+        revokedAtProvider: false,
+        revokedScopes: ["email"],
+      });
       await expect(
         AuthService.revokeScopesWithResult(["email"]),
       ).resolves.toEqual({
         revokedAtProvider: false,
         revokedScopes: ["email"],
       });
-      expect(native().revokeScopes).toHaveBeenCalledWith(["email"]);
+      expect(native().revokeScopesWithResult).toHaveBeenCalledWith(["email"]);
     });
+  });
+  it("suppresses queued callbacks after unsubscribe and makes cleanup idempotent", () => {
+    const callback = jest.fn();
+    const remove = jest.fn();
+    native().onAuthStateChanged.mockImplementationOnce((listener) => {
+      onAuthStateChangedCallback = listener;
+      return remove;
+    });
+    const unsubscribe = AuthService.onAuthStateChanged(callback);
+    unsubscribe();
+    unsubscribe();
+    onAuthStateChangedCallback?.({ provider: "google" });
+    expect(callback).not.toHaveBeenCalled();
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates JavaScript listener failures at the service boundary", () => {
+    const unsubscribe = AuthService.onAuthStateChanged(() => {
+      throw new Error("private callback detail");
+    });
+    expect(() =>
+      onAuthStateChangedCallback?.({ provider: "google" }),
+    ).not.toThrow();
+    unsubscribe();
+  });
+
+  it("suppresses queued callbacks when the service is disposed", () => {
+    const callback = jest.fn();
+    AuthService.onAuthStateChanged(callback);
+    const queued = onAuthStateChangedCallback;
+    AuthService.dispose();
+    queued?.({ provider: "google" });
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it("correlates operation terminal events without exposing credentials or error details", async () => {
+    const events: unknown[] = [];
+    const unsubscribe = AuthService.onAuthEvent((event) => events.push(event));
+    native().getCredential.mockRejectedValueOnce(
+      new Error("network_error: private-provider-detail"),
+    );
+    await expect(AuthService.getCredential("google")).rejects.toMatchObject({
+      code: "network_error",
+    });
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      type: "operation_started",
+      operation: "getCredential",
+      provider: "google",
+    });
+    expect(events[1]).toMatchObject({
+      type: "operation_failed",
+      operation: "getCredential",
+      errorCode: "network_error",
+    });
+    expect(JSON.stringify(events)).not.toContain("private-provider-detail");
+    expect(events[1]).toMatchObject({
+      operationId: (events[0] as { operationId: number }).operationId,
+      elapsedMilliseconds: expect.any(Number),
+    });
+    unsubscribe();
+  });
+  it("keeps mounted snapshot observers connected after service disposal", () => {
+    let callback: ((snapshot: AuthSessionSnapshot) => void) | undefined;
+    let snapshot: AuthSessionSnapshot = { revision: 0, scopes: [] };
+    const backend = {
+      ...native(),
+      getSessionSnapshot: jest.fn(() => snapshot),
+      onSessionChanged: jest.fn(
+        (listener: (value: AuthSessionSnapshot) => void) => {
+          callback = listener;
+          return jest.fn();
+        },
+      ),
+    };
+    const service = createAuthService(() => backend);
+    const observer = jest.fn();
+    const remove = service.onSessionChanged(observer);
+    service.dispose();
+    expect(observer.mock.calls.at(-1)?.[0].user).toBeUndefined();
+    service.getSessionSnapshot();
+    snapshot = { revision: 1, scopes: ["email"], user: { provider: "google" } };
+    callback?.(snapshot);
+    expect(observer.mock.calls.at(-1)?.[0].user.provider).toBe("google");
+    expect(backend.onSessionChanged).toHaveBeenCalledTimes(2);
+    remove();
+    remove();
+  });
+
+  it("does not retain an event listener when native registration fails", async () => {
+    const observer = jest.fn();
+    native().onAuthEvent.mockImplementationOnce(() => {
+      throw new Error("configuration_error");
+    });
+    expect(() => AuthService.onAuthEvent(observer)).toThrow(AuthError);
+    await AuthService.getAccessToken();
+    expect(observer).not.toHaveBeenCalled();
+  });
+
+  it("does not deliver a snapshot to a listener removed during dispatch", () => {
+    let deliver: ((snapshot: AuthSessionSnapshot) => void) | undefined;
+    const backend = {
+      ...native(),
+      getSessionSnapshot: jest.fn(() => ({ revision: 0, scopes: [] })),
+      onSessionChanged: jest.fn(
+        (listener: (snapshot: AuthSessionSnapshot) => void) => {
+          deliver = listener;
+          return jest.fn();
+        },
+      ),
+    };
+    const service = createAuthService(() => backend);
+    let removeSecond: () => void = jest.fn();
+    const removeFirst = service.onSessionChanged(() => {
+      removeSecond();
+    });
+    const second = jest.fn();
+    removeSecond = service.onSessionChanged(second);
+    deliver?.({ revision: 1, scopes: [] });
+    expect(second).not.toHaveBeenCalled();
+    removeFirst();
   });
 });

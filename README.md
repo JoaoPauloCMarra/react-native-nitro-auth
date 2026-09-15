@@ -19,6 +19,10 @@ uses configurable browser storage, with token persistence disabled by default.
 Your backend remains responsible for validating tokens and creating application
 sessions.
 
+This development README includes the Unreleased changes in PR #38: credential
+acquisition, Android Apple sign-in, and expanded social buttons. Check the
+[changelog](CHANGELOG.md) for the APIs included in your installed version.
+
 ## Install
 
 ```sh
@@ -48,7 +52,7 @@ bare app.
 | React Native               | `>=0.75.0`; runtime gate `0.86.3`, RN `0.87` Strict TypeScript compatibility check |
 | React                      | Validated with `19.2.3`                                                            |
 | React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                                 |
-| Expo                       | SDK `57.0.21` development builds; RN `0.86.3`                                      |
+| Expo                       | SDK `57.0.23` development builds; RN `0.86.3`                                      |
 | iOS                        | `16.4` or later                                                                    |
 
 iOS static frameworks are supported with source-built React Native. After
@@ -83,6 +87,8 @@ export default {
           },
           android: {
             googleClientId: process.env.GOOGLE_WEB_CLIENT_ID,
+            appleAndroidBrokerUrl: "https://auth.example.com/apple",
+            appleAndroidCallbackScheme: "myapp-auth",
             microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
             microsoftTenant: process.env.MICROSOFT_TENANT,
             microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,
@@ -104,19 +110,21 @@ export default {
 
 Plugin options:
 
-| Option                       | Platform | Required for                                                                     |
-| ---------------------------- | -------- | -------------------------------------------------------------------------------- |
-| `ios.googleClientId`         | iOS      | Google Sign-In on iOS.                                                           |
-| `ios.googleServerClientId`   | iOS      | Google server auth code flow.                                                    |
-| `ios.googleUrlScheme`        | iOS      | Optional Google redirect scheme. Derived from `ios.googleClientId` when omitted. |
-| `ios.appleSignIn`            | iOS      | Apple Sign-In entitlement.                                                       |
-| `ios.microsoftClientId`      | iOS      | Microsoft Entra ID native login.                                                 |
-| `ios.microsoftTenant`        | iOS      | Microsoft tenant override.                                                       |
-| `ios.microsoftB2cDomain`     | iOS      | Microsoft B2C hostname.                                                          |
-| `android.googleClientId`     | Android  | Google Sign-In on Android.                                                       |
-| `android.microsoftClientId`  | Android  | Microsoft Entra ID native login.                                                 |
-| `android.microsoftTenant`    | Android  | Microsoft tenant override.                                                       |
-| `android.microsoftB2cDomain` | Android  | Microsoft B2C hostname.                                                          |
+| Option                               | Platform | Required for                                                                     |
+| ------------------------------------ | -------- | -------------------------------------------------------------------------------- |
+| `ios.googleClientId`                 | iOS      | Google Sign-In on iOS.                                                           |
+| `ios.googleServerClientId`           | iOS      | Google server auth code flow.                                                    |
+| `ios.googleUrlScheme`                | iOS      | Optional Google redirect scheme. Derived from `ios.googleClientId` when omitted. |
+| `ios.appleSignIn`                    | iOS      | Apple Sign-In entitlement.                                                       |
+| `ios.microsoftClientId`              | iOS      | Microsoft Entra ID native login.                                                 |
+| `ios.microsoftTenant`                | iOS      | Microsoft tenant override.                                                       |
+| `ios.microsoftB2cDomain`             | iOS      | Microsoft B2C hostname.                                                          |
+| `android.googleClientId`             | Android  | Google Sign-In on Android.                                                       |
+| `android.appleAndroidBrokerUrl`      | Android  | HTTPS base URL of your Apple broker. Required together with the callback scheme. |
+| `android.appleAndroidCallbackScheme` | Android  | App-specific lowercase custom scheme, such as `myapp-auth`.                      |
+| `android.microsoftClientId`          | Android  | Microsoft Entra ID native login.                                                 |
+| `android.microsoftTenant`            | Android  | Microsoft tenant override.                                                       |
+| `android.microsoftB2cDomain`         | Android  | Microsoft B2C hostname.                                                          |
 
 When `ios.googleUrlScheme` is omitted, the plugin derives
 `com.googleusercontent.apps.<id>` from an iOS client ID that ends in
@@ -142,6 +150,58 @@ Web options in `expo.extra`:
 Web reads `expo-constants` for these options. `expo-constants` is an optional
 peer dependency: without it, web falls back to defaults and provider client
 IDs must be configured another way.
+
+### Apple on Android
+
+Google and Apple use the same calls on Android and iOS:
+
+```ts
+const credential = await AuthService.getCredential("apple");
+```
+
+Android Apple opens a Custom Tab and requires a server broker. Configure the two
+Android plugin options above, then prebuild and rebuild. The plugin installs
+the resources and callback Activity; the app needs no browser or deep-link
+handler. Use a callback scheme distinct from the app's other auth links.
+Broker URLs must use HTTPS without credentials, query parameters, or fragments.
+For bare Android, define `nitro_auth_apple_android_broker_url` and
+`nitro_auth_apple_android_callback_scheme` string resources and register a VIEW,
+DEFAULT, BROWSABLE intent filter on `com.auth.AppleAuthCallbackActivity` for the
+configured scheme, host `apple`, and exact path `/callback`.
+
+The broker is hosted by your backend; it has no
+Supabase dependency. Register an Apple Services ID associated with your Sign in
+with Apple App ID, and an HTTPS return URL pointing to the broker. Keep Apple
+signing keys and client secrets on the server. Native iOS continues using the
+App ID and native Apple authorization UI.
+
+Implement these endpoints relative to `appleAndroidBrokerUrl`:
+
+1. `POST /start` accepts `{nonce, codeChallenge, scopes?}`. Nonce and challenge
+   are lowercase SHA-256 hex. Scopes contain only `email` and `fullName`; map
+   `fullName` to Apple's OAuth `name` scope. Return
+   `{data:{attemptId, authorizationUrl}}`, where `attemptId` is a canonical UUID
+   and the URL starts at `https://appleid.apple.com/auth/authorize`.
+2. Your HTTPS Apple callback verifies state and the Apple token's signature,
+   issuer, audience, expiry, and nonce. Store the result privately and redirect
+   to `myapp-auth://apple/callback?attemptId=<UUID>`. Do not put credentials or
+   the proof verifier in this URL.
+3. `POST /complete` accepts `{attemptId, codeVerifier}`. The verifier is 32 random
+   bytes encoded as 64 lowercase hex characters; its SHA-256 hex digest must
+   equal the stored challenge. Atomically consume the matching unexpired
+   attempt and return
+   `{data:{idToken, authorizationCode, user:{id,email?,name?,firstName?,lastName?}}}`.
+   Required fields must be nonempty strings. Optional names/email may be absent
+   or null. Derive `user.id` from the verified Apple subject.
+
+Use no-store responses, encrypted credential storage, short attempt expiry,
+request limits, and single-use proof consumption. Return failures as
+`{error:{code,message}}`; Apple cancellation uses HTTP 409 with
+`APPLE_AUTHORIZATION_CANCELLED`. The package exposes fixed error descriptions,
+rejects redirects and oversized responses, and accepts only the active attempt's
+callback. The package manages nonce/proof generation, browser cancellation,
+request deadlines, and transient cleanup. It returns the original nonce with
+`getCredential()` for your application's final server session exchange.
 
 ### Web OAuth redirects
 
@@ -221,19 +281,56 @@ async function signInWithMicrosoft() {
 ```
 
 `login()` still returns `Promise<void>` and leaves the session on
-`AuthService.currentUser`. `loginAndGetUser()` runs the same native login, then
-returns that user or rejects with `not_signed_in`. `logout()` is synchronous and
+`AuthService.currentUser`. `loginAndGetUser()` returns the user captured by its
+own login completion, even if a later operation replaces the session. `logout()` is synchronous and
 returns `void`.
+
+Use `getCredential()` when the app sends an identity-provider token to its own
+backend and does not need a local package session:
+
+```ts
+const credential = await AuthService.getCredential("google", {
+  forceAccountPicker: true,
+});
+
+await fetch(yourAuthEndpoint, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    provider: credential.provider,
+    idToken: credential.idToken,
+    nonce: credential.nonce,
+  }),
+});
+```
+
+`getCredential()` supports Google and Apple. It creates a random nonce, sends
+its SHA-256 hex value to the provider, returns the raw nonce for backend
+verification, and clears provider state before resolving without publishing a
+package session.
+If a package session is already active, it rejects with `invalid_state` before
+provider setup or session changes; call `logout()` before requesting a separate
+credential.
+While acquisition is pending, another credential or session operation rejects
+with `operation_in_progress`; `logout()` and `dispose()` can cancel it. Cleanup
+preserves the original acquisition error if cleanup also fails. Credential acquisition emits correlated operation events without temporary
+login, state, or logout events.
+Google defaults to `openid`, `email`, and `profile`; Apple defaults to `email`
+and `fullName` (`name` in Apple's web SDK). Explicit `scopes` replace those defaults. Caller-supplied `nonce`
+and Android `useLegacyGoogleSignIn` are not accepted. Android nonce-bound Google
+flows use Credential Manager even with `forceAccountPicker: true`; they reject
+when Credential Manager cannot provide and verify a matching ID token instead
+of retrying through legacy Google Sign-In.
 
 ## Providers
 
-| Provider  | Native       | Web | Notes                                                                 |
-| --------- | ------------ | --- | --------------------------------------------------------------------- |
-| Google    | iOS, Android | Yes | Supports account picker, login hint, refresh, and incremental scopes. |
-| Apple     | iOS          | Yes | Returns name and email only on first authorization.                   |
-| Microsoft | iOS, Android | Yes | Supports tenant, B2C, refresh, and incremental scopes.                |
+| Provider  | Native       | Web | Notes                                                                                  |
+| --------- | ------------ | --- | -------------------------------------------------------------------------------------- |
+| Google    | iOS, Android | Yes | Supports account picker, login hint, refresh, and incremental scopes.                  |
+| Apple     | iOS, Android | Yes | Native iOS; HTTPS broker on Android. Name/email may be absent on repeat authorization. |
+| Microsoft | iOS, Android | Yes | Supports tenant, B2C, refresh, and incremental scopes.                                 |
 
-Apple Sign-In is unavailable on Android. Use `expo-auth-session`,
+Use `expo-auth-session`,
 `react-native-app-auth`, Auth0, Firebase Auth, or your identity provider SDK
 when you need generic OAuth/OIDC providers, password authentication, MFA,
 hosted user management, or server session management.
@@ -246,6 +343,8 @@ Main exports:
 - `AuthService` for imperative operations and account listeners.
 - `AuthService.loginAndGetUser()` when the caller needs the signed-in user from
   the same call.
+- `AuthService.getCredential()` when the caller needs a nonce-bound Google or
+  Apple ID token without retaining a package session.
 - `SocialButton` for provider-aware UI.
 - `AuthProvider` for `"google"`, `"apple"`, and `"microsoft"`.
 - `AuthError` and `AuthErrorCode` for deterministic failures.
@@ -299,7 +398,8 @@ Supported login options:
 - `getAccessToken()` returns the current access token and refreshes near-expiry
   Google or Microsoft credentials when supported.
 - `refreshToken()` supports Google and Microsoft. Apple token exchange and
-  refresh belong on your backend.
+  refresh belong on your backend. Native Apple sessions reject `refreshToken()`
+  and `requestScopes()` with `unsupported_provider` while preserving the session.
 - `revokeAccess()` clears local state only after provider revocation succeeds.
   Client-side revocation supports Google web and iOS sessions, plus Android
   sessions created through legacy Google Sign-In. Unsupported providers reject
@@ -313,6 +413,81 @@ Supported login options:
 `operation`, and `underlyingMessage` without a cast. Use
 `error instanceof AuthError` when handling an error value that came from
 outside the package.
+
+### Social buttons
+
+`SocialButton` renders Google and Apple controls in `custom` mode by default.
+Set `renderMode` to `image` or `svg` to use the package's official full-button
+artwork. Those modes preserve the platform artwork's aspect ratio and do not
+apply `textStyle` or `borderRadius`. Microsoft keeps its existing custom
+renderer. `appearance` accepts `light` or `dark`; `shape` accepts `pill` or
+`rectangular`. For Google and Apple, the deprecated `variant` values `primary`,
+`outline`, and `white` map to `light`; `black` maps to `dark`.
+
+Set `iconOnly` to render the provider's official square icon without cropping
+the full button. It defaults to `false`; icon-only buttons remain 48 × 48 dp
+targets and keep the accessible label “Sign in with Google” or “Sign in with
+Apple”.
+
+While a login runs, every render mode keeps the provider mark, the button
+chrome, and the button size. Labeled buttons show the mark with the indicator
+beside it; icon-only buttons dim the mark and center the indicator over it.
+Turning `loading` on or off never moves or resizes the control.
+
+Custom content can use the exported `SocialProviderIcon` for Google or Apple
+artwork without copying assets or loading a font. Set `loadingIndicator={null}`
+when that content renders its own loading state; this removes the default
+indicator while preserving the outer button's
+busy state and duplicate-press protection. A React element passed as
+`loadingIndicator` replaces the default indicator inside the button.
+
+```tsx
+<SocialButton provider="google" appearance="light" shape="pill" />
+<SocialButton provider="apple" renderMode="svg" iconOnly />
+```
+
+When provided, `onPress` replaces the package-managed login and may return a
+promise. The component disables itself and reports progress while it settles;
+`loading` adds a controlled busy state. Rejections are normalized and passed to
+`onError` as `AuthError`.
+
+Custom mode draws its label in the platform system font, which is Roboto on
+Android and San Francisco on iOS, and needs no bundled font. To use Google Sans
+Medium instead, set the Expo config plugin's `googleButtonFont` option to `true`
+in the existing `react-native-nitro-auth` plugin options and pass the family
+through `textStyle`:
+
+```js
+[
+  "react-native-nitro-auth",
+  { googleButtonFont: true /* keep other options */ },
+];
+```
+
+```tsx
+<SocialButton provider="google" textStyle={{ fontFamily: googleSansFamily }} />
+```
+
+No render mode requires this font. For a bare React Native app without the Expo
+plugin, copy
+`node_modules/react-native-nitro-auth/assets/fonts/GoogleSans-Medium.ttf` to
+Android as `android/app/src/main/assets/fonts/NitroAuthGoogleSans-Medium.ttf`.
+On iOS, add `NitroAuthGoogleSans-Medium.ttf` to the app bundle and list it under
+`UIAppFonts` in `Info.plist`. The registered font families are
+`NitroAuthGoogleSans-Medium` on Android and `GoogleSans-Medium` on iOS; web apps
+must register `GoogleSans-Medium` themselves. After changing native font
+configuration, regenerate and rebuild the app.
+
+The package ships the official Google and Apple marks as images and draws them
+unaltered in every mode. `svg` mode uses vector button artwork; Google's vector
+export draws its mark with a Figma conic gradient inside a `foreignObject`,
+which no native SVG renderer supports, so the package draws the mark image into
+that box instead. Run `bun scripts/generate-social-button-assets.ts` after
+changing any artwork file, then refresh `src/ui/assets/provenance.json`.
+
+The layouts follow the [Google Sign-In branding
+guidelines](https://developers.google.com/identity/branding-guidelines) and
+[Apple's Sign in with Apple HIG](https://developer.apple.com/design/human-interface-guidelines/sign-in-with-apple).
 
 ### Token semantics and capabilities
 
@@ -337,13 +512,13 @@ const androidGoogle = getProviderTokenCapabilities("google", "android");
 // { supportsAccessToken: false, accessTokenExpirySource: "id_token", ... }
 ```
 
-| Provider  | Platform | Access token | Client-side refresh | Server auth code | Expiry source  |
-| --------- | -------- | ------------ | ------------------- | ---------------- | -------------- |
-| Google    | iOS      | yes          | yes                 | yes              | access token   |
-| Google    | Android  | no           | yes (silent)        | yes (legacy)     | ID-token `exp` |
-| Google    | Web      | yes          | yes                 | yes              | access token   |
-| Apple     | iOS/Web  | no           | no                  | no               | —              |
-| Microsoft | all      | yes          | yes                 | no               | access token   |
+| Provider  | Platform        | Access token | Client-side refresh | Server auth code | Expiry source  |
+| --------- | --------------- | ------------ | ------------------- | ---------------- | -------------- |
+| Google    | iOS             | yes          | yes                 | yes              | access token   |
+| Google    | Android         | no           | yes (silent)        | yes (legacy)     | ID-token `exp` |
+| Google    | Web             | yes          | yes                 | yes              | access token   |
+| Apple     | iOS/Android/Web | no           | no                  | no               | —              |
+| Microsoft | all             | yes          | yes                 | no               | access token   |
 
 ## Events
 
@@ -358,7 +533,37 @@ const unsubscribe = AuthService.onAuthEvent((event) => {
     report(event.provider, event.errorCode);
   }
 });
+
+// Call when the subscriber is no longer needed.
+unsubscribe();
 ```
+
+Async service calls also emit `operation_started` followed by one
+`operation_succeeded` or `operation_failed`. These events carry `operationId`,
+`operation`, an optional `provider`, and terminal `elapsedMilliseconds`.
+Failures include `errorCode`. Timing covers the complete service call, including
+validation. Concurrent callers receive distinct IDs even when native refresh is
+deduplicated. Use `AuthLifecycleEvent` for the full discriminated event union.
+Synchronous logout/dispose retain their named lifecycle events.
+
+`onAuthStateChanged`, `onTokensRefreshed`, and `onSessionChanged` can carry
+credentials and profile data; never forward them to analytics. Listener failures
+are isolated. Unsubscribe is idempotent and suppresses queued JS delivery.
+Web legacy state registration sends an initial value; native registration waits
+for a change. Use `getSessionSnapshot()` for an atomic current value:
+
+```ts
+const snapshot = AuthService.getSessionSnapshot(); // { revision, user?, scopes }
+const remove = AuthService.onSessionChanged((next) => {
+  // Consume the snapshot; do not log user or token fields.
+});
+```
+
+`useAuth()` shares one native snapshot subscription across mounted consumers.
+Snapshot observers remain usable after service disposal and reattach when the
+service recreates. Other subscriptions end on disposal. Refresh publishes state,
+then token data, then its named lifecycle event. Do not infer ordering between
+async native callbacks and the service promise's operation events.
 
 ## Storage and Security
 
@@ -398,17 +603,21 @@ import {
   AuthError,
   AuthService,
   type AuthErrorCode,
+  type AuthOperation,
 } from "react-native-nitro-auth";
 
 async function signIn(
-  reportFailure: (code: AuthErrorCode, detail: string | undefined) => void,
+  reportFailure: (
+    code: AuthErrorCode,
+    operation: AuthOperation | undefined,
+  ) => void,
 ) {
   try {
     await AuthService.login("google");
   } catch (error) {
     if (error instanceof AuthError) {
       if (error.code === "cancelled") return;
-      reportFailure(error.code, error.underlyingMessage);
+      reportFailure(error.code, error.operation);
       return;
     }
     throw error;
@@ -422,20 +631,24 @@ Error codes are `cancelled`, `interaction_required`, `timeout`,
 `invalid_nonce`, `token_error`, `no_id_token`, `parse_error`,
 `refresh_failed`, and `unknown`.
 
+Treat `underlyingMessage` as untrusted diagnostic text that may contain provider
+details. Prefer `code` and `operation` for telemetry and user-facing decisions;
+do not forward raw details automatically.
+
 ## Platform Support
 
-| Platform | Status                                                      |
-| -------- | ----------------------------------------------------------- |
-| iOS      | Google, Apple, Microsoft native flows.                      |
-| Android  | Google and Microsoft native flows.                          |
-| Web      | Google, Apple, and Microsoft OAuth through Expo web config. |
-| Expo     | Development builds with the config plugin.                  |
+| Platform | Status                                                            |
+| -------- | ----------------------------------------------------------------- |
+| iOS      | Google, Apple, Microsoft native flows.                            |
+| Android  | Google and Microsoft native flows; Apple through an HTTPS broker. |
+| Web      | Google, Apple, and Microsoft OAuth through Expo web config.       |
+| Expo     | Development builds with the config plugin.                        |
 
 The native package gate and Expo example use React Native `0.86.3`. The
 `check:ci` workflow also compiles the public source against React Native
 `0.87.0`'s Strict TypeScript API to catch declaration and callback regressions;
 that compatibility check does not change the runtime baseline. Expo SDK
-`57.0.21` selects React Native `0.86.3`; do not override it in an Expo app.
+`57.0.23` selects React Native `0.86.3`; do not override it in an Expo app.
 
 Package peer range: `>=0.37.0 <0.38.0`.
 
@@ -471,6 +684,10 @@ bun run example:ios
 Run native example builds locally before release when changing plugin, native,
 Nitro, or packaging files. GitHub CI does not build the Android or iOS example;
 use the commands above for local validation.
+
+The [native performance investigation](docs/native-performance-plan.md) maps
+current C++ ownership and implemented credential, event, error, and snapshot
+improvements. It describes future work, not new APIs or measured speedups.
 
 ## Links
 

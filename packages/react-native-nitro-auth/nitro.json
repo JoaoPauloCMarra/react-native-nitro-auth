@@ -1,10 +1,15 @@
 {
-  "cxxNamespace": ["NitroAuth"],
+  "cxxNamespace": [
+    "NitroAuth"
+  ],
   "ios": {
-    "iosModuleName": "NitroAuth"
+    "iosModuleName": "NitroAuthPlatform"
   },
   "android": {
-    "androidNamespace": ["com", "auth"],
+    "androidNamespace": [
+      "com",
+      "auth"
+    ],
     "androidCxxLibName": "NitroAuth"
   },
   "autolinking": {
@@ -12,6 +17,16 @@
       "all": {
         "language": "c++",
         "implementationClassName": "HybridAuth"
+      }
+    },
+    "NativeAuthAdapter": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridNativeAuthAdapter"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "HybridNativeAuthAdapter"
       }
     }
   }

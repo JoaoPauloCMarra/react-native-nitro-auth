@@ -37,9 +37,17 @@ summarizes the invariants agents must preserve.
   prefix is the contract and message text is never control flow.
 - `AuthError` carries `code`, `operation` (the failed phase), and
   `underlyingMessage`.
-- One canonical OAuth error table (`src/utils/oauth-error.ts`) is shared by
-  iOS, Android, and web; refresh operations surface grant failures as
-  `refresh_failed`.
+- One canonical OAuth error table (`scripts/oauth-errors.json` in the library)
+  generates Swift, Kotlin, and TypeScript mappings; refresh operations surface
+  grant failures as `refresh_failed`.
+- `getCredential()` rejects an active session before provider setup. Preserve
+  service concurrency guards, nonce ownership, and primary-error precedence
+  during cleanup. Credential-only operations never publish a package session.
+- Keep lifecycle telemetry limited to typed codes and provider identifiers.
+  Token/state listener payloads and raw error details are not telemetry-safe.
+- Preserve callback isolation, queued unsubscribe suppression, correlated
+  operation events, and atomic snapshots. Native JS-dispatch proof requires
+  the example runtime smoke tests, not only C++ callback mocks.
 
 ## Session Lifecycle
 

@@ -2,6 +2,8 @@
 
 package com.auth
 
+import com.margelo.nitro.com.auth.HybridNativeAuthAdapter
+
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -19,6 +21,8 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.NoCredentialException
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.common.LifecycleState
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
@@ -27,11 +31,14 @@ import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.api.Scope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancel
@@ -39,10 +46,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.LinkedHashMap
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.UUID
 
 object AuthAdapter {
     private const val TAG = "AuthAdapter"
+    private const val APPLE_AUTH_TIMEOUT_MS = 180_000L
+    private val nonceRandom = SecureRandom()
     private val defaultMicrosoftScopes =
         listOf("openid", "email", "profile", "offline_access", "User.Read")
 
@@ -50,6 +61,23 @@ object AuthAdapter {
         val credential: GoogleIdTokenCredential,
         val scopes: List<String>,
         val hostedDomain: String?,
+    )
+
+    private data class PendingAppleAuth(
+        val origin: String,
+        val generation: Long,
+        val config: AppleAndroidBrokerConfig,
+        val codeVerifier: String,
+        val scopes: List<String>,
+        var attemptId: String? = null,
+        var browserWasOpened: Boolean = false,
+        var callbackReceived: Boolean = false,
+    )
+
+    private data class ClearedAppleAuth(
+        val pending: PendingAppleAuth,
+        val job: Job?,
+        val timeoutRunnable: Runnable?,
     )
 
     private data class GoogleCredentialCleanup(
@@ -63,8 +91,9 @@ object AuthAdapter {
     private var isInitialized = false
 
     private var appContext: Context? = null
-    @Volatile
-    private var currentActivity: Activity? = null
+    private val activityTracker = AuthActivityTracker()
+    private val currentActivity: Activity?
+        get() = activityTracker.currentActivity()
     private var googleSignInClient: GoogleSignInClient? = null
     private var lifecycleCallbacks: Application.ActivityLifecycleCallbacks? = null
     private var pendingMicrosoftScopes: List<String> = emptyList()
@@ -113,6 +142,12 @@ object AuthAdapter {
     private var googleAuthStateEpoch = 1L
     private val googlePickerOperationState = GooglePickerOperationState()
     private val googlePickerRetryHandler by lazy { Handler(Looper.getMainLooper()) }
+    private val appleAuthTimeoutHandler by lazy { Handler(Looper.getMainLooper()) }
+    @Volatile
+    private var pendingAppleAuth: PendingAppleAuth? = null
+    private var appleBrokerJob: Job? = null
+    private var appleAuthTimeoutRunnable: Runnable? = null
+    private var appleResumeSuppressionGeneration: Long? = null
     private var googleLegacyAccountNeedsRevalidation = false
     private val googleRevokeState = GoogleRevokeState()
     @JvmField
@@ -135,17 +170,15 @@ object AuthAdapter {
 
     private var moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    @JvmStatic
-    private external fun nativeInitialize(context: Context)
-    @JvmStatic
-    private external fun nativeDispose()
 
     @JvmStatic
-    private external fun nativeOnLoginSuccess(
+    private fun nativeOnLoginSuccess(
         origin: String,
         provider: String,
         email: String?,
         name: String?,
+        firstName: String?,
+        lastName: String?,
         photo: String?,
         idToken: String?,
         accessToken: String?,
@@ -156,18 +189,34 @@ object AuthAdapter {
         scopes: Array<String>?,
         expirationTime: Long?,
         generation: Long,
-    ): Boolean
+    ): Boolean = HybridNativeAuthAdapter.loginSuccess(origin, provider, email, name, firstName, lastName, photo, idToken, accessToken, serverAuthCode, userId, phoneNumber, hostedDomain, scopes, expirationTime, generation)
 
     @JvmStatic
-    private external fun nativeOnLoginError(origin: String, code: Int, underlyingError: String?, generation: Long): Boolean
+    private fun nativeOnLoginError(origin: String, code: Int, underlyingError: String?, generation: Long): Boolean = HybridNativeAuthAdapter.loginError(origin, code, underlyingError, generation)
 
     @JvmStatic
-    private external fun nativeOnRefreshSuccess(idToken: String?, accessToken: String?, expirationTime: Long?, generation: Long): Boolean
+    fun createNonce(): Array<String> {
+        val randomBytes = ByteArray(32)
+        nonceRandom.nextBytes(randomBytes)
+        val raw = Base64.encodeToString(
+            randomBytes,
+            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP,
+        )
+        val hashed = MessageDigest.getInstance("SHA-256")
+            .digest(raw.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte ->
+                (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+            }
+        return arrayOf(raw, hashed)
+    }
 
     @JvmStatic
-    private external fun nativeOnRefreshError(code: Int, underlyingError: String?, generation: Long): Boolean
+    private fun nativeOnRefreshSuccess(idToken: String?, accessToken: String?, expirationTime: Long?, generation: Long): Boolean = HybridNativeAuthAdapter.refreshSuccess(idToken, accessToken, expirationTime, generation)
+
     @JvmStatic
-    private external fun nativeOnRevokeAccessResult(code: Int?, underlyingError: String?, generation: Long): Boolean
+    private fun nativeOnRefreshError(code: Int, underlyingError: String?, generation: Long): Boolean = HybridNativeAuthAdapter.refreshError(code, underlyingError, generation)
+    @JvmStatic
+    private fun nativeOnRevokeAccessResult(code: Int?, underlyingError: String?, generation: Long): Boolean = HybridNativeAuthAdapter.revokeResult(code, underlyingError, generation)
 
     @Synchronized
     fun initialize(context: Context) {
@@ -180,10 +229,31 @@ object AuthAdapter {
         val app = applicationContext as? Application
         if (app != null && lifecycleCallbacks == null) {
             lifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
-                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) { currentActivity = activity }
-                override fun onActivityStarted(activity: Activity) { currentActivity = activity }
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) { activityTracker.onActivityCreated(activity) }
+                override fun onActivityStarted(activity: Activity) { activityTracker.onActivityStarted(activity) }
                 override fun onActivityResumed(activity: Activity) {
-                    currentActivity = activity
+                    activityTracker.onActivityResumed(activity)
+                    val isAppleRedirectHandler = activity is AppleAuthCallbackActivity
+                    val appleSuppressed = synchronized(this@AuthAdapter) {
+                        val generation = pendingAppleAuth?.generation
+                        when {
+                            isAppleRedirectHandler && generation != null -> {
+                                appleResumeSuppressionGeneration = generation
+                                true
+                            }
+                            shouldConsumeAppleResumeSuppression(
+                                resumeSuppressionGeneration = appleResumeSuppressionGeneration,
+                                currentGeneration = generation,
+                                resumingActivityIsCallbackHandler = isAppleRedirectHandler,
+                            ) -> {
+                                appleResumeSuppressionGeneration = null
+                                true
+                            }
+                            else -> false
+                        }
+                    }
+                    if (appleSuppressed) return
+
                     val isRedirectHandler = activity is MicrosoftAuthActivity
                     val suppressed = synchronized(this@AuthAdapter) {
                         val generation = pendingMicrosoftGeneration
@@ -228,26 +298,43 @@ object AuthAdapter {
                             generation,
                         )
                     }
+
+                    val appleCancellationGeneration = synchronized(this@AuthAdapter) {
+                        val pending = pendingAppleAuth
+                        if (pending != null &&
+                            shouldCancelAppleAuth(
+                                authInProgress = pendingAppleAuth != null,
+                                browserWasOpened = pending.browserWasOpened,
+                                callbackReceived = pending.callbackReceived,
+                                resumingActivityIsCallbackHandler = isAppleRedirectHandler,
+                                resumeSuppressionGeneration = appleResumeSuppressionGeneration,
+                                currentGeneration = pending.generation,
+                            )
+                        ) pending.generation else null
+                    }
+                    appleCancellationGeneration?.let {
+                        failAppleAuth(it, AuthErrorCode.CANCELLED, "Apple sign-in was dismissed")
+                    }
                 }
                 override fun onActivityPaused(activity: Activity) {
                     if (microsoftAuthInProgress) microsoftBrowserWasOpened = true
-                    if (currentActivity == activity) currentActivity = null
+                    activityTracker.onActivityPaused(activity)
                 }
-                override fun onActivityStopped(activity: Activity) { if (currentActivity == activity) currentActivity = null }
+                override fun onActivityStopped(activity: Activity) { activityTracker.onActivityStopped(activity) }
                 override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
-                override fun onActivityDestroyed(activity: Activity) { if (currentActivity == activity) currentActivity = null }
+                override fun onActivityDestroyed(activity: Activity) { activityTracker.onActivityDestroyed(activity) }
             }
             app.registerActivityLifecycleCallbacks(lifecycleCallbacks)
         }
-
-        try {
-            nativeInitialize(applicationContext)
-            isInitialized = true
-        } catch (error: Throwable) {
-            Log.e(TAG, "Failed to initialize NitroAuth native bridge", error)
-            dispose()
-            throw IllegalStateException("configuration_error", error)
+        val reactContext = context as? ReactApplicationContext
+        val hostActivity = if (reactContext?.lifecycleState == LifecycleState.RESUMED) {
+            reactContext.currentActivity
+        } else {
+            null
         }
+        activityTracker.seed(hostActivity)
+
+        isInitialized = true;
     }
 
     fun dispose() {
@@ -258,13 +345,12 @@ object AuthAdapter {
         }
         moduleScope.cancel()
         moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        runCatching { nativeDispose() }
-            .onFailure { Log.w(TAG, "Failed to dispose NitroAuth native bridge", it) }
+        HybridNativeAuthAdapter.cancelAll()
 
         val app = appContext as? Application
         lifecycleCallbacks?.let { app?.unregisterActivityLifecycleCallbacks(it) }
         lifecycleCallbacks = null
-        currentActivity = null
+        activityTracker.clear()
         appContext = null
         googleSignInClient = null
         hasLegacyGoogleSession = false
@@ -399,8 +485,9 @@ object AuthAdapter {
             return false
         }
         val expirationTime = getGoogleExpirationTimeMs(account.idToken)
+        val claims = MicrosoftAuthConfig.decodeJwt(account.idToken.orEmpty())
         if (!nativeOnLoginSuccess(origin, "google", account.email, account.displayName,
-            account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
+            claims["given_name"], claims["family_name"], account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
             account.id, null, hostedDomain, scopes.toTypedArray(), expirationTime, generation)
         ) {
             cleanupStaleGoogleAccount(context, account)
@@ -466,7 +553,7 @@ object AuthAdapter {
     ) {
         val cleanupBarrier = beginGoogleAuthStateTransition(clearPendingCallbacks = true)
         if (provider == "apple") {
-            nativeOnLoginError("login", AuthErrorCode.UNSUPPORTED_PROVIDER.code, "Apple Sign-In is not supported on Android.", generation)
+            loginApple(context, scopes, nonce, generation, cleanupBarrier)
             return
         }
         if (provider == "microsoft") {
@@ -497,7 +584,7 @@ object AuthAdapter {
 
         val startLogin = {
             if (isCurrentGoogleGeneration("login", generation) && isCurrentGoogleStateEpoch(loginStateEpoch)) {
-                if (useLegacyGoogleSignIn || forceAccountPicker) {
+                if (nonce == null && (useLegacyGoogleSignIn || forceAccountPicker)) {
                     loginLegacy(context, clientId, requestedScopes, loginHint, forceAccountPicker, forceCodeForRefreshToken, hostedDomain, "login", generation)
                 } else {
                     loginOneTap(context, clientId, requestedScopes, loginHint, nonce, forceAccountPicker, useOneTap, filterByAuthorizedAccounts, requestVerifiedPhoneNumber, hostedDomain, "login", generation)
@@ -512,6 +599,242 @@ object AuthAdapter {
                 startLogin()
             }
         }
+    }
+
+    private fun loginApple(
+        context: Context,
+        scopes: Array<String>?,
+        nonce: String?,
+        generation: Long,
+        cleanupBarrier: Deferred<Unit>?,
+    ) {
+        val ctx = appContext ?: context.applicationContext
+        val brokerUrlResource = ctx.resources.getIdentifier(
+            "nitro_auth_apple_android_broker_url",
+            "string",
+            ctx.packageName,
+        )
+        val callbackSchemeResource = ctx.resources.getIdentifier(
+            "nitro_auth_apple_android_callback_scheme",
+            "string",
+            ctx.packageName,
+        )
+        val config = AppleAndroidBrokerConfig.parse(
+            baseUrl = brokerUrlResource.takeIf { it != 0 }?.let(ctx::getString),
+            callbackScheme = callbackSchemeResource.takeIf { it != 0 }?.let(ctx::getString),
+        )
+        if (config == null) {
+            nativeOnLoginError(
+                "login",
+                AuthErrorCode.CONFIGURATION_ERROR.code,
+                "Apple Android broker URL and callback scheme are required. Set them in app.json plugins.",
+                generation,
+            )
+            return
+        }
+
+        val hashedNonce = nonce ?: createNonce()[1]
+        if (!Regex("^[a-f0-9]{64}$").matches(hashedNonce)) {
+            nativeOnLoginError(
+                "login",
+                AuthErrorCode.INVALID_NONCE.code,
+                "Apple nonce must be a 64-character SHA-256 hex value",
+                generation,
+            )
+            return
+        }
+
+        val code = try {
+            createAppleCodePair()
+        } catch (_: Exception) {
+            nativeOnLoginError(
+                "login",
+                AuthErrorCode.UNKNOWN.code,
+                "Could not create Apple PKCE challenge",
+                generation,
+            )
+            return
+        }
+        val pending = PendingAppleAuth(
+            origin = "login",
+            generation = generation,
+            config = config,
+            codeVerifier = code.verifier,
+            scopes = scopes?.toList() ?: listOf("email", "fullName"),
+        )
+        val timeoutRunnable = Runnable {
+            failAppleAuth(generation, AuthErrorCode.TIMEOUT, "Apple sign-in timed out")
+        }
+        synchronized(this) {
+            if (pendingAppleAuth != null) {
+                nativeOnLoginError(
+                    "login",
+                    AuthErrorCode.OPERATION_IN_PROGRESS.code,
+                    "Apple authentication is already in progress",
+                    generation,
+                )
+                return
+            }
+            pendingAppleAuth = pending
+            appleResumeSuppressionGeneration = null
+            appleAuthTimeoutRunnable = timeoutRunnable
+        }
+        appleAuthTimeoutHandler.postDelayed(timeoutRunnable, APPLE_AUTH_TIMEOUT_MS)
+
+        val job = moduleScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+            try {
+                cleanupBarrier?.await()
+                if (!isCurrentAppleAuth(pending)) return@launch
+
+                val broker = AppleAndroidBroker(config)
+                val attempt = broker.start(hashedNonce, code.challenge, pending.scopes)
+                val launched = withContext(Dispatchers.Main) {
+                    val activity = currentActivity
+                        ?: throw AppleAndroidBrokerException(
+                            AuthErrorCode.CONFIGURATION_ERROR,
+                            "An Activity is required for Apple sign-in",
+                        )
+                    val shouldLaunch = synchronized(this@AuthAdapter) {
+                        if (pendingAppleAuth === pending && !pending.callbackReceived) {
+                            pending.attemptId = attempt.attemptId
+                            pending.browserWasOpened = true
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    if (!shouldLaunch) return@withContext false
+                    try {
+                        CustomTabsIntent.Builder().build().launchUrl(activity, Uri.parse(attempt.authorizationUrl))
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        throw AppleAndroidBrokerException(
+                            AuthErrorCode.POPUP_BLOCKED,
+                            "Could not open Apple sign-in in a browser",
+                        )
+                    }
+                    true
+                }
+                if (!launched) return@launch
+            } catch (_: CancellationException) {
+                // Cancellation and timeout have already cleared this attempt.
+            } catch (error: AppleAndroidBrokerException) {
+                withContext(Dispatchers.Main) {
+                    failAppleAuth(pending.generation, error.authErrorCode, error.message)
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    failAppleAuth(pending.generation, AuthErrorCode.NETWORK_ERROR, "Apple sign-in failed")
+                }
+            }
+        }
+        synchronized(this) {
+            if (pendingAppleAuth === pending) {
+                appleBrokerJob = job
+            } else {
+                job.cancel()
+            }
+        }
+        job.start()
+    }
+
+    private fun isCurrentAppleAuth(pending: PendingAppleAuth): Boolean = synchronized(this) {
+        pendingAppleAuth === pending
+    }
+
+    private fun clearPendingAppleAuth(
+        generation: Long? = null,
+        cancelNetwork: Boolean = true,
+    ): PendingAppleAuth? {
+        val cleared = synchronized(this) {
+            val pending = pendingAppleAuth ?: return null
+            if (generation != null && pending.generation != generation) return null
+            ClearedAppleAuth(pending, appleBrokerJob, appleAuthTimeoutRunnable).also {
+                pendingAppleAuth = null
+                appleBrokerJob = null
+                appleAuthTimeoutRunnable = null
+                appleResumeSuppressionGeneration = null
+            }
+        }
+        cleared.timeoutRunnable?.let(appleAuthTimeoutHandler::removeCallbacks)
+        if (cancelNetwork) cleared.job?.cancel()
+        return cleared.pending
+    }
+
+    private fun failAppleAuth(generation: Long, code: AuthErrorCode, message: String?) {
+        val pending = clearPendingAppleAuth(generation) ?: return
+        nativeOnLoginError(pending.origin, code.code, message, pending.generation)
+    }
+
+    @JvmStatic
+    fun handleAppleRedirect(uri: Uri): Boolean {
+        val current = synchronized(this) {
+            val pending = pendingAppleAuth ?: return false
+            val decision = classifyAppleCallback(
+                callbackUrl = uri.toString(),
+                expectedScheme = pending.config.callbackScheme,
+                currentAttemptId = pending.attemptId,
+                alreadyHandled = pending.callbackReceived,
+            )
+            if (decision == AppleCallbackDecision.CURRENT) {
+                pending.callbackReceived = true
+                pending to pending.attemptId!!
+            } else {
+                null
+            }
+        } ?: return false
+
+        val (pending, attemptId) = current
+        val job = moduleScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+            try {
+                val credential = AppleAndroidBroker(pending.config)
+                    .complete(attemptId, pending.codeVerifier)
+                withContext(Dispatchers.Main) {
+                    val active = synchronized(this@AuthAdapter) {
+                        pendingAppleAuth === pending && pending.callbackReceived
+                    }
+                    if (!active) return@withContext
+                    val completed = clearPendingAppleAuth(pending.generation, cancelNetwork = false)
+                        ?: return@withContext
+                    nativeOnLoginSuccess(
+                        completed.origin,
+                        "apple",
+                        credential.email,
+                        credential.name,
+                        credential.firstName,
+                        credential.lastName,
+                        null,
+                        credential.idToken,
+                        null,
+                        credential.authorizationCode,
+                        credential.userId,
+                        null,
+                        null,
+                        completed.scopes.toTypedArray(),
+                        null,
+                        completed.generation,
+                    )
+                }
+            } catch (_: CancellationException) {
+                // Cancellation and timeout have already cleared this attempt.
+            } catch (error: AppleAndroidBrokerException) {
+                withContext(Dispatchers.Main) {
+                    failAppleAuth(pending.generation, error.authErrorCode, error.message)
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    failAppleAuth(pending.generation, AuthErrorCode.NETWORK_ERROR, "Apple sign-in failed")
+                }
+            }
+        }
+        synchronized(this) {
+            if (pendingAppleAuth === pending) {
+                appleBrokerJob = job
+            } else {
+                job.cancel()
+            }
+        }
+        job.start()
+        return true
     }
 
     private fun loginMicrosoft(context: Context, scopes: Array<String>?, loginHint: String?, tenant: String?, prompt: String?, origin: String = "login", generation: Long) {
@@ -731,6 +1054,8 @@ object AuthAdapter {
                             "microsoft",
                             completion.email,
                             completion.name,
+                            null,
+                            null,
                             null,
                             completion.idToken,
                             completion.accessToken,
@@ -1100,6 +1425,7 @@ object AuthAdapter {
     }
 
     private fun beginGoogleAuthStateTransition(clearPendingCallbacks: Boolean = false): Deferred<Unit>? {
+        if (clearPendingCallbacks) clearPendingAppleAuth()
         var cancelledCleanup: CompletableDeferred<Unit>? = null
         var pickerActivityToFinish: Activity? = null
         var pickerCleanupBarrier: Deferred<Unit>? = null
@@ -1467,44 +1793,73 @@ object AuthAdapter {
     ) {
         val activity = currentActivity ?: context as? Activity
         if (activity == null) {
+            if (nonce != null) {
+                Log.w(TAG, "No Activity context available for nonce-bound Credential Manager login")
+                if (consumeGoogleGeneration(origin, generation)) {
+                    nativeOnLoginError(origin, AuthErrorCode.CONFIGURATION_ERROR.code, "An Activity is required for nonce-bound Google credentials", generation)
+                }
+                return
+            }
             Log.w(TAG, "No Activity context available for One-Tap, falling back to legacy")
             return loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, false, hostedDomain, origin, generation)
         }
 
         val credentialManager = CredentialManager.create(activity)
-        val googleIdOption = GetGoogleIdOption.Builder()
-            .setFilterByAuthorizedAccounts(filterByAuthorizedAccounts)
-            .setServerClientId(clientId)
-            .setAutoSelectEnabled(useOneTap && !forceAccountPicker)
-            .setRequestVerifiedPhoneNumber(requestVerifiedPhoneNumber)
-            .apply {
-                if (nonce != null) setNonce(nonce)
-                if (hostedDomain != null) setHostedDomainFilter(hostedDomain)
-            }
-            .build()
-
-        val request = GetCredentialRequest.Builder()
-            .addCredentialOption(googleIdOption)
-            .build()
+        val requestBuilder = GetCredentialRequest.Builder()
+        if (nonce != null && forceAccountPicker) {
+            val signInOption = GetSignInWithGoogleOption.Builder(clientId)
+                .apply {
+                    setNonce(nonce)
+                    if (hostedDomain != null) setHostedDomainFilter(hostedDomain)
+                }
+                .build()
+            requestBuilder.addCredentialOption(signInOption)
+        } else {
+            val googleIdOption = GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(filterByAuthorizedAccounts)
+                .setServerClientId(clientId)
+                .setAutoSelectEnabled(useOneTap && !forceAccountPicker)
+                .setRequestVerifiedPhoneNumber(requestVerifiedPhoneNumber)
+                .apply {
+                    if (nonce != null) setNonce(nonce)
+                    if (hostedDomain != null) setHostedDomainFilter(hostedDomain)
+                }
+                .build()
+            requestBuilder.addCredentialOption(googleIdOption)
+        }
+        val request = requestBuilder.build()
 
         moduleScope.launch(Dispatchers.Main) {
             try {
                 val result = credentialManager.getCredential(context = activity, request = request)
-                handleCredentialResponse(result, scopes, hostedDomain, origin, generation)
+                handleCredentialResponse(result, scopes, hostedDomain, nonce, origin, generation)
             } catch (e: CancellationException) {
+                if (consumeGoogleGeneration(origin, generation)) {
+                    nativeOnLoginError(origin, AuthErrorCode.CANCELLED.code, e.message, generation)
+                }
                 return@launch
             } catch (e: GetCredentialCancellationException) {
                 if (consumeGoogleGeneration(origin, generation)) {
                     nativeOnLoginError(origin, AuthErrorCode.CANCELLED.code, e.message, generation)
                 }
             } catch (e: NoCredentialException) {
-                Log.w(TAG, "One-Tap has no credentials, falling back to legacy: ${e.message}")
-                if (isCurrentGoogleGeneration(origin, generation)) {
+                if (nonce != null) {
+                    Log.w(TAG, "Credential Manager returned no nonce-bound Google credential")
+                    if (consumeGoogleGeneration(origin, generation)) {
+                        nativeOnLoginError(origin, AuthErrorCode.NO_ID_TOKEN.code, e.message, generation)
+                    }
+                } else if (isCurrentGoogleGeneration(origin, generation)) {
+                    Log.w(TAG, "One-Tap has no credentials, falling back to legacy: ${e.message}")
                     loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, false, hostedDomain, origin, generation)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "One-Tap failed, falling back to legacy: ${e.message}")
-                if (isCurrentGoogleGeneration(origin, generation)) {
+                if (nonce != null) {
+                    Log.w(TAG, "Nonce-bound Credential Manager login failed (${e.javaClass.simpleName})")
+                    if (consumeGoogleGeneration(origin, generation)) {
+                        nativeOnLoginError(origin, AuthErrorCode.UNKNOWN.code, e.message, generation)
+                    }
+                } else if (isCurrentGoogleGeneration(origin, generation)) {
+                    Log.w(TAG, "One-Tap failed, falling back to legacy: ${e.message}")
                     loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, false, hostedDomain, origin, generation)
                 }
             }
@@ -1534,6 +1889,7 @@ object AuthAdapter {
         response: GetCredentialResponse,
         scopes: List<String>,
         hostedDomain: String?,
+        expectedNonce: String?,
         origin: String,
         generation: Long,
     ) {
@@ -1552,15 +1908,39 @@ object AuthAdapter {
         }
 
         if (googleIdTokenCredential != null) {
-            val context = appContext ?: return
+            val context = appContext
+            if (context == null) {
+                if (consumeGoogleGeneration(origin, generation)) {
+                    nativeOnLoginError(origin, AuthErrorCode.CONFIGURATION_ERROR.code, "Auth adapter is not initialized", generation)
+                }
+                return
+            }
             if (!synchronized(this) { acceptsPendingGoogleGenerationLocked(origin, generation) }) return
-            val expirationTime = getGoogleExpirationTimeMs(googleIdTokenCredential.idToken)
+            val idToken = googleIdTokenCredential.idToken
+            if (expectedNonce != null) {
+                if (idToken.isBlank()) {
+                    if (consumeGoogleGeneration(origin, generation)) {
+                        nativeOnLoginError(origin, AuthErrorCode.NO_ID_TOKEN.code, "Google returned an empty ID token", generation)
+                    }
+                    return
+                }
+                if (MicrosoftAuthConfig.decodeJwt(idToken)["nonce"] != expectedNonce) {
+                    if (consumeGoogleGeneration(origin, generation)) {
+                        nativeOnLoginError(origin, AuthErrorCode.INVALID_NONCE.code, "Nonce mismatch - token may be replayed", generation)
+                    }
+                    return
+                }
+            }
+            val claims = MicrosoftAuthConfig.decodeJwt(idToken)
+            val expirationTime = getGoogleExpirationTimeMs(idToken)
             if (!nativeOnLoginSuccess(
                 origin, "google",
                 googleIdTokenCredential.email,
                 googleIdTokenCredential.displayName,
+                claims["given_name"],
+                claims["family_name"],
                 googleIdTokenCredential.profilePictureUri?.toString(),
-                googleIdTokenCredential.idToken,
+                idToken,
                 null, null,
                 googleIdTokenCredential.id,
                 googleIdTokenCredential.phoneNumber,
@@ -1593,7 +1973,8 @@ object AuthAdapter {
         } else {
             Log.w(TAG, "Unsupported credential type: ${credential.type}")
             if (consumeGoogleGeneration(origin, generation)) {
-                nativeOnLoginError(origin, AuthErrorCode.UNKNOWN.code, "Unsupported credential type: ${credential.type}", generation)
+                val code = if (expectedNonce != null) AuthErrorCode.NO_ID_TOKEN else AuthErrorCode.UNKNOWN
+                nativeOnLoginError(origin, code.code, "Unsupported credential type: ${credential.type}", generation)
             }
         }
     }
@@ -1668,10 +2049,13 @@ object AuthAdapter {
             val mergedScopes = (oneTapSession.scopes + scopes.toList()).distinct()
             if (!synchronized(this) { acceptsPendingGoogleGenerationLocked("scopes", generation) }) return
             val credential = oneTapSession.credential
+            val claims = MicrosoftAuthConfig.decodeJwt(credential.idToken)
             if (!nativeOnLoginSuccess(
                 "scopes", "google",
                 credential.email,
                 credential.displayName,
+                claims["given_name"],
+                claims["family_name"],
                 credential.profilePictureUri?.toString(),
                 credential.idToken,
                 null, null,
@@ -1916,8 +2300,9 @@ object AuthAdapter {
             }
             if (!synchronized(this) { acceptsSilentGenerationLocked(generation) }) return
             val expirationTime = getGoogleExpirationTimeMs(account.idToken)
+            val claims = MicrosoftAuthConfig.decodeJwt(account.idToken.orEmpty())
             if (!nativeOnLoginSuccess("silent", "google", account.email, account.displayName,
-                account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
+                claims["given_name"], claims["family_name"], account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
                 account.id, null, hostedDomain, account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), expirationTime, generation)
             ) return
             synchronized(this) {
@@ -1994,6 +2379,8 @@ object AuthAdapter {
                             "microsoft",
                             completion.email,
                             completion.name,
+                            null,
+                            null,
                             null,
                             completion.idToken,
                             completion.accessToken,

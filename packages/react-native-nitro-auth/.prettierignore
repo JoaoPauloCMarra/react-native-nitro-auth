@@ -5,3 +5,4 @@ lib
 nitrogen/generated
 coverage
 cpp/build
+src/ui/social-button-assets.ts

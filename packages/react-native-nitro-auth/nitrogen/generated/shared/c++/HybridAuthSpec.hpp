@@ -15,10 +15,20 @@
 
 // Forward declaration of `AuthUser` to properly resolve imports.
 namespace margelo::nitro::NitroAuth { struct AuthUser; }
-// Forward declaration of `AuthProvider` to properly resolve imports.
-namespace margelo::nitro::NitroAuth { enum class AuthProvider; }
+// Forward declaration of `AuthNonce` to properly resolve imports.
+namespace margelo::nitro::NitroAuth { struct AuthNonce; }
+// Forward declaration of `AuthCredential` to properly resolve imports.
+namespace margelo::nitro::NitroAuth { struct AuthCredential; }
+// Forward declaration of `CredentialProvider` to properly resolve imports.
+namespace margelo::nitro::NitroAuth { enum class CredentialProvider; }
 // Forward declaration of `LoginOptions` to properly resolve imports.
 namespace margelo::nitro::NitroAuth { struct LoginOptions; }
+// Forward declaration of `AuthSessionSnapshot` to properly resolve imports.
+namespace margelo::nitro::NitroAuth { struct AuthSessionSnapshot; }
+// Forward declaration of `AuthProvider` to properly resolve imports.
+namespace margelo::nitro::NitroAuth { enum class AuthProvider; }
+// Forward declaration of `ScopeRevocationResult` to properly resolve imports.
+namespace margelo::nitro::NitroAuth { struct ScopeRevocationResult; }
 // Forward declaration of `AuthTokens` to properly resolve imports.
 namespace margelo::nitro::NitroAuth { struct AuthTokens; }
 // Forward declaration of `AuthEvent` to properly resolve imports.
@@ -28,11 +38,16 @@ namespace margelo::nitro::NitroAuth { struct AuthEvent; }
 #include <optional>
 #include <string>
 #include <vector>
+#include "AuthNonce.hpp"
 #include <NitroModules/Promise.hpp>
-#include "AuthProvider.hpp"
+#include "AuthCredential.hpp"
+#include "CredentialProvider.hpp"
 #include "LoginOptions.hpp"
-#include "AuthTokens.hpp"
+#include "AuthSessionSnapshot.hpp"
 #include <functional>
+#include "AuthProvider.hpp"
+#include "ScopeRevocationResult.hpp"
+#include "AuthTokens.hpp"
 #include "AuthEvent.hpp"
 
 namespace margelo::nitro::NitroAuth {
@@ -68,9 +83,15 @@ namespace margelo::nitro::NitroAuth {
 
     public:
       // Methods
+      virtual std::shared_ptr<Promise<AuthNonce>> createNonce() = 0;
+      virtual std::shared_ptr<Promise<AuthCredential>> getCredential(CredentialProvider provider, const std::optional<LoginOptions>& options) = 0;
+      virtual AuthSessionSnapshot getSessionSnapshot() = 0;
+      virtual std::function<void()> onSessionChanged(const std::function<void(const AuthSessionSnapshot& /* snapshot */)>& callback) = 0;
       virtual std::shared_ptr<Promise<void>> login(AuthProvider provider, const std::optional<LoginOptions>& options) = 0;
+      virtual std::shared_ptr<Promise<AuthUser>> loginAndGetUser(AuthProvider provider, const std::optional<LoginOptions>& options) = 0;
       virtual std::shared_ptr<Promise<void>> requestScopes(const std::vector<std::string>& scopes) = 0;
       virtual std::shared_ptr<Promise<void>> revokeScopes(const std::vector<std::string>& scopes) = 0;
+      virtual std::shared_ptr<Promise<ScopeRevocationResult>> revokeScopesWithResult(const std::vector<std::string>& scopes) = 0;
       virtual std::shared_ptr<Promise<void>> revokeAccess() = 0;
       virtual std::shared_ptr<Promise<std::optional<std::string>>> getAccessToken() = 0;
       virtual std::shared_ptr<Promise<AuthTokens>> refreshToken() = 0;

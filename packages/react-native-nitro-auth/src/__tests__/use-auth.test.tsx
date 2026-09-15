@@ -3,6 +3,7 @@ import { AuthService } from "../service";
 import { useAuth } from "../use-auth";
 import { AuthError } from "../utils/auth-error";
 import type {
+  AuthSessionSnapshot,
   AuthProvider,
   AuthTokens,
   AuthUser,
@@ -14,6 +15,7 @@ import type {
 // Module-level mock state
 let mockCurrentUser: AuthUser | undefined = undefined;
 let mockScopes: string[] = [];
+let mockSnapshotRevision = 0;
 
 type LoginFn = (
   provider: AuthProvider,
@@ -66,6 +68,20 @@ const mockSilentRestore = jest.fn<Promise<void>, []>();
 // Mock the service module
 jest.mock("../service", () => ({
   AuthService: {
+    getSessionSnapshot: () => ({
+      revision: ++mockSnapshotRevision,
+      user: mockCurrentUser,
+      scopes: mockScopes,
+    }),
+    onSessionChanged: (callback: (snapshot: AuthSessionSnapshot) => void) =>
+      mockOnAuthStateChanged((user) => {
+        mockCurrentUser = user;
+        callback({
+          revision: ++mockSnapshotRevision,
+          scopes: mockScopes,
+          ...(user ? { user } : {}),
+        });
+      }),
     get currentUser() {
       return mockCurrentUser;
     },
@@ -499,8 +515,8 @@ describe("useAuth", () => {
     });
 
     it("callback fires and syncs state from service", () => {
-      let tokensCallback: ((tokens: AuthTokens) => void) | null = null;
-      mockOnTokensRefreshed.mockImplementation((cb) => {
+      let tokensCallback: ((user: AuthUser | undefined) => void) | null = null;
+      mockOnAuthStateChanged.mockImplementation((cb) => {
         tokensCallback = cb;
         return () => {
           tokensCallback = null;
@@ -517,7 +533,7 @@ describe("useAuth", () => {
       mockScopes = ["email", "profile"];
 
       act(() => {
-        tokensCallback?.({ accessToken: "new_access", idToken: "new_id" });
+        tokensCallback?.(updatedUser);
       });
 
       expect(result.current.user).toEqual(updatedUser);

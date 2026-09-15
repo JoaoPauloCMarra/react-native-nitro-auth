@@ -3,6 +3,7 @@ import GoogleSignIn
 import AuthenticationServices
 import NitroModules
 import CommonCrypto
+import Security
 
 @objc
 public class AuthAdapter: NSObject {
@@ -64,6 +65,26 @@ public class AuthAdapter: NSObject {
   static let formUrlEncodedAllowedCharacters = CharacterSet(
     charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
   )
+
+  @objc
+  public static func createNonce() -> NSDictionary? {
+    var randomBytes = [UInt8](repeating: 0, count: 32)
+    guard SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes) == errSecSuccess else {
+      return nil
+    }
+
+    let raw = Data(randomBytes).base64EncodedString()
+      .replacingOccurrences(of: "+", with: "-")
+      .replacingOccurrences(of: "/", with: "_")
+      .replacingOccurrences(of: "=", with: "")
+    guard let data = raw.data(using: .ascii) else { return nil }
+    var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+    data.withUnsafeBytes {
+      _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &digest)
+    }
+    let hashed = Data(digest).map { String(format: "%02x", $0) }.joined()
+    return ["raw": raw, "hashed": hashed] as NSDictionary
+  }
 
   static func advanceOperation() -> AuthOperationToken {
     tokenStoreLock.lock()
@@ -127,7 +148,7 @@ public class AuthAdapter: NSObject {
     return { data, code, message in
       guard gate.claim() else { return }
       guard isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
       finishInteractiveAuth()
@@ -140,7 +161,7 @@ public class AuthAdapter: NSObject {
     return { data, code, message in
       guard gate.claim() else { return }
       guard isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
       completion(data, code, message)
@@ -152,12 +173,12 @@ public class AuthAdapter: NSObject {
     let operation = beginOperation()
     if provider == "google" {
       guard beginInteractiveAuth() else {
-        completion(nil, NSNumber(value: AuthErrorCode.operationInProgress.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.operationInProgress.rawValue), nil)
         return
       }
       let complete = completeInteractiveAuth(operation, completion)
       guard let clientId = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String, !clientId.isEmpty else {
-        complete(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+        complete(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
         return
       }
 
@@ -165,11 +186,11 @@ public class AuthAdapter: NSObject {
 
       DispatchQueue.main.async {
         guard self.isCurrentOperation(operation) else {
-          complete(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          complete(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
         guard let rootVC = presentingViewController() else {
-          complete(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+          complete(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
           return
         }
 
@@ -182,11 +203,11 @@ public class AuthAdapter: NSObject {
 
         let performSignIn = {
           guard self.isCurrentOperation(operation) else {
-            complete(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+            complete(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
             return
           }
           GIDSignIn.sharedInstance.signIn(withPresenting: rootVC, hint: effectiveHint, additionalScopes: additionalScopes, nonce: nonce) { result, error in
-            self.handleGoogleResult(result, error: error, operation: operation, completion: complete)
+            self.handleGoogleResult(result, error: error, operation: operation, expectedNonce: nonce, completion: complete)
           }
         }
 
@@ -200,7 +221,7 @@ public class AuthAdapter: NSObject {
       }
     } else if provider == "apple" {
       guard beginInteractiveAuth() else {
-        completion(nil, NSNumber(value: AuthErrorCode.operationInProgress.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.operationInProgress.rawValue), nil)
         return
       }
       let complete = completeInteractiveAuth(operation, completion)
@@ -229,11 +250,11 @@ public class AuthAdapter: NSObject {
 
       DispatchQueue.main.async {
         guard self.isCurrentOperation(operation) else {
-          complete(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          complete(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
         guard let window = activeWindow() else {
-          complete(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+          complete(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
           return
         }
         let contextProvider = AppleSignInContextProvider(anchor: window)
@@ -244,7 +265,7 @@ public class AuthAdapter: NSObject {
     } else if provider == "microsoft" {
       loginMicrosoft(scopes: scopes, loginHint: loginHint, tenant: tenant, prompt: prompt, operation: operation, completion: completion)
     } else {
-      completion(nil, NSNumber(value: AuthErrorCode.unsupportedProvider.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.unsupportedProvider.rawValue), nil)
     }
   }
 
@@ -255,11 +276,11 @@ public class AuthAdapter: NSObject {
       let complete = completeOperation(operation, completion)
       DispatchQueue.main.async {
         guard self.isCurrentOperation(operation) else {
-          complete(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          complete(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
         guard let rootVC = presentingViewController() else {
-          complete(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+          complete(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
           return
         }
         guard self.invokeGoogleAddScopes(
@@ -271,7 +292,7 @@ public class AuthAdapter: NSObject {
             self.handleGoogleResult(result, error: error, operation: operation, completion: complete)
           }
         ) else {
-          complete(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          complete(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
       }
@@ -282,7 +303,7 @@ public class AuthAdapter: NSObject {
     let currentScopes = inMemoryMicrosoftScopes
     tokenStoreLock.unlock()
     guard hasRefreshToken else {
-      completion(nil, NSNumber(value: AuthErrorCode.notSignedIn.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.notSignedIn.rawValue), nil)
       return
     }
     let mergedScopes = (currentScopes + scopes).reduce(into: [String]()) { acc, s in
@@ -297,7 +318,7 @@ public class AuthAdapter: NSObject {
     if let currentUser = GIDSignIn.sharedInstance.currentUser {
       currentUser.refreshTokensIfNeeded { user, error in
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
         if let error = error {
@@ -305,7 +326,7 @@ public class AuthAdapter: NSObject {
           return
         }
         guard let user = user else {
-          completion(nil, NSNumber(value: AuthErrorCode.unknown.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.unknown.rawValue), nil)
           return
         }
         let data: [String: Any] = [
@@ -326,7 +347,7 @@ public class AuthAdapter: NSObject {
     if Bundle.main.object(forInfoDictionaryKey: "GIDClientID") != nil {
       GIDSignIn.sharedInstance.restorePreviousSignIn { user, error in
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
         if let error = error {

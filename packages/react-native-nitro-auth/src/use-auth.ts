@@ -7,7 +7,10 @@ import type {
 } from "./Auth.nitro";
 import type { AuthLogin, ProviderLoginOptions } from "./provider-options";
 import { AuthService } from "./service";
+import { createSessionStore } from "./session-store";
 import { AuthError } from "./utils/auth-error";
+
+const sessionStore = createSessionStore(AuthService);
 
 const EMPTY_SCOPES: string[] = [];
 
@@ -58,17 +61,22 @@ export type UseAuthReturn = AuthState & {
 };
 
 export function useAuth(): UseAuthReturn {
-  const [state, setState] = useState<AuthState>({
-    user: AuthService.currentUser,
-    scopes: normalizeScopes(AuthService.grantedScopes),
-    loading: false,
-    error: undefined,
+  const [state, setState] = useState<AuthState>(() => {
+    const snapshot = sessionStore.getSnapshot();
+    return {
+      user: snapshot.user,
+      scopes: snapshot.scopes,
+      loading: false,
+      error: undefined,
+    };
   });
 
   const syncStateFromService = useCallback(
     (nextLoading: boolean, nextError: AuthError | undefined) => {
-      const nextUser = AuthService.currentUser;
-      const nextScopes = normalizeScopes(AuthService.grantedScopes);
+      sessionStore.refresh();
+      const snapshot = sessionStore.getSnapshot();
+      const nextUser = snapshot.user;
+      const nextScopes = normalizeScopes(snapshot.scopes);
       setState((prev) => {
         if (
           prev.loading === nextLoading &&
@@ -213,32 +221,21 @@ export function useAuth(): UseAuthReturn {
   }, [syncStateFromService]);
 
   useEffect(() => {
-    const unsubscribeAuth = AuthService.onAuthStateChanged((currentUser) => {
-      const nextScopes = normalizeScopes(AuthService.grantedScopes);
+    const syncSnapshot = () => {
+      const snapshot = sessionStore.getSnapshot();
       setState((prev) => {
         if (
-          prev.user === currentUser &&
-          areScopesEqual(prev.scopes, nextScopes) &&
-          prev.loading === false
-        ) {
+          prev.user === snapshot.user &&
+          areScopesEqual(prev.scopes, snapshot.scopes)
+        )
           return prev;
-        }
-        return {
-          ...prev,
-          user: currentUser,
-          scopes: nextScopes,
-          loading: false,
-        };
+        return { ...prev, user: snapshot.user, scopes: snapshot.scopes };
       });
-    });
-    const unsubscribeTokens = AuthService.onTokensRefreshed?.(() => {
-      syncStateFromService(false, undefined);
-    });
-    return () => {
-      unsubscribeAuth();
-      unsubscribeTokens?.();
     };
-  }, [syncStateFromService]);
+    const unsubscribe = sessionStore.subscribe(syncSnapshot);
+    syncSnapshot();
+    return unsubscribe;
+  }, []);
 
   return useMemo(
     () => ({

@@ -5,7 +5,7 @@ import CommonCrypto
 extension AuthAdapter {
   static func loginMicrosoft(scopes: [String], loginHint: String?, tenant: String?, prompt: String?, operation: AuthAdapter.AuthOperationToken, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
     guard let clientId = Bundle.main.object(forInfoDictionaryKey: "MSALClientID") as? String, !clientId.isEmpty else {
-      completion(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       return
     }
     let effectiveTenant = tenant ?? Bundle.main.object(forInfoDictionaryKey: "MSALTenant") as? String ?? "common"
@@ -15,11 +15,11 @@ extension AuthAdapter {
     let effectivePrompt = prompt ?? "select_account"
 
     guard let codeVerifier = generateCodeVerifier() else {
-      completion(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       return
     }
     guard let codeChallenge = generateCodeChallenge(codeVerifier) else {
-      completion(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       return
     }
     let state = UUID().uuidString
@@ -27,12 +27,12 @@ extension AuthAdapter {
 
     let b2cDomain = Bundle.main.object(forInfoDictionaryKey: "MSALB2cDomain") as? String
     guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: effectiveTenant, b2cDomain: b2cDomain) else {
-      completion(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       return
     }
 
     guard var urlComponents = URLComponents(string: "\(authBaseUrl)oauth2/v2.0/authorize") else {
-      completion(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       return
     }
     urlComponents.queryItems = [
@@ -53,7 +53,7 @@ extension AuthAdapter {
     }
 
     guard let authUrl = urlComponents.url else {
-      completion(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       return
     }
 
@@ -61,17 +61,17 @@ extension AuthAdapter {
 
     DispatchQueue.main.async {
       guard self.isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
       guard self.activeMicrosoftWebAuthSession == nil else {
-        completion(nil, NSNumber(value: AuthErrorCode.operationInProgress.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.operationInProgress.rawValue), nil)
         return
       }
 
       let completeAndClearSession = { (data: NSDictionary?, code: NSNumber?, message: String?) in
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
         self.activeMicrosoftWebAuthSession = nil
@@ -83,18 +83,18 @@ extension AuthAdapter {
         if let error = error {
           let nsError = error as NSError
           if nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
-            completeAndClearSession(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nsError.localizedDescription)
+            completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nsError.localizedDescription)
           } else if nsError.domain.lowercased().contains("network") || nsError.code == NSURLErrorNotConnectedToInternet {
-            completeAndClearSession(nil, NSNumber(value: AuthErrorCode.networkError.rawValue), nsError.localizedDescription)
+            completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nsError.localizedDescription)
           } else {
-            completeAndClearSession(nil, NSNumber(value: AuthErrorCode.unknown.rawValue), nsError.localizedDescription)
+            completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.unknown.rawValue), nsError.localizedDescription)
           }
           return
         }
 
         guard let callbackURL = callbackURL,
               let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
-          completeAndClearSession(nil, NSNumber(value: AuthErrorCode.unknown.rawValue), nil)
+          completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.unknown.rawValue), nil)
           return
         }
 
@@ -110,17 +110,17 @@ extension AuthAdapter {
         }
 
         guard let returnedState = params["state"], returnedState == state else {
-          completeAndClearSession(nil, NSNumber(value: AuthErrorCode.invalidState.rawValue), nil)
+          completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.invalidState.rawValue), nil)
           return
         }
 
         guard let code = params["code"] else {
-          completeAndClearSession(nil, NSNumber(value: AuthErrorCode.tokenError.rawValue), nil)
+          completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.tokenError.rawValue), nil)
           return
         }
 
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
         self.activeMicrosoftWebAuthSession = nil
@@ -140,7 +140,7 @@ extension AuthAdapter {
       }
 
       guard let window = activeWindow() else {
-        completeAndClearSession(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+        completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
         return
       }
       let contextProvider = WebAuthContextProvider(anchor: window)
@@ -150,7 +150,7 @@ extension AuthAdapter {
       self.activeMicrosoftWebAuthSession = session
       self.activeMicrosoftWebAuthSessionEpoch = operation.epoch
       if !session.start() {
-        completeAndClearSession(nil, NSNumber(value: AuthErrorCode.unknown.rawValue), nil)
+        completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.unknown.rawValue), nil)
       }
     }
   }
@@ -202,17 +202,17 @@ extension AuthAdapter {
     completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void
   ) {
     guard isCurrentOperation(operation) else {
-      completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
       return
     }
     guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
           let tokenUrl = URL(string: "\(authBaseUrl)oauth2/v2.0/token") else {
       DispatchQueue.main.async {
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
-        completion(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       }
       return
     }
@@ -234,20 +234,20 @@ extension AuthAdapter {
     URLSession.shared.dataTask(with: request) { data, response, error in
       DispatchQueue.main.async {
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
         if let error = error {
-          completion(nil, NSNumber(value: AuthErrorCode.networkError.rawValue), error.localizedDescription)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), error.localizedDescription)
           return
         }
 
         guard let data = data,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
           if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-            completion(nil, NSNumber(value: AuthErrorCode.networkError.rawValue), nil)
+            completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nil)
           } else {
-            completion(nil, NSNumber(value: AuthErrorCode.parseError.rawValue), nil)
+            completion(nil, NSNumber(value: PlatformAuthErrorCode.parseError.rawValue), nil)
           }
           return
         }
@@ -258,18 +258,18 @@ extension AuthAdapter {
         }
 
         if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-          completion(nil, NSNumber(value: AuthErrorCode.networkError.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nil)
           return
         }
 
         guard let idToken = json["id_token"] as? String else {
-          completion(nil, NSNumber(value: AuthErrorCode.noIdToken.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.noIdToken.rawValue), nil)
           return
         }
 
         let claims = decodeJwt(idToken)
         guard claims["nonce"] == expectedNonce else {
-          completion(nil, NSNumber(value: AuthErrorCode.invalidNonce.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.invalidNonce.rawValue), nil)
           return
         }
 
@@ -285,11 +285,11 @@ extension AuthAdapter {
           }
           inMemoryMicrosoftScopes = resultScopes
         }) else {
-          completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
 
@@ -342,18 +342,18 @@ extension AuthAdapter {
     onResponse: @escaping (Data?, URLResponse?, Error?) -> Void
   ) {
     guard isCurrentOperation(operation) else {
-      completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
       return
     }
     guard let clientId = Bundle.main.object(forInfoDictionaryKey: "MSALClientID") as? String, !clientId.isEmpty else {
-      completion(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       return
     }
     let tenant = Bundle.main.object(forInfoDictionaryKey: "MSALTenant") as? String ?? "common"
     let b2cDomain = Bundle.main.object(forInfoDictionaryKey: "MSALB2cDomain") as? String
     guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
           let tokenUrl = URL(string: "\(authBaseUrl)oauth2/v2.0/token") else {
-      completion(nil, NSNumber(value: AuthErrorCode.configurationError.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       return
     }
     var request = URLRequest(url: tokenUrl)
@@ -378,17 +378,17 @@ extension AuthAdapter {
     let currentScopes = inMemoryMicrosoftScopes
     tokenStoreLock.unlock()
     guard let refreshToken = refreshToken else {
-      completion(nil, NSNumber(value: AuthErrorCode.notSignedIn.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.notSignedIn.rawValue), nil)
       return
     }
 
     requestMicrosoftTokenRefresh(refreshToken: refreshToken, operation: operation, completion: completion) { data, response, error in
       guard self.isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
       if let error = error {
-        completion(nil, NSNumber(value: AuthErrorCode.networkError.rawValue), error.localizedDescription)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), error.localizedDescription)
         return
       }
       if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
@@ -397,14 +397,14 @@ extension AuthAdapter {
            let errorCode = json["error"] as? String {
           completion(nil, NSNumber(value: mapOAuthError(errorCode, context: "refresh").rawValue), json["error_description"] as? String)
         } else {
-          completion(nil, NSNumber(value: AuthErrorCode.networkError.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nil)
         }
         return
       }
       guard let data = data,
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let idToken = json["id_token"] as? String else {
-        completion(nil, NSNumber(value: AuthErrorCode.parseError.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.parseError.rawValue), nil)
         return
       }
 
@@ -419,11 +419,11 @@ extension AuthAdapter {
           inMemoryMicrosoftRefreshToken = newRefreshToken
         }
       }) else {
-        completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
       guard self.isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
 
@@ -447,24 +447,24 @@ extension AuthAdapter {
     let refreshToken = inMemoryMicrosoftRefreshToken
     tokenStoreLock.unlock()
     guard let refreshToken = refreshToken else {
-      completion(nil, NSNumber(value: AuthErrorCode.notSignedIn.rawValue), nil)
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.notSignedIn.rawValue), nil)
       return
     }
     requestMicrosoftTokenRefresh(refreshToken: refreshToken, operation: operation, completion: completion) { data, response, error in
       guard self.isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
       if let error = error {
-        completion(nil, NSNumber(value: AuthErrorCode.networkError.rawValue), error.localizedDescription)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), error.localizedDescription)
         return
       }
       guard let data = data,
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
         if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-          completion(nil, NSNumber(value: AuthErrorCode.networkError.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nil)
         } else {
-          completion(nil, NSNumber(value: AuthErrorCode.parseError.rawValue), nil)
+          completion(nil, NSNumber(value: PlatformAuthErrorCode.parseError.rawValue), nil)
         }
         return
       }
@@ -473,7 +473,7 @@ extension AuthAdapter {
         return
       }
       if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-        completion(nil, NSNumber(value: AuthErrorCode.networkError.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nil)
         return
       }
       let idToken = json["id_token"] as? String ?? ""
@@ -486,11 +486,11 @@ extension AuthAdapter {
           inMemoryMicrosoftRefreshToken = newRefreshToken
         }
       }) else {
-        completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
       guard self.isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: AuthErrorCode.cancelled.rawValue), nil)
+        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
       let tokensData: [String: Any] = [

@@ -8,6 +8,8 @@ type TestAuthUser = {
   provider: string;
   email?: string;
   name?: string;
+  firstName?: string;
+  lastName?: string;
   photo?: string;
   accessToken?: string;
   idToken?: string;
@@ -26,6 +28,7 @@ type TestAuthEvent = {
 type TestAuthModule = {
   currentUser: TestAuthUser | undefined;
   grantedScopes: string[];
+  createNonce: () => Promise<{ raw: string; hashed: string }>;
   logout: () => void;
   login: (
     provider: "google" | "apple" | "microsoft",
@@ -160,6 +163,16 @@ describe("AuthModule (web)", () => {
         value: () => "test-random-uuid",
       });
     }
+    Object.defineProperty(globalThis.crypto, "getRandomValues", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(<T extends ArrayBufferView>(array: T) => {
+        new Uint8Array(array.buffer, array.byteOffset, array.byteLength).fill(
+          1,
+        );
+        return array;
+      }),
+    });
     if (typeof globalThis.TextEncoder !== "function") {
       Object.defineProperty(globalThis, "TextEncoder", {
         configurable: true,
@@ -194,6 +207,130 @@ describe("AuthModule (web)", () => {
       writable: true,
       value: originalFetch,
     });
+  });
+
+  it("creates a random raw nonce and SHA-256 hex hash with WebCrypto", async () => {
+    const digest = globalThis.crypto.subtle.digest as jest.Mock;
+    const auth = await loadAuthModule();
+
+    const result = await auth.createNonce();
+
+    expect(result.raw).toBe("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE");
+    expect(result.hashed).toBe("00".repeat(32));
+    expect(globalThis.crypto.getRandomValues).toHaveBeenCalledTimes(1);
+    expect(digest).toHaveBeenCalledWith(
+      "SHA-256",
+      new TextEncoder().encode(result.raw),
+    );
+  });
+
+  it("does not persist a credential-only login when token persistence is enabled", async () => {
+    jest.useFakeTimers();
+    const idToken = createJwtWithPayload({
+      email: "credential@example.com",
+      nonce: "00".repeat(32),
+    });
+    const popup = {
+      closed: false,
+      close: jest.fn(),
+      location: { href: "" },
+    } as unknown as Window;
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: jest.fn((url: string) => {
+        const state = new URL(url).searchParams.get("state");
+        popup.location.href = `${window.location.origin}#id_token=${idToken}&state=${state}&expires_in=3600`;
+        return popup;
+      }),
+    });
+    const setItem = jest.spyOn(Storage.prototype, "setItem");
+    const auth = await loadAuthService({
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+      nitroAuthPersistTokensOnWeb: true,
+    });
+
+    const observedUsers: unknown[] = [];
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) observedUsers.push(user);
+    });
+    const credentialPromise = auth.getCredential("google");
+    await Promise.all([
+      expect(credentialPromise).resolves.toMatchObject({
+        provider: "google",
+        idToken,
+      }),
+      jest.advanceTimersByTimeAsync(501),
+    ]);
+
+    const persistedAuthKeys = setItem.mock.calls
+      .map(([key]) => key)
+      .filter((key) => key === CACHE_KEY || key === SCOPES_KEY);
+    expect(observedUsers).toEqual([]);
+    unsubscribe();
+    expect(persistedAuthKeys).toEqual([]);
+    expect(sessionStorage.getItem(CACHE_KEY)).toBeNull();
+    expect(sessionStorage.getItem(SCOPES_KEY)).toBeNull();
+  });
+
+  it("rejects credential acquisition without changing an existing web session", async () => {
+    const cachedUser = {
+      provider: "google",
+      email: "existing@example.com",
+      idToken: "existing-id-token",
+    };
+    const cachedUserValue = JSON.stringify(cachedUser);
+    const cachedScopesValue = JSON.stringify(["openid", "email"]);
+    sessionStorage.setItem(CACHE_KEY, cachedUserValue);
+    sessionStorage.setItem(SCOPES_KEY, cachedScopesValue);
+
+    const popup = jest.fn(() => null);
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: popup,
+    });
+    const randomValues = globalThis.crypto.getRandomValues as jest.Mock;
+    const digest = globalThis.crypto.subtle.digest as jest.Mock;
+    const setItem = jest.spyOn(Storage.prototype, "setItem");
+    const removeItem = jest.spyOn(Storage.prototype, "removeItem");
+    const auth = await loadAuthService({
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+      nitroAuthPersistTokensOnWeb: true,
+    });
+    const existingUser = auth.currentUser;
+    const existingScopes = auth.grantedScopes;
+    const userListener = jest.fn();
+    const eventListener = jest.fn();
+    const unsubscribeUser = auth.onAuthStateChanged(userListener);
+    const unsubscribeEvent = auth.onAuthEvent(eventListener);
+    userListener.mockClear();
+    setItem.mockClear();
+    removeItem.mockClear();
+    randomValues.mockClear();
+    digest.mockClear();
+
+    await expect(auth.getCredential("google")).rejects.toMatchObject({
+      code: "invalid_state",
+      operation: "getCredential",
+    });
+
+    expect(popup).not.toHaveBeenCalled();
+    expect(randomValues).not.toHaveBeenCalled();
+    expect(digest).not.toHaveBeenCalled();
+    expect(auth.currentUser).toBe(existingUser);
+    expect(auth.grantedScopes).toEqual(existingScopes);
+    expect(sessionStorage.getItem(CACHE_KEY)).toBe(cachedUserValue);
+    expect(sessionStorage.getItem(SCOPES_KEY)).toBe(cachedScopesValue);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(userListener).not.toHaveBeenCalled();
+    expect(eventListener.mock.calls.map(([event]) => event.type)).toEqual([
+      "operation_started",
+      "operation_failed",
+    ]);
+    unsubscribeUser();
+    unsubscribeEvent();
   });
 
   it("defaults to session storage and strips sensitive tokens from persisted user", async () => {
@@ -609,6 +746,55 @@ describe("AuthModule (web)", () => {
 
     auth.onTokensRefreshed(listenerA);
     unsubscribeB = auth.onTokensRefreshed(listenerB);
+
+    await auth.refreshToken();
+
+    expect(listenerA).toHaveBeenCalledTimes(1);
+    expect(listenerB).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates throwing token listeners after a successful refresh", async () => {
+    const expSoon = Date.now() + 60_000;
+
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "microsoft",
+        idToken: "cached-id-token",
+        expirationTime: expSoon,
+      }),
+    );
+    localStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
+
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: true,
+      microsoftClientId: "test-client-id",
+    });
+
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(
+        async () =>
+          ({
+            ok: true,
+            json: async () => ({
+              id_token: "cached-id-token",
+              access_token: "new-access-token",
+              expires_in: 3600,
+            }),
+          }) as Response,
+      ),
+    });
+
+    const listenerA = jest.fn(() => {
+      throw new Error("listener failed");
+    });
+    const listenerB = jest.fn();
+
+    auth.onTokensRefreshed(listenerA);
+    auth.onTokensRefreshed(listenerB);
 
     await auth.refreshToken();
 
@@ -1193,6 +1379,8 @@ describe("AuthModule (web)", () => {
         provider: "google",
         email: "pii@example.com",
         name: "PII Name",
+        firstName: "PII",
+        lastName: "Name",
         photo: "https://example.com/photo.jpg",
         userId: "sub-123",
       }),
@@ -1204,6 +1392,8 @@ describe("AuthModule (web)", () => {
     });
     expect(auth.currentUser?.email).toBeUndefined();
     expect(auth.currentUser?.name).toBeUndefined();
+    expect(auth.currentUser?.firstName).toBeUndefined();
+    expect(auth.currentUser?.lastName).toBeUndefined();
     expect(auth.currentUser?.photo).toBeUndefined();
     expect(auth.currentUser?.userId).toBe("sub-123");
   });
@@ -1905,6 +2095,35 @@ describe("AuthModule (web)", () => {
     );
   });
 
+  it("maps fullName to Apple's web name scope", async () => {
+    const initMock = jest.fn();
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: {
+        auth: {
+          init: initMock,
+          signIn: jest.fn(async () => ({
+            authorization: {
+              id_token: createJwtWithPayload({ nonce: "test-random-uuid" }),
+            },
+          })),
+        },
+      },
+    });
+
+    const auth = await loadAuthModule({
+      appleWebClientId: "apple-client-id",
+    });
+
+    await expect(
+      auth.login("apple", { scopes: ["email", "fullName"] }),
+    ).resolves.toBeUndefined();
+    expect(initMock).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "email name" }),
+    );
+  });
+
   it("isolates throwing auth-state listeners", async () => {
     const auth = await loadAuthModule();
     const throwing = jest.fn(() => {
@@ -2096,6 +2315,8 @@ describe("AuthModule (web)", () => {
 
     await auth.login("apple");
     expect(auth.currentUser?.name).toBe("Jane Doe");
+    expect(auth.currentUser?.firstName).toBe("Jane");
+    expect(auth.currentUser?.lastName).toBe("Doe");
   });
 
   it("resetAuthModule ignores foreign instances", async () => {

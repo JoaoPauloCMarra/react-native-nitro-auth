@@ -41,6 +41,7 @@ const appConfig = {
       [
         "react-native-nitro-auth",
         {
+          googleButtonFont: true,
           ios: {
             googleClientId: process.env.GOOGLE_IOS_CLIENT_ID,
             googleServerClientId: process.env.GOOGLE_SERVER_CLIENT_ID,
@@ -52,6 +53,10 @@ const appConfig = {
           },
           android: {
             googleClientId: process.env.GOOGLE_WEB_CLIENT_ID,
+            appleAndroidBrokerUrl: process.env.APPLE_ANDROID_BROKER_URL,
+            ...(process.env.APPLE_ANDROID_BROKER_URL
+              ? { appleAndroidCallbackScheme: "nitro-auth-example" }
+              : {}),
             microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
             microsoftTenant: process.env.MICROSOFT_TENANT,
             microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,

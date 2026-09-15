@@ -1,0 +1,631 @@
+{
+  "retrieved": "2026-09-15",
+  "googleSource": "https://developers.google.com/static/identity/images/signin-assets.zip",
+  "appleSource": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+  "appleSdkSha256": "d443b6ff67b95e7d5811d53447365c980c9c4f3dd13317024853672298d75790",
+  "marks": [
+    {
+      "file": "google-logo.png",
+      "source": "Google identity signin-assets: standalone G mark",
+      "sha256": "d1ce9c2af0b10a7333abc99bc706f9a6a199e5b65bf3e3009624f076b8638e6a",
+      "width": 200,
+      "height": 204
+    },
+    {
+      "file": "apple-mark-light.png",
+      "source": "Apple JS SDK black logo, path traced to a transparent mark",
+      "sha256": "871327566b715d98d53bdaba79f4f3253597392b8b39d3d10cc4b403450cf763",
+      "width": 186,
+      "height": 228
+    },
+    {
+      "file": "apple-mark-dark.png",
+      "source": "Apple JS SDK white logo, path traced to a transparent mark",
+      "sha256": "dc0a08f1c125cfec325455aa412a4390d578ae88f70b6e97f959de32ff1ed3cb",
+      "width": 186,
+      "height": 228
+    }
+  ],
+  "entries": [
+    {
+      "file": "google-android-light-pill.png",
+      "source": "Android + Web/PNG @4x/Light/Theme=Light, Show text=Yes, Shape=Pill, Platform=Android+Web@4x.png",
+      "sha256": "2f30a746fd0acc72417c460139f3a2ae9f93d3e31bb6f44181719556ec54a2d5"
+    },
+    {
+      "file": "google-android-light-pill.svg",
+      "source": "Android + Web/SVG/Light/Theme=Light, Show text=Yes, Shape=Pill, Platform=Android+Web.svg",
+      "sha256": "8841f353d5a6a2957fdfe57829da325d35f6c301508f80f5ce23b830677926df",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "google-android-light-rectangular.png",
+      "source": "Android + Web/PNG @4x/Light/Theme=Light, Show text=Yes, Shape=Square, Platform=Android+Web@4x.png",
+      "sha256": "e048546f162b43a5f3809796f88df02a8e13f07ca1280a9c1635018956e05c05"
+    },
+    {
+      "file": "google-android-light-rectangular.svg",
+      "source": "Android + Web/SVG/Light/Theme=Light, Show text=Yes, Shape=Square, Platform=Android+Web.svg",
+      "sha256": "81a3c7fd7a1e21b5b8ce96a8ac9bff92eb6c1503cadb9f44396df773e5515f33",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "google-android-dark-pill.png",
+      "source": "Android + Web/PNG @4x/Dark/Theme=Dark, Show text=Yes, Shape=Pill, Platform=Android+Web@4x.png",
+      "sha256": "1aa891e26e1d9ff7ad15e7e56874f3e15daa3e85c74c674fa763badc37417b55"
+    },
+    {
+      "file": "google-android-dark-pill.svg",
+      "source": "Android + Web/SVG/Dark/Theme=Dark, Show text=Yes, Shape=Pill, Platform=Android+Web.svg",
+      "sha256": "509b600a6c0491550cf9503196858fcc8424a6023c02a47ca56c1272162d050a",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "google-android-dark-rectangular.png",
+      "source": "Android + Web/PNG @4x/Dark/Theme=Dark, Show text=Yes, Shape=Square, Platform=Android+Web@4x.png",
+      "sha256": "1c8c1b94727499d5e8d98a86199819f5c1e711b15b805d53a9f85aa308940656"
+    },
+    {
+      "file": "google-android-dark-rectangular.svg",
+      "source": "Android + Web/SVG/Dark/Theme=Dark, Show text=Yes, Shape=Square, Platform=Android+Web.svg",
+      "sha256": "9ce53eb47f7212097b089cd39691b499dc4db87ed893f4f5bbef07ec4ae51d6b",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "google-ios-light-pill.png",
+      "source": "iOS/PNG @4x/Light/Theme=Light, Show text=Yes, Shape=Pill, Platform=iOS@4x.png",
+      "sha256": "fa1bcf0cd9dae77bfce3f2994e0cd70b6d942384ee6e72768c84066c35236791"
+    },
+    {
+      "file": "google-ios-light-pill.svg",
+      "source": "iOS/SVG/Light/Theme=Light, Show text=Yes, Shape=Pill, Platform=iOS.svg",
+      "sha256": "a02c858b73d412d339e9cc132a3d44e10a19c7d19ed97f011c53af2777fcc017",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "google-ios-light-rectangular.png",
+      "source": "iOS/PNG @4x/Light/Theme=Light, Show text=Yes, Shape=Square, Platform=iOS@4x.png",
+      "sha256": "d7336b22bbffc93f15f9a072e3626f03ffa6e2c5f4dc283ecf8f94927d52e26b"
+    },
+    {
+      "file": "google-ios-light-rectangular.svg",
+      "source": "iOS/SVG/Light/Theme=Light, Show text=Yes, Shape=Square, Platform=iOS.svg",
+      "sha256": "ff51b8c61779660c4b6306092a38aeac9dbc29116832e73a3c1b071284561c60",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "google-ios-dark-pill.png",
+      "source": "iOS/PNG @4x/Dark/Theme=Dark, Show text=Yes, Shape=Pill, Platform=iOS@4x.png",
+      "sha256": "0886fb1b07efc95e4866fa03dd8caea7f5898b9da7d90e18ebb1c26b4eeffb57"
+    },
+    {
+      "file": "google-ios-dark-pill.svg",
+      "source": "iOS/SVG/Dark/Theme=Dark, Show text=Yes, Shape=Pill, Platform=iOS.svg",
+      "sha256": "970f7124aa419ce47b05521d8561a541abef1810d8d7c77215e7a15b496fc601",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "google-ios-dark-rectangular.png",
+      "source": "iOS/PNG @4x/Dark/Theme=Dark, Show text=Yes, Shape=Square, Platform=iOS@4x.png",
+      "sha256": "2a28c536cb9cc0f5ebce19d4df92891ca9e52127fb168a8ba874a17cbede9245"
+    },
+    {
+      "file": "google-ios-dark-rectangular.svg",
+      "source": "iOS/SVG/Dark/Theme=Dark, Show text=Yes, Shape=Square, Platform=iOS.svg",
+      "sha256": "67ced5809c3b264a2ce9a5445512b5bc307a1f657bb726118fd7f889303ac76b",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "apple-android-light-pill.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "center-align",
+        "type": "sign-in",
+        "color": "white",
+        "border": true,
+        "borderRadius": 50,
+        "width": 180,
+        "height": 40,
+        "locale": "en_US",
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "f554412ca36bddb8428f57230aa70a20fff5b58dd3a2bc7f116f17ce773fbf08"
+    },
+    {
+      "file": "apple-android-light-pill.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "9f9b23143c2d137c0047b504be62dc3bc901a659c60a467e35556373af705e63",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "apple-android-light-rectangular.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "center-align",
+        "type": "sign-in",
+        "color": "white",
+        "border": true,
+        "borderRadius": 8,
+        "width": 180,
+        "height": 40,
+        "locale": "en_US",
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "6d963acc37b2ea54040c4a9eb76ce940ef514fd6dc02df707568d4fc5cda946c"
+    },
+    {
+      "file": "apple-android-light-rectangular.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "2ee6fb211eeaf996791dd977823a40033cf4a36b8e1e958dd4c30f41c8e27187",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "apple-android-dark-pill.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "center-align",
+        "type": "sign-in",
+        "color": "black",
+        "border": false,
+        "borderRadius": 50,
+        "width": 180,
+        "height": 40,
+        "locale": "en_US",
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "71447313f292c0ea36903a15d7ee150ebaa36a9675d426150afa71108bbeac12"
+    },
+    {
+      "file": "apple-android-dark-pill.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "b6c3c5cc741d793877f8af463a929b89f7950de356e34e734c1db0ff435a6618",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "apple-android-dark-rectangular.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "center-align",
+        "type": "sign-in",
+        "color": "black",
+        "border": false,
+        "borderRadius": 8,
+        "width": 180,
+        "height": 40,
+        "locale": "en_US",
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "622a619151aa3d7c0b71e47db75cf3f0a9cb05f033e16bf2d1b8f9fc68b9f59d"
+    },
+    {
+      "file": "apple-android-dark-rectangular.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "d97615468467da7b939798a72d512673bd50fc9d5c5315fad263cc9df3b8af9b",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "apple-ios-light-pill.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "center-align",
+        "type": "sign-in",
+        "color": "white",
+        "border": true,
+        "borderRadius": 50,
+        "width": 188,
+        "height": 44,
+        "locale": "en_US",
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "05da697b3705b012f03ddeca1d1b58e37698d70d05c852bcab6cc658e7277519"
+    },
+    {
+      "file": "apple-ios-light-pill.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "185e7ba4896320f427c5f4baa6f9ff0bf93478c7a0f8e6d48c488bf141003572",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "apple-ios-light-rectangular.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "center-align",
+        "type": "sign-in",
+        "color": "white",
+        "border": true,
+        "borderRadius": 8,
+        "width": 188,
+        "height": 44,
+        "locale": "en_US",
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "95f4cd303bff7205999f7eacd47250c073e8b7ce25bfb54048c9dfab0b2d1704"
+    },
+    {
+      "file": "apple-ios-light-rectangular.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "91d4e90a127eb26614220592e11993a2cbc59cded4ae8a9b393df83a52f7103e",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "apple-ios-dark-pill.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "center-align",
+        "type": "sign-in",
+        "color": "black",
+        "border": false,
+        "borderRadius": 50,
+        "width": 188,
+        "height": 44,
+        "locale": "en_US",
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "41b042c8dbae2ffb6447040f999a965526215fece0192a17228c3dd84d1a4de6"
+    },
+    {
+      "file": "apple-ios-dark-pill.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "3125cfd33e03b930775401f665ef43d429f16fc8a11a26998f9f09264e09cd7f",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "apple-ios-dark-rectangular.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "center-align",
+        "type": "sign-in",
+        "color": "black",
+        "border": false,
+        "borderRadius": 8,
+        "width": 188,
+        "height": 44,
+        "locale": "en_US",
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "56bf5933b10d9f5b834f9c80d71a0d07b432d0dde97e6cadcf1bfc2db16fd53d"
+    },
+    {
+      "file": "apple-ios-dark-rectangular.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "07797da5be69b8683cc70552b62decf5a8f4b6fda02d1fdab50b5a959014b5b4",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "google-android-light-pill-icon.png",
+      "source": "Android + Web/PNG @4x/Light/Theme=Light, Show text=No, Shape=Pill, Platform=Android+Web@4x.png",
+      "sha256": "77189d3d322bf41c675d889bc1e64c8e2c6c59648963de40979803b45283a5a2"
+    },
+    {
+      "file": "google-android-light-pill-icon.svg",
+      "source": "Android + Web/SVG/Light/Theme=Light, Show text=No, Shape=Pill, Platform=Android+Web.svg",
+      "sha256": "de2b1bfa783f2905bf0c8eb95a14ec65af637773aa51e147cfaa9dbdfe8c796a",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "apple-android-light-pill-icon.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "white",
+        "border": true,
+        "borderRadius": 50,
+        "size": 40,
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "50cb7104dd64ba8891a1c839da7440a7a7a8ad4d8d355297c0eaf5664042022e"
+    },
+    {
+      "file": "apple-android-light-pill-icon.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "white",
+        "border": true,
+        "borderRadius": 50,
+        "size": 40,
+        "scale": 4
+      },
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "1902236e31801b576b463eb091b0603e66f8695723971048dc6caca290c3685a",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "google-android-light-rectangular-icon.png",
+      "source": "Android + Web/PNG @4x/Light/Theme=Light, Show text=No, Shape=Square, Platform=Android+Web@4x.png",
+      "sha256": "2bc2ae8e4c67de66d74bf1deed12cd8f22981270266a487576b671b0b4df361c"
+    },
+    {
+      "file": "google-android-light-rectangular-icon.svg",
+      "source": "Android + Web/SVG/Light/Theme=Light, Show text=No, Shape=Square, Platform=Android+Web.svg",
+      "sha256": "d3f73dbc812b40af6f44329a9bcb6c9692b2311bd01f7067319bcf50586e2c54",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "apple-android-light-rectangular-icon.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "white",
+        "border": true,
+        "borderRadius": 8,
+        "size": 40,
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "94e611f590bae6d083798621e0729d4635e86c8b9f0afd7209d93187bdfd5976"
+    },
+    {
+      "file": "apple-android-light-rectangular-icon.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "white",
+        "border": true,
+        "borderRadius": 8,
+        "size": 40,
+        "scale": 4
+      },
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "16be5e90d56067b25137af991da928d3a32bfa8e6e723e4f6cf59b44cf1fb4b4",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "google-android-dark-pill-icon.png",
+      "source": "Android + Web/PNG @4x/Dark/Theme=Dark, Show text=No, Shape=Pill, Platform=Android+Web@4x.png",
+      "sha256": "b3c9cbc019a473dc9fdee0c2e56e7f79eb78275bdbf09d4608d08fae722bdadb"
+    },
+    {
+      "file": "google-android-dark-pill-icon.svg",
+      "source": "Android + Web/SVG/Dark/Theme=Dark, Show text=No, Shape=Pill, Platform=Android+Web.svg",
+      "sha256": "255c8472c065d4541e050884d600b94e580e33c3edf0d07fed12b41d71a05c8a",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "apple-android-dark-pill-icon.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "black",
+        "border": false,
+        "borderRadius": 50,
+        "size": 40,
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "c983729e065766c110ff17d3e0e6dfe14e29ac46a2e620f3109e47108a3afe97"
+    },
+    {
+      "file": "apple-android-dark-pill-icon.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "black",
+        "border": false,
+        "borderRadius": 50,
+        "size": 40,
+        "scale": 4
+      },
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "94ce4d8956845c175b730147aaf316a53a33da4216f537dd1e57a4481b8f9a45",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "google-android-dark-rectangular-icon.png",
+      "source": "Android + Web/PNG @4x/Dark/Theme=Dark, Show text=No, Shape=Square, Platform=Android+Web@4x.png",
+      "sha256": "0da0f2b6250ddbde07200b1d49555111c314fe32bde94c9f7a306227650e50d5"
+    },
+    {
+      "file": "google-android-dark-rectangular-icon.svg",
+      "source": "Android + Web/SVG/Dark/Theme=Dark, Show text=No, Shape=Square, Platform=Android+Web.svg",
+      "sha256": "4ece0cd7585968cb12e83d14a85775064c83b5c81f577f17306f382baf7941a2",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "apple-android-dark-rectangular-icon.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "black",
+        "border": false,
+        "borderRadius": 8,
+        "size": 40,
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "afcd1bad5014e10f3e4793162bf353e92ff2864728c488b55a6a41bbc2b92a5f"
+    },
+    {
+      "file": "apple-android-dark-rectangular-icon.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "black",
+        "border": false,
+        "borderRadius": 8,
+        "size": 40,
+        "scale": 4
+      },
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "771339226c9f86511bdbffeacd7259a2890c657b00f4b8a8bf89191a31202113",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "google-ios-light-pill-icon.png",
+      "source": "iOS/PNG @4x/Light/Theme=Light, Show text=No, Shape=Pill, Platform=iOS@4x.png",
+      "sha256": "accb9b0c050e1fe06bc6333e294421a2f4dc7716f89ce1da2316337a8769132d"
+    },
+    {
+      "file": "google-ios-light-pill-icon.svg",
+      "source": "iOS/SVG/Light/Theme=Light, Show text=No, Shape=Pill, Platform=iOS.svg",
+      "sha256": "314a6c87d7f98aa52a29b17e5dd148b004a7b3493f92270110f84aa02cf0bc85",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "apple-ios-light-pill-icon.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "white",
+        "border": true,
+        "borderRadius": 50,
+        "size": 44,
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "266613e3b554f6cfeeb1c68112427856d9316cb8a920cefa990f30cb7e84a439"
+    },
+    {
+      "file": "apple-ios-light-pill-icon.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "white",
+        "border": true,
+        "borderRadius": 50,
+        "size": 44,
+        "scale": 4
+      },
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "3e49862fc70a5d40e1723208a77ac0eaf5f8d9458ea5fd52ed1507fd753250ce",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "google-ios-light-rectangular-icon.png",
+      "source": "iOS/PNG @4x/Light/Theme=Light, Show text=No, Shape=Square, Platform=iOS@4x.png",
+      "sha256": "085692d68716db0e621635128407cb0f0a8db058b1dbfebe3f57a2c9d625d145"
+    },
+    {
+      "file": "google-ios-light-rectangular-icon.svg",
+      "source": "iOS/SVG/Light/Theme=Light, Show text=No, Shape=Square, Platform=iOS.svg",
+      "sha256": "9ddb348aa3f1fa92a445e36ac9367bb3ada5900ca066d34f803e0d803dad78b4",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "apple-ios-light-rectangular-icon.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "white",
+        "border": true,
+        "borderRadius": 8,
+        "size": 44,
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "7b14a7c55397cdbbe250508c21c4b38667ac86588e352380e181977537ebe04d"
+    },
+    {
+      "file": "apple-ios-light-rectangular-icon.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "white",
+        "border": true,
+        "borderRadius": 8,
+        "size": 44,
+        "scale": 4
+      },
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "08906201bcf597f6d53093d7620388621c153f22d80277e9b1ae7d0cc189e2a4",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "google-ios-dark-pill-icon.png",
+      "source": "iOS/PNG @4x/Dark/Theme=Dark, Show text=No, Shape=Pill, Platform=iOS@4x.png",
+      "sha256": "8e0df21156738ad3475e0616441a5553edbd8d1117771a9ed32dd039be009b43"
+    },
+    {
+      "file": "google-ios-dark-pill-icon.svg",
+      "source": "iOS/SVG/Dark/Theme=Dark, Show text=No, Shape=Pill, Platform=iOS.svg",
+      "sha256": "e21e750f386ff24f9541064d7ec4b31db7a406dd5a81150f9e8cfca0b61ec0d3",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "apple-ios-dark-pill-icon.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "black",
+        "border": false,
+        "borderRadius": 50,
+        "size": 44,
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "46d561c7ea96547eb0f7212e7c2e1d04e1f66c6bf2b9f2f44d498eb949eac7b7"
+    },
+    {
+      "file": "apple-ios-dark-pill-icon.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "black",
+        "border": false,
+        "borderRadius": 50,
+        "size": 44,
+        "scale": 4
+      },
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "7585484520a4ce5bb788deb39b974fc4f8015e3ef758495fda79092c7bd22693",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    },
+    {
+      "file": "google-ios-dark-rectangular-icon.png",
+      "source": "iOS/PNG @4x/Dark/Theme=Dark, Show text=No, Shape=Square, Platform=iOS@4x.png",
+      "sha256": "07c3f161dbfad1314a375ddc0f8d5a4a67ec3f9780f906c2d93e75390c53bb68"
+    },
+    {
+      "file": "google-ios-dark-rectangular-icon.svg",
+      "source": "iOS/SVG/Dark/Theme=Dark, Show text=No, Shape=Square, Platform=iOS.svg",
+      "sha256": "b8c66d97fbdf52a62a12623581ddf3745b7a6c7244434d6ef2d9c3cd1f761551",
+      "transform": "Unsupported Figma conic-gradient mark block removed; the mark image is drawn over it"
+    },
+    {
+      "file": "apple-ios-dark-rectangular-icon.png",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "black",
+        "border": false,
+        "borderRadius": 8,
+        "size": 44,
+        "scale": 4
+      },
+      "method": "Unmodified official SDK rendered in Chromium",
+      "sha256": "ef64ebfbfa4c9dce072725bc5380921a20889a7de440a0aad46eb21a0e01552c"
+    },
+    {
+      "file": "apple-ios-dark-rectangular-icon.svg",
+      "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
+      "configuration": {
+        "mode": "logo-only",
+        "color": "black",
+        "border": false,
+        "borderRadius": 8,
+        "size": 44,
+        "scale": 4
+      },
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "e211392a487ee2524b9399d73582c14eb87a26f88522dcc68c26fbb053abc271",
+      "transform": "Nested SVG viewports flattened to transforms so the artwork renders standalone"
+    }
+  ]
+}

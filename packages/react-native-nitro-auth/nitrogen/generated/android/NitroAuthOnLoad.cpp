@@ -15,7 +15,9 @@
 #include <fbjni/fbjni.h>
 #include <NitroModules/HybridObjectRegistry.hpp>
 
+#include "JHybridNativeAuthAdapterSpec.hpp"
 #include "HybridAuth.hpp"
+#include <NitroModules/DefaultConstructableObject.hpp>
 
 namespace margelo::nitro::NitroAuth {
 
@@ -25,14 +27,21 @@ int initialize(JavaVM* vm) {
   });
 }
 
-
+struct JHybridNativeAuthAdapterSpecImpl: public jni::JavaClass<JHybridNativeAuthAdapterSpecImpl, JHybridNativeAuthAdapterSpec::JavaPart> {
+  static constexpr auto kJavaDescriptor = "Lcom/margelo/nitro/com/auth/HybridNativeAuthAdapter;";
+  static std::shared_ptr<JHybridNativeAuthAdapterSpec> create() {
+    static const auto constructorFn = javaClassStatic()->getConstructor<JHybridNativeAuthAdapterSpecImpl::javaobject()>();
+    jni::local_ref<JHybridNativeAuthAdapterSpec::JavaPart> javaPart = javaClassStatic()->newObject(constructorFn);
+    return javaPart->getJHybridNativeAuthAdapterSpec();
+  }
+};
 
 void registerAllNatives() {
   using namespace margelo::nitro;
   using namespace margelo::nitro::NitroAuth;
 
   // Register native JNI methods
-  
+  margelo::nitro::NitroAuth::JHybridNativeAuthAdapterSpec::CxxPart::registerNatives();
 
   // Register Nitro Hybrid Objects
   HybridObjectRegistry::registerHybridObjectConstructor(
@@ -42,6 +51,12 @@ void registerAllNatives() {
                     "The HybridObject \"HybridAuth\" is not default-constructible! "
                     "Create a public constructor that takes zero arguments to be able to autolink this HybridObject.");
       return std::make_shared<HybridAuth>();
+    }
+  );
+  HybridObjectRegistry::registerHybridObjectConstructor(
+    "NativeAuthAdapter",
+    []() -> std::shared_ptr<HybridObject> {
+      return JHybridNativeAuthAdapterSpecImpl::create();
     }
   );
 }

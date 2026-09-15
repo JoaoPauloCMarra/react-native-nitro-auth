@@ -1,7 +1,12 @@
 import type {
+  AuthLifecycleEvent,
   AuthLogin,
   AuthLoginAndGetUser,
+  AuthGetCredential,
+  CredentialOptions,
+  CredentialProvider,
   AuthError,
+  AppleAndroidLoginOptions,
   AppleIOSLoginOptions,
   AppleLoginOptions,
   AppleWebLoginOptions,
@@ -20,6 +25,9 @@ type IsAssignable<Source, Target> = Source extends Target ? true : false;
 
 type AppleTenant = AssertNever<NonNullable<AppleLoginOptions["tenant"]>>;
 type ApplePrompt = AssertNever<NonNullable<AppleLoginOptions["prompt"]>>;
+type AppleAndroidNameScope = AssertNever<
+  Extract<NonNullable<AppleAndroidLoginOptions["scopes"]>[number], "name">
+>;
 type AppleIOSLoginHint = AssertNever<
   NonNullable<AppleIOSLoginOptions["loginHint"]>
 >;
@@ -68,6 +76,9 @@ type TypedAuthUsesProviderLogin = AssertTrue<
 type TypedAuthUsesLoginAndGetUser = AssertTrue<
   IsAssignable<TypedAuth["loginAndGetUser"], AuthLoginAndGetUser>
 >;
+type TypedAuthUsesGetCredential = AssertTrue<
+  IsAssignable<TypedAuth["getCredential"], AuthGetCredential>
+>;
 type HookUsesProviderLogin = AssertTrue<
   IsAssignable<UseAuthReturn["login"], AuthLogin>
 >;
@@ -79,6 +90,22 @@ type WebProviderOptionsMatchNative = AssertTrue<
 >;
 type WebHookUsesProviderLogin = AssertTrue<
   IsAssignable<WebUseAuthReturn["login"], AuthLogin>
+>;
+type GoogleCredentialOptions = CredentialOptions<"google">;
+type AppleCredentialOptions = CredentialOptions<"apple">;
+type CredentialProviderValues = AssertTrue<
+  IsAssignable<CredentialProvider, "google" | "apple"> extends true
+    ? IsAssignable<"google" | "apple", CredentialProvider>
+    : false
+>;
+type GoogleCredentialRejectsNonce = AssertTrue<
+  "nonce" extends keyof GoogleCredentialOptions ? false : true
+>;
+type AppleCredentialRejectsNonce = AssertTrue<
+  "nonce" extends keyof AppleCredentialOptions ? false : true
+>;
+type GoogleCredentialRejectsLegacy = AssertTrue<
+  "useLegacyGoogleSignIn" extends keyof GoogleCredentialOptions ? false : true
 >;
 type SocialButtonErrorCallback = (error: AuthError) => void;
 type BroadSocialButtonErrorCallback = (error: unknown) => void;
@@ -125,6 +152,11 @@ const googleAndroidOptions = {
   requestVerifiedPhoneNumber: true,
 } satisfies GoogleAndroidLoginOptions;
 
+const appleAndroidOptions = {
+  scopes: ["email", "fullName"],
+  nonce: "nonce",
+} satisfies AppleAndroidLoginOptions;
+
 const googleIOSOptions = {
   hostedDomain: "company.com",
   openIDRealm: "https://example.com",
@@ -139,6 +171,7 @@ const login: AuthLogin = async () => {};
 
 test("provider login option types compile", () => {
   expect(googleAndroidOptions.useOneTap).toBe(true);
+  expect(appleAndroidOptions.scopes).toEqual(["email", "fullName"]);
   expect(googleIOSOptions.openIDRealm).toBe("https://example.com");
   expect(microsoftOptions.prompt).toBe("select_account");
 });
@@ -148,6 +181,7 @@ void login("apple", { nonce: "nonce" });
 void login("microsoft", microsoftOptions);
 
 void (0 as unknown as AppleTenant);
+void (0 as unknown as AppleAndroidNameScope);
 void (0 as unknown as ApplePrompt);
 void (0 as unknown as AppleIOSLoginHint);
 void (0 as unknown as AppleWebHostedDomain);
@@ -164,12 +198,35 @@ void (0 as unknown as NativeServiceUsesTypedAuth);
 void (0 as unknown as WebServiceUsesTypedAuth);
 void (0 as unknown as TypedAuthUsesProviderLogin);
 void (0 as unknown as TypedAuthUsesLoginAndGetUser);
+void (0 as unknown as TypedAuthUsesGetCredential);
 void (0 as unknown as HookUsesProviderLogin);
 void (0 as unknown as WebProviderOptionsMatchNative);
 void (0 as unknown as WebHookUsesProviderLogin);
+void (0 as unknown as CredentialProviderValues);
+void (0 as unknown as GoogleCredentialRejectsNonce);
+void (0 as unknown as AppleCredentialRejectsNonce);
+void (0 as unknown as GoogleCredentialRejectsLegacy);
 void (0 as unknown as NativeSocialButtonError);
 void (0 as unknown as NativeSocialButtonAcceptsAuthError);
 void (0 as unknown as NativeSocialButtonAcceptsBroadError);
 void (0 as unknown as WebSocialButtonError);
 void (0 as unknown as WebSocialButtonAcceptsAuthError);
 void (0 as unknown as WebSocialButtonAcceptsBroadError);
+
+function checkEventNarrowing(event: AuthLifecycleEvent) {
+  if (event.type === "operation_failed") {
+    const code: import("../index").AuthErrorCode = event.errorCode;
+    const duration: number = event.elapsedMilliseconds;
+    void code;
+    void duration;
+    // @ts-expect-error Lifecycle metadata must not expose credentials.
+    void event.idToken;
+  }
+  if (event.type === "operation_started") {
+    const id: number = event.operationId;
+    void id;
+    // @ts-expect-error Start events have no terminal timing.
+    void event.elapsedMilliseconds;
+  }
+}
+void checkEventNarrowing;

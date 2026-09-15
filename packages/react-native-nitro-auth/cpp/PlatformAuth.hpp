@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AuthProvider.hpp"
+#include "AuthNonce.hpp"
 #include "AuthUser.hpp"
 #include "AuthTokens.hpp"
 #include "AuthErrorCode.hpp"
@@ -16,6 +17,7 @@ using namespace margelo::nitro;
 
 class PlatformAuth {
 public:
+  static std::shared_ptr<Promise<AuthNonce>> createNonce();
   static std::shared_ptr<Promise<AuthUser>> login(AuthProvider provider, const std::optional<LoginOptions>& options = std::nullopt);
   static std::shared_ptr<Promise<AuthUser>> requestScopes(const std::vector<std::string>& scopes);
   static std::shared_ptr<Promise<AuthTokens>> refreshToken();

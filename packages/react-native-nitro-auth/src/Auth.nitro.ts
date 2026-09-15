@@ -1,6 +1,7 @@
 import type { HybridObject } from "react-native-nitro-modules";
 
 export type AuthProvider = "google" | "apple" | "microsoft";
+export type CredentialProvider = "google" | "apple";
 
 export type AuthErrorCode =
   | "cancelled"
@@ -29,7 +30,10 @@ export interface LoginOptions {
   useOneTap?: boolean;
   /** (iOS only) Use native sign-in sheet */
   useSheet?: boolean;
-  /** Force account picker to show, ignoring any cached session or loginHint. On Android Google, this uses the legacy chooser path. */
+  /**
+   * Force account selection and ignore cached sign-in. Android Google uses the
+   * legacy chooser without a nonce and Credential Manager for nonce-bound login.
+   */
   forceAccountPicker?: boolean;
   filterByAuthorizedAccounts?: boolean;
   /** (Android only) Use legacy Google Sign-In flow (e.g. for serverAuthCode) */
@@ -44,6 +48,13 @@ export interface LoginOptions {
   prompt?: MicrosoftPrompt;
 }
 
+export interface AuthNonce {
+  /** The unmodified nonce to return to the credential consumer. */
+  raw: string;
+  /** The SHA-256 hex nonce to pass to the identity provider. */
+  hashed: string;
+}
+
 export interface AuthTokens {
   accessToken?: string;
   idToken?: string;
@@ -55,6 +66,8 @@ export interface AuthUser {
   provider: AuthProvider;
   email?: string;
   name?: string;
+  firstName?: string;
+  lastName?: string;
   photo?: string;
   idToken?: string;
   accessToken?: string;
@@ -80,6 +93,20 @@ export interface ScopeRevocationResult {
   revokedScopes: string[];
 }
 
+export interface AuthCredential {
+  provider: CredentialProvider;
+  idToken: string;
+  /** Raw nonce for the server's credential verification. */
+  nonce: string;
+  user: AuthUser;
+}
+
+export interface AuthSessionSnapshot {
+  revision: number;
+  user?: AuthUser;
+  scopes: string[];
+}
+
 export type AuthEventType =
   | "login_started"
   | "login_succeeded"
@@ -101,9 +128,23 @@ export interface Auth extends HybridObject<{ ios: "c++"; android: "c++" }> {
   readonly grantedScopes: string[];
   readonly hasPlayServices: boolean;
 
+  createNonce(): Promise<AuthNonce>;
+  getCredential(
+    provider: CredentialProvider,
+    options?: LoginOptions,
+  ): Promise<AuthCredential>;
+  getSessionSnapshot(): AuthSessionSnapshot;
+  onSessionChanged(
+    callback: (snapshot: AuthSessionSnapshot) => void,
+  ): () => void;
   login(provider: AuthProvider, options?: LoginOptions): Promise<void>;
+  loginAndGetUser(
+    provider: AuthProvider,
+    options?: LoginOptions,
+  ): Promise<AuthUser>;
   requestScopes(scopes: string[]): Promise<void>;
   revokeScopes(scopes: string[]): Promise<void>;
+  revokeScopesWithResult(scopes: string[]): Promise<ScopeRevocationResult>;
   revokeAccess(): Promise<void>;
   getAccessToken(): Promise<string | undefined>;
   refreshToken(): Promise<AuthTokens>;

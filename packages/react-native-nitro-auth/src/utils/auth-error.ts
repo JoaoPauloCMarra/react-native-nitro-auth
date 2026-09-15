@@ -57,6 +57,7 @@ export function toAuthErrorCode(raw: string): AuthErrorCode {
  */
 export type AuthOperation =
   | "login"
+  | "getCredential"
   | "requestScopes"
   | "revokeScopes"
   | "revokeAccess"
@@ -138,6 +139,11 @@ export class AuthError extends Error {
   }
 
   static from(raw: unknown, operation?: AuthOperation): AuthError {
-    return raw instanceof AuthError ? raw : new AuthError(raw, operation);
+    if (
+      raw instanceof AuthError &&
+      (raw.operation !== undefined || operation === undefined)
+    )
+      return raw;
+    return new AuthError(raw, operation);
   }
 }

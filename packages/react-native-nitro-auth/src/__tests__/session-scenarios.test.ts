@@ -489,7 +489,30 @@ function createNativeFacade(): {
     get hasPlayServices() {
       return true;
     },
+    createNonce: async () => ({
+      raw: "raw-test-nonce",
+      hashed: "a".repeat(64),
+    }),
     login,
+    getCredential: async () => {
+      throw new Error("unsupported_provider");
+    },
+    loginAndGetUser: async (provider: "google" | "apple" | "microsoft") => {
+      if (provider === "apple") throw new Error("unsupported_provider");
+      await login(provider);
+      if (!state.currentUser) throw new Error("not_signed_in");
+      return state.currentUser;
+    },
+    getSessionSnapshot: () => ({
+      revision: 0,
+      ...(state.currentUser ? { user: state.currentUser } : {}),
+      scopes: state.grantedScopes,
+    }),
+    onSessionChanged: () => () => undefined,
+    revokeScopesWithResult: async () => ({
+      revokedAtProvider: false as const,
+      revokedScopes: [],
+    }),
     requestScopes: () => Promise.resolve(),
     revokeScopes: () => Promise.resolve(),
     revokeAccess: () => Promise.resolve(),

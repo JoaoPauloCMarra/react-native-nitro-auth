@@ -20,5 +20,10 @@
                 <data android:scheme="msauth" />
             </intent-filter>
         </activity>
+        <activity
+            android:name="com.auth.AppleAuthCallbackActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     </application>
 </manifest>
