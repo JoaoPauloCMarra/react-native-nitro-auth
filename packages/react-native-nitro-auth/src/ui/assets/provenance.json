@@ -102,8 +102,8 @@
     {
       "file": "apple-android-light-pill.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
-      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "f1ef9d7d3b7b561f125a9864031f3ffef146f523f9b569a7afbaff02e4f75cb9"
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "9a0ccf9c24c61d74966a2e713e5e4975f040ab88fa341c3be6aafbd0ff6f89fd"
     },
     {
       "file": "apple-android-light-rectangular.png",
@@ -125,8 +125,8 @@
     {
       "file": "apple-android-light-rectangular.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
-      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "1559d8dbc2c402f4a757a5ebdc30a3471d96676c57f60b0f34204a0884d524e0"
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "714cbb5d371235970b840383a011dc25bc7bd02247671b198fe7502058da5219"
     },
     {
       "file": "apple-android-dark-pill.png",
@@ -148,8 +148,8 @@
     {
       "file": "apple-android-dark-pill.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
-      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "6957f537a65dfcf67fdb6eff9ca30e3a891952eaacb94e2bffcc023d34045cce"
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "1ad5a53d78d42e71da95c502684517a3453482d2fc3e084036e3d211ce071a03"
     },
     {
       "file": "apple-android-dark-rectangular.png",
@@ -171,8 +171,8 @@
     {
       "file": "apple-android-dark-rectangular.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
-      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "7878cdc65ae8ad14d894de9e8e4609be913a3005154e4257b73b93c8609a714d"
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "5abdb55a4f79b10368fe22530292d6e420f39a666dc7c30644757cb841075723"
     },
     {
       "file": "apple-ios-light-pill.png",
@@ -194,8 +194,8 @@
     {
       "file": "apple-ios-light-pill.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
-      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "caa0f84bd89e60847bc9100fc3c891c55a4ae9e0d64e3bcf3eb748d1e3986f9f"
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "9968f8af98ee499d043d03810d2c95234741cd371361f74659cb7369535c91d5"
     },
     {
       "file": "apple-ios-light-rectangular.png",
@@ -217,8 +217,8 @@
     {
       "file": "apple-ios-light-rectangular.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
-      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "ab7b056d8db3572948a8438aafb528975f887d331d123116677aebd11971dadc"
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "99c292967051c9579af9c129f6500923cfef9fd8aa604f2de44fee5391dd8025"
     },
     {
       "file": "apple-ios-dark-pill.png",
@@ -240,8 +240,8 @@
     {
       "file": "apple-ios-dark-pill.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
-      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "315953ada75dea4ef1874755e5277bd15bae54ae909dd4e06ce79d922c542131"
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "c588399086f00db8838c6ecc2f0d04dd4fd8f4e6d0a33281c5f939837c85a09f"
     },
     {
       "file": "apple-ios-dark-rectangular.png",
@@ -263,8 +263,8 @@
     {
       "file": "apple-ios-dark-rectangular.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
-      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "6da9d50012102f5ddd724c8535fa0aa37b0155d2a601a85366ea821543f5ab1e"
+      "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "fadd5fda3678ea5b859ed385a2471a91d1641121e404d1ba6a46b2be3b842361"
     },
     {
       "file": "google-android-light-pill-icon.png",
@@ -301,8 +301,8 @@
         "size": 40,
         "scale": 4
       },
-      "method": "Official SDK vector mark and background without font dependencies",
-      "sha256": "5709f6cc56ca918d277a95172869072639f18d4284dbf38bd61ccac8d86d69c5"
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "1fb50a33e6f5702f4a06673be3da859c76c9d84474e9144d31f9ff372e8f8ec9"
     },
     {
       "file": "google-android-light-rectangular-icon.png",
@@ -339,8 +339,8 @@
         "size": 40,
         "scale": 4
       },
-      "method": "Official SDK vector mark and background without font dependencies",
-      "sha256": "5eb9b354de912fe246c61409e256343c3fe8feb96d3702d241e13debdde793f4"
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "293de3641764321cf739614c1f2066179edc85e9d790e9c7cff54206662b7484"
     },
     {
       "file": "google-android-dark-pill-icon.png",
@@ -377,8 +377,8 @@
         "size": 40,
         "scale": 4
       },
-      "method": "Official SDK vector mark and background without font dependencies",
-      "sha256": "722b387005362d72e7f153c775bab6599db2d0d7f729ed3317b1311c9f74c842"
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "ad967f5b102eef548d0fa899381b33057e0c9df4998335289a975dbb69af5f1e"
     },
     {
       "file": "google-android-dark-rectangular-icon.png",
@@ -415,8 +415,8 @@
         "size": 40,
         "scale": 4
       },
-      "method": "Official SDK vector mark and background without font dependencies",
-      "sha256": "e5e93f76cc682f53e6b16553445387e202a07bebf286ef6e1a6523265bcc6d3c"
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "d6e7f2f962c8ccdcd8fa2f3cf91cc2a71155cc7ece57a44e659b1bf2e7171684"
     },
     {
       "file": "google-ios-light-pill-icon.png",
@@ -453,8 +453,8 @@
         "size": 44,
         "scale": 4
       },
-      "method": "Official SDK vector mark and background without font dependencies",
-      "sha256": "dc0cf34ca5bd787d9d4514d153f38e66fedc3f859d1e7cd6ab1df2177db7d4db"
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "ac920064bbe01bf7b910df2d4c637db3eaacbaddcc47a711684107fc8634981c"
     },
     {
       "file": "google-ios-light-rectangular-icon.png",
@@ -491,8 +491,8 @@
         "size": 44,
         "scale": 4
       },
-      "method": "Official SDK vector mark and background without font dependencies",
-      "sha256": "891a14a59e212983ef75ab2ddc751669c15a33315bd989e44b3978873da3d073"
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "b86781804f79152bf6ca38c2b8ce20a7d2db4095790a2e1f5b2cb2da0a306001"
     },
     {
       "file": "google-ios-dark-pill-icon.png",
@@ -529,8 +529,8 @@
         "size": 44,
         "scale": 4
       },
-      "method": "Official SDK vector mark and background without font dependencies",
-      "sha256": "14c4cac25120672d894c8b1016d8c096d4f6dd7906c8757f92b14c56670df7f2"
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "ab8920d4ca665fa08e964e61ea70746e2c13e31b0eb8c7190f39ac5017bd9e72"
     },
     {
       "file": "google-ios-dark-rectangular-icon.png",
@@ -567,8 +567,8 @@
         "size": 44,
         "scale": 4
       },
-      "method": "Official SDK vector mark and background without font dependencies",
-      "sha256": "626974df02bcf1fd003192f77092a1a01319a5a7efa3403514378860d646c24a"
+      "method": "Official SDK vector mark and background without font dependencies; nested percentage viewports resolved to explicit SVG user units for native rendering",
+      "sha256": "987de4056c343385ae4289bd8a9b69e6792ff20ae762217859e6ac58d1bcf542"
     }
   ],
   "appleSource": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
