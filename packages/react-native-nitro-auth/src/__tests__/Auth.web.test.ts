@@ -267,6 +267,63 @@ describe("AuthModule (web)", () => {
     expect(sessionStorage.getItem(SCOPES_KEY)).toBeNull();
   });
 
+  it("rejects credential acquisition without changing an existing web session", async () => {
+    const cachedUser = {
+      provider: "google",
+      email: "existing@example.com",
+      idToken: "existing-id-token",
+    };
+    const cachedUserValue = JSON.stringify(cachedUser);
+    const cachedScopesValue = JSON.stringify(["openid", "email"]);
+    sessionStorage.setItem(CACHE_KEY, cachedUserValue);
+    sessionStorage.setItem(SCOPES_KEY, cachedScopesValue);
+
+    const popup = jest.fn(() => null);
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: popup,
+    });
+    const randomValues = globalThis.crypto.getRandomValues as jest.Mock;
+    const digest = globalThis.crypto.subtle.digest as jest.Mock;
+    const setItem = jest.spyOn(Storage.prototype, "setItem");
+    const removeItem = jest.spyOn(Storage.prototype, "removeItem");
+    const auth = await loadAuthService({
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+      nitroAuthPersistTokensOnWeb: true,
+    });
+    const existingUser = auth.currentUser;
+    const existingScopes = auth.grantedScopes;
+    const userListener = jest.fn();
+    const eventListener = jest.fn();
+    const unsubscribeUser = auth.onAuthStateChanged(userListener);
+    const unsubscribeEvent = auth.onAuthEvent(eventListener);
+    userListener.mockClear();
+    setItem.mockClear();
+    removeItem.mockClear();
+    randomValues.mockClear();
+    digest.mockClear();
+
+    await expect(auth.getCredential("google")).rejects.toMatchObject({
+      code: "invalid_state",
+      operation: "getCredential",
+    });
+
+    expect(popup).not.toHaveBeenCalled();
+    expect(randomValues).not.toHaveBeenCalled();
+    expect(digest).not.toHaveBeenCalled();
+    expect(auth.currentUser).toBe(existingUser);
+    expect(auth.grantedScopes).toEqual(existingScopes);
+    expect(sessionStorage.getItem(CACHE_KEY)).toBe(cachedUserValue);
+    expect(sessionStorage.getItem(SCOPES_KEY)).toBe(cachedScopesValue);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(userListener).not.toHaveBeenCalled();
+    expect(eventListener).not.toHaveBeenCalled();
+    unsubscribeUser();
+    unsubscribeEvent();
+  });
+
   it("defaults to session storage and strips sensitive tokens from persisted user", async () => {
     sessionStorage.setItem(
       CACHE_KEY,

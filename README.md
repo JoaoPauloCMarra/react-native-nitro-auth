@@ -48,7 +48,7 @@ bare app.
 | React Native               | `>=0.75.0`; runtime gate `0.86.3`, RN `0.87` Strict TypeScript compatibility check |
 | React                      | Validated with `19.2.3`                                                            |
 | React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                                 |
-| Expo                       | SDK `57.0.21` development builds; RN `0.86.3`                                      |
+| Expo                       | SDK `57.0.22` development builds; RN `0.86.3`                                      |
 | iOS                        | `16.4` or later                                                                    |
 
 iOS static frameworks are supported with source-built React Native. After
@@ -242,13 +242,14 @@ await fetch(yourAuthEndpoint, {
     nonce: credential.nonce,
   }),
 });
-
-console.log(credential.user.firstName, credential.user.lastName);
 ```
 
 `getCredential()` supports Google and Apple. It creates a random nonce, sends
 its SHA-256 hex value to the provider, returns the raw nonce for backend
 verification, and clears the temporary package session before resolving.
+If a package session is already active, it rejects with `invalid_state` before
+provider setup or session changes; call `logout()` before requesting a separate
+credential.
 Google defaults to `openid`, `email`, and `profile`; Apple defaults to `email`
 and `fullName` (`name` in Apple's web SDK). Explicit `scopes` replace those defaults. Caller-supplied `nonce`
 and Android `useLegacyGoogleSignIn` are not accepted. Android nonce-bound Google
@@ -468,7 +469,7 @@ The native package gate and Expo example use React Native `0.86.3`. The
 `check:ci` workflow also compiles the public source against React Native
 `0.87.0`'s Strict TypeScript API to catch declaration and callback regressions;
 that compatibility check does not change the runtime baseline. Expo SDK
-`57.0.21` selects React Native `0.86.3`; do not override it in an Expo app.
+`57.0.22` selects React Native `0.86.3`; do not override it in an Expo app.
 
 Package peer range: `>=0.37.0 <0.38.0`.
 

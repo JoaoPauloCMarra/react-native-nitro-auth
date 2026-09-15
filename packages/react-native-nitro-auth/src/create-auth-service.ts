@@ -33,6 +33,10 @@ type AuthWithOptionalNativeMembers = Auth & {
   setLoggingEnabled?: (enabled: boolean) => void;
 };
 
+function hasCurrentUser(auth: Auth): boolean {
+  return auth.currentUser !== undefined;
+}
+
 async function wrapAuthOperation<T>(
   operation: AuthOperation,
   run: () => Promise<T>,
@@ -135,10 +139,14 @@ export function createAuthService(
           throw new AuthError("operation_in_progress", "getCredential");
         }
 
+        const auth = getAuth();
+        if (hasCurrentUser(auth)) {
+          throw new AuthError("invalid_state", "getCredential");
+        }
+
         credentialAcquisitionInFlight = true;
         try {
           const operationGeneration = authOperationGeneration;
-          const auth = getAuth();
           let nativeLoginStarted = false;
           let hasPrimaryError = false;
           let primaryError: unknown;

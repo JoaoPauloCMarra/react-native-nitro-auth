@@ -16,6 +16,8 @@ Breaking changes are always listed first in each release section.
 
 ### Fixed
 
+- Credential acquisition now rejects before provider setup when a package
+  session is already active, preserving that session and its listeners.
 - Android nonce-bearing Google sign-in now stays on Credential Manager and
   rejects on missing or mismatched nonce credentials instead of falling back
   to legacy Google Sign-In.

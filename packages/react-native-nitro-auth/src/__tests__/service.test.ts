@@ -572,6 +572,51 @@ describe("AuthService", () => {
       });
     });
 
+    it.each(["success", "cancel", "failure"] as const)(
+      "rejects a pre-existing package session before %s provider setup",
+      async (providerResult) => {
+        const existingUser: AuthUser = {
+          provider: "google",
+          email: "existing@example.com",
+          idToken: "existing-id-token",
+        };
+        mockCurrentUser = existingUser;
+        const auth = native();
+        auth.createNonce.mockResolvedValueOnce({
+          raw: rawNonce,
+          hashed: hashedNonce,
+        });
+        auth.login.mockImplementationOnce(async () => {
+          if (providerResult === "success") {
+            mockCurrentUser = { provider: "apple", idToken };
+            onAuthStateChangedCallback?.(mockCurrentUser);
+            return;
+          }
+          throw new Error(
+            providerResult === "cancel" ? "cancelled" : "network_error",
+          );
+        });
+        auth.logout.mockImplementationOnce(() => {
+          mockCurrentUser = undefined;
+          onAuthStateChangedCallback?.(undefined);
+        });
+        const userListener = jest.fn();
+        const unsubscribe = AuthService.onAuthStateChanged(userListener);
+
+        await expect(AuthService.getCredential("apple")).rejects.toMatchObject({
+          code: "invalid_state",
+          operation: "getCredential",
+        });
+
+        expect(auth.createNonce).not.toHaveBeenCalled();
+        expect(auth.login).not.toHaveBeenCalled();
+        expect(auth.logout).not.toHaveBeenCalled();
+        expect(AuthService.currentUser).toBe(existingUser);
+        expect(userListener).not.toHaveBeenCalled();
+        unsubscribe();
+      },
+    );
+
     it("rejects a credential whose ID token nonce does not match and still cleans the session", async () => {
       native().createNonce.mockResolvedValueOnce({
         raw: rawNonce,
