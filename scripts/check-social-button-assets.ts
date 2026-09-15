@@ -43,6 +43,10 @@ for (const entry of manifest.entries) {
       throw new Error(`Invalid image dimensions: ${entry.file}`);
   } else if (entry.file.endsWith(".svg")) {
     const xml = bytes.toString("utf8");
+    if (/<svg\b[^>]*\b(?:width|height|x|y)=["'][^"']*%/i.test(xml))
+      throw new Error(
+        `SVG viewports must use explicit coordinate units: ${entry.file}`,
+      );
     if (
       /<text\b|@font-face|font-family|<image\b|<script\b|url\(https?:|(?:href|src)=["']https?:/i.test(
         xml,
