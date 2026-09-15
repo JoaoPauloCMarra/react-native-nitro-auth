@@ -103,7 +103,7 @@
       "file": "apple-android-light-pill.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
       "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "b07ddd6cb1c92b07c575b39cbeb6949acd35e393695456916a6f8ef69b4af986"
+      "sha256": "f1ef9d7d3b7b561f125a9864031f3ffef146f523f9b569a7afbaff02e4f75cb9"
     },
     {
       "file": "apple-android-light-rectangular.png",
@@ -126,7 +126,7 @@
       "file": "apple-android-light-rectangular.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
       "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "e6cbe59caffe19d6113340342575732c0b3223a1145e54356581317b66e3c93b"
+      "sha256": "1559d8dbc2c402f4a757a5ebdc30a3471d96676c57f60b0f34204a0884d524e0"
     },
     {
       "file": "apple-android-dark-pill.png",
@@ -149,7 +149,7 @@
       "file": "apple-android-dark-pill.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
       "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "12e18da3976a19bcef4d5938bb69714a5dde934f7fa8bf803d94f8e0f2351d46"
+      "sha256": "6957f537a65dfcf67fdb6eff9ca30e3a891952eaacb94e2bffcc023d34045cce"
     },
     {
       "file": "apple-android-dark-rectangular.png",
@@ -172,7 +172,7 @@
       "file": "apple-android-dark-rectangular.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
       "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "41ac1cbc8ecfd86df5bc11c54b02a2224f7e20fdfcb23b3a00fef6fc3f10dbfa"
+      "sha256": "7878cdc65ae8ad14d894de9e8e4609be913a3005154e4257b73b93c8609a714d"
     },
     {
       "file": "apple-ios-light-pill.png",
@@ -195,7 +195,7 @@
       "file": "apple-ios-light-pill.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
       "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "7843a264dee14d7e6b9623c1b14ee80d689925900db3b349871e993b5ff5b8e1"
+      "sha256": "caa0f84bd89e60847bc9100fc3c891c55a4ae9e0d64e3bcf3eb748d1e3986f9f"
     },
     {
       "file": "apple-ios-light-rectangular.png",
@@ -218,7 +218,7 @@
       "file": "apple-ios-light-rectangular.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
       "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "e4762e4a3916ddc2ebb82a3d3fca57bc5a09a2da797234eb4e2acffc584df66a"
+      "sha256": "ab7b056d8db3572948a8438aafb528975f887d331d123116677aebd11971dadc"
     },
     {
       "file": "apple-ios-dark-pill.png",
@@ -241,7 +241,7 @@
       "file": "apple-ios-dark-pill.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
       "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "fa4332fed217885a12d42867dfc5cbbc471b974e906eb61616a4cac43f3fa41c"
+      "sha256": "315953ada75dea4ef1874755e5277bd15bae54ae909dd4e06ce79d922c542131"
     },
     {
       "file": "apple-ios-dark-rectangular.png",
@@ -264,7 +264,7 @@
       "file": "apple-ios-dark-rectangular.svg",
       "source": "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js",
       "method": "Official SDK artwork with its embedded font converted to vector paths for React Native SVG; no font dependency",
-      "sha256": "8c3fe759eb59769ac2867db875673d6c8fabf9386faba03999dcab1fb8b06a19"
+      "sha256": "6da9d50012102f5ddd724c8535fa0aa37b0155d2a601a85366ea821543f5ab1e"
     },
     {
       "file": "google-android-light-pill-icon.png",
