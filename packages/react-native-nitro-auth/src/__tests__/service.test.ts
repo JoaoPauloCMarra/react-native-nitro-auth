@@ -492,6 +492,23 @@ describe("AuthService", () => {
     const hashedNonce = "a".repeat(64);
     const idToken = createJwtWithPayload({ nonce: hashedNonce });
 
+    it("classifies HybridObject creation failures as configuration errors", async () => {
+      const underlyingMessage =
+        "Cannot create HybridObject Auth: not registered in HybridObjectRegistry";
+      AuthService.dispose();
+      (NitroModules.createHybridObject as jest.Mock).mockImplementationOnce(
+        () => {
+          throw new Error(underlyingMessage);
+        },
+      );
+
+      await expect(AuthService.getCredential("google")).rejects.toMatchObject({
+        code: "configuration_error",
+        operation: "getCredential",
+        underlyingMessage,
+      });
+    });
+
     it("returns a copied nonce-bound Google credential and cleans the temporary session", async () => {
       const user: AuthUser = {
         provider: "google",

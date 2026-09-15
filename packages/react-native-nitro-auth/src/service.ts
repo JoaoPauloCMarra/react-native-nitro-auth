@@ -6,8 +6,20 @@ import type { TypedAuth } from "./provider-options";
 let nitroAuth: Auth | undefined;
 
 function getNitroAuth(): Auth {
-  nitroAuth ??= NitroModules.createHybridObject<Auth>("Auth");
-  return nitroAuth;
+  if (nitroAuth) {
+    return nitroAuth;
+  }
+
+  try {
+    const auth = NitroModules.createHybridObject<Auth>("Auth");
+    nitroAuth = auth;
+    return auth;
+  } catch (error) {
+    throw Object.assign(new Error("Native Auth module is unavailable"), {
+      code: "configuration_error" as const,
+      underlyingMessage: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function clearNitroAuth(auth: Auth): void {

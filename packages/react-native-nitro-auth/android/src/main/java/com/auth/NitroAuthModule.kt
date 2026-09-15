@@ -3,10 +3,12 @@ package com.auth
 import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.turbomodule.core.interfaces.TurboModule
 import com.margelo.nitro.com.auth.NitroAuthOnLoad
 
-class NitroAuthModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
-    override fun getName(): String = "NitroAuthModule"
+class NitroAuthModule(reactContext: ReactApplicationContext) :
+    ReactContextBaseJavaModule(reactContext), TurboModule {
+    override fun getName(): String = NAME
 
     init {
         try {
@@ -23,5 +25,9 @@ class NitroAuthModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
     override fun invalidate() {
         super.invalidate()
         AuthAdapter.dispose()
+    }
+
+    companion object {
+        const val NAME = "NitroAuthModule"
     }
 }
