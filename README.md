@@ -441,7 +441,10 @@ existing `react-native-nitro-auth` plugin options only when using custom Google
 text:
 
 ```js
-["react-native-nitro-auth", { googleButtonFont: true /* keep other options */ }]
+[
+  "react-native-nitro-auth",
+  { googleButtonFont: true /* keep other options */ },
+];
 ```
 
 Image and SVG modes, custom icon-only buttons, and the Apple custom button do
