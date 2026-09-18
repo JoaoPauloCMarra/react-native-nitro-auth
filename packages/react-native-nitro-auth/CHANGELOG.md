@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [0.11.1] - 2026-09-18
+
+### Breaking changes
+
+- None.
+
+### Changed
+
+- The example Expo pin follows SDK 57.0.24 (`expo-doctor` / `expo install --check`).
+  React Native stays `0.86.3`.
+
 ## [0.11.0] - 2026-09-15
 
 ### Breaking changes

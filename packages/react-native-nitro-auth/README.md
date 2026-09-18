@@ -19,10 +19,6 @@ uses configurable browser storage, with token persistence disabled by default.
 Your backend remains responsible for validating tokens and creating application
 sessions.
 
-This development README includes the Unreleased changes in PR #38: credential
-acquisition, Android Apple sign-in, and expanded social buttons. Check the
-[changelog](CHANGELOG.md) for the APIs included in your installed version.
-
 ## Install
 
 ```sh
@@ -52,7 +48,7 @@ bare app.
 | React Native               | `>=0.75.0`; runtime gate `0.86.3`, RN `0.87` Strict TypeScript compatibility check |
 | React                      | Validated with `19.2.3`                                                            |
 | React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                                 |
-| Expo                       | SDK `57.0.23` development builds; RN `0.86.3`                                      |
+| Expo                       | SDK `57.0.24` development builds; RN `0.86.3`                                      |
 | iOS                        | `16.4` or later                                                                    |
 
 iOS static frameworks are supported with source-built React Native. After
@@ -648,7 +644,7 @@ The native package gate and Expo example use React Native `0.86.3`. The
 `check:ci` workflow also compiles the public source against React Native
 `0.87.0`'s Strict TypeScript API to catch declaration and callback regressions;
 that compatibility check does not change the runtime baseline. Expo SDK
-`57.0.23` selects React Native `0.86.3`; do not override it in an Expo app.
+`57.0.24` selects React Native `0.86.3`; do not override it in an Expo app.
 
 Package peer range: `>=0.37.0 <0.38.0`.
 

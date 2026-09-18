@@ -88,7 +88,7 @@
     "access": "public"
   },
   "dependencies": {
-    "expo-build-properties": "~57.0.18",
+    "expo-build-properties": "~57.0.21",
     "react-native-svg": "15.15.5"
   },
   "devDependencies": {
