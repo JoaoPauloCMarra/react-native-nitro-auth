@@ -33,8 +33,12 @@ not prove successful provider authentication.
 4. `agent-device test e2e/qa-full-features.ad --device '<emulator name>'`
 5. `CI=1 bun run --cwd apps/example prebuild -- --platform ios`
 6. `bun run example:ios:build`
-7. Install and launch the resulting app on the selected iOS simulator, then run
+7. Install and launch the resulting app on the selected iOS simulator or
+   physical iPhone, then run
    `agent-device test e2e/qa-full-features.ad --device '<simulator name>'`.
+   A free personal team cannot provision Sign In with Apple. Leave
+   `NITRO_AUTH_APPLE_SIGN_IN` unset so the example installs; set it to `1`
+   only on a paid Apple Developer team when live Apple Sign-In is required.
 
 Inspect package-owned runtime errors after each run. The smoke result must reach
 `Complete: PASS`; a build alone or a screen that only lists APIs is insufficient.

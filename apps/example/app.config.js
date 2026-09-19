@@ -61,7 +61,7 @@ const appConfig = {
             googleClientId: process.env.GOOGLE_IOS_CLIENT_ID,
             googleServerClientId: process.env.GOOGLE_SERVER_CLIENT_ID,
             googleUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME,
-            appleSignIn: true,
+            appleSignIn: process.env.NITRO_AUTH_APPLE_SIGN_IN === "1",
             microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
             microsoftTenant: process.env.MICROSOFT_TENANT,
             microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,

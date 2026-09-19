@@ -23,6 +23,9 @@ Breaking changes are always listed first in each release section.
   React Native stays `0.86.3`.
 - The example iOS host uses a `SceneDelegate` so the app can present a window on
   iOS 27 physical devices.
+- The example leaves `ios.appleSignIn` off unless `NITRO_AUTH_APPLE_SIGN_IN=1`,
+  so a free personal team can install on a physical iPhone. Live Apple Sign-In
+  still needs a paid Apple Developer team.
 
 ## [0.11.0] - 2026-09-15
 

@@ -111,7 +111,7 @@ Plugin options:
 | `ios.googleClientId`                 | iOS      | Google Sign-In on iOS.                                                           |
 | `ios.googleServerClientId`           | iOS      | Google server auth code flow.                                                    |
 | `ios.googleUrlScheme`                | iOS      | Optional Google redirect scheme. Derived from `ios.googleClientId` when omitted. |
-| `ios.appleSignIn`                    | iOS      | Apple Sign-In entitlement.                                                       |
+| `ios.appleSignIn`                    | iOS      | Apple Sign-In entitlement. Personal Apple teams cannot provision this.           |
 | `ios.microsoftClientId`              | iOS      | Microsoft Entra ID native login.                                                 |
 | `ios.microsoftTenant`                | iOS      | Microsoft tenant override.                                                       |
 | `ios.microsoftB2cDomain`             | iOS      | Microsoft B2C hostname.                                                          |
