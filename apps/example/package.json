@@ -21,12 +21,12 @@
   "dependencies": {
     "@babel/runtime": "^7.29.7",
     "dotenv": "^17.4.2",
-    "expo": "~57.0.23",
-    "expo-asset": "~57.0.17",
-    "expo-build-properties": "~57.0.18",
-    "expo-constants": "~57.0.18",
+    "expo": "~57.0.24",
+    "expo-asset": "~57.0.18",
+    "expo-build-properties": "~57.0.21",
+    "expo-constants": "~57.0.19",
     "expo-linking": "~57.0.10",
-    "expo-router": "~57.0.21",
+    "expo-router": "~57.0.22",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.4",
     "react": "19.2.3",
@@ -43,7 +43,7 @@
   },
   "devDependencies": {
     "babel-plugin-module-resolver": "^5.0.3",
-    "babel-preset-expo": "~57.0.5",
+    "babel-preset-expo": "~57.0.7",
     "eslint": "^10.8.0",
     "eslint-config-expo-magic": "^3.0.0"
   }

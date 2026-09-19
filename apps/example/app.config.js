@@ -12,6 +12,20 @@ const appConfig = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.auth.example",
+      infoPlist: {
+        UIApplicationSceneManifest: {
+          UIApplicationSupportsMultipleScenes: false,
+          UISceneConfigurations: {
+            UIWindowSceneSessionRoleApplication: [
+              {
+                UISceneConfigurationName: "Default Configuration",
+                UISceneDelegateClassName:
+                  "$(PRODUCT_MODULE_NAME).SceneDelegate",
+              },
+            ],
+          },
+        },
+      },
     },
     android: {
       package: "com.auth.example",
@@ -22,6 +36,7 @@ const appConfig = {
     },
     plugins: [
       "expo-router",
+      "./plugins/with-ios-scene-lifecycle",
       [
         "expo-build-properties",
         {
@@ -46,7 +61,7 @@ const appConfig = {
             googleClientId: process.env.GOOGLE_IOS_CLIENT_ID,
             googleServerClientId: process.env.GOOGLE_SERVER_CLIENT_ID,
             googleUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME,
-            appleSignIn: true,
+            appleSignIn: process.env.NITRO_AUTH_APPLE_SIGN_IN === "1",
             microsoftClientId: process.env.MICROSOFT_CLIENT_ID,
             microsoftTenant: process.env.MICROSOFT_TENANT,
             microsoftB2cDomain: process.env.MICROSOFT_B2C_DOMAIN,

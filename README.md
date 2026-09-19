@@ -19,10 +19,6 @@ uses configurable browser storage, with token persistence disabled by default.
 Your backend remains responsible for validating tokens and creating application
 sessions.
 
-This development README includes the Unreleased changes in PR #38: credential
-acquisition, Android Apple sign-in, and expanded social buttons. Check the
-[changelog](CHANGELOG.md) for the APIs included in your installed version.
-
 ## Install
 
 ```sh
@@ -52,7 +48,7 @@ bare app.
 | React Native               | `>=0.75.0`; runtime gate `0.86.3`, RN `0.87` Strict TypeScript compatibility check |
 | React                      | Validated with `19.2.3`                                                            |
 | React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                                 |
-| Expo                       | SDK `57.0.23` development builds; RN `0.86.3`                                      |
+| Expo                       | SDK `57.0.24` development builds; RN `0.86.3`                                      |
 | iOS                        | `16.4` or later                                                                    |
 
 iOS static frameworks are supported with source-built React Native. After
@@ -115,7 +111,7 @@ Plugin options:
 | `ios.googleClientId`                 | iOS      | Google Sign-In on iOS.                                                           |
 | `ios.googleServerClientId`           | iOS      | Google server auth code flow.                                                    |
 | `ios.googleUrlScheme`                | iOS      | Optional Google redirect scheme. Derived from `ios.googleClientId` when omitted. |
-| `ios.appleSignIn`                    | iOS      | Apple Sign-In entitlement.                                                       |
+| `ios.appleSignIn`                    | iOS      | Apple Sign-In entitlement. Personal Apple teams cannot provision this.           |
 | `ios.microsoftClientId`              | iOS      | Microsoft Entra ID native login.                                                 |
 | `ios.microsoftTenant`                | iOS      | Microsoft tenant override.                                                       |
 | `ios.microsoftB2cDomain`             | iOS      | Microsoft B2C hostname.                                                          |
@@ -585,7 +581,8 @@ Profile metadata (email, name, photo) is persisted by default; set
 Supplying a custom storage adapter without an explicit token-persistence option
 keeps the pre-0.7 behavior and persists tokens.
 
-JWT decoding in this package is for display and routing only. Validate token
+JWT decoding in this package is for display and routing only. Native iOS and
+Android share a C++ payload split (`docs/native-libraries.md`). Validate token
 signatures, issuer, audience, nonce, and expiry on your server before creating
 an application session.
 
@@ -648,7 +645,7 @@ The native package gate and Expo example use React Native `0.86.3`. The
 `check:ci` workflow also compiles the public source against React Native
 `0.87.0`'s Strict TypeScript API to catch declaration and callback regressions;
 that compatibility check does not change the runtime baseline. Expo SDK
-`57.0.23` selects React Native `0.86.3`; do not override it in an Expo app.
+`57.0.24` selects React Native `0.86.3`; do not override it in an Expo app.
 
 Package peer range: `>=0.37.0 <0.38.0`.
 
@@ -694,6 +691,7 @@ improvements. It describes future work, not new APIs or measured speedups.
 - [npm package](https://www.npmjs.com/package/react-native-nitro-auth)
 - [GitHub repository](https://github.com/JoaoPauloCMarra/react-native-nitro-auth)
 - [Issue tracker](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/issues)
+- [Native libraries](docs/native-libraries.md)
 - [Benchmark policy](docs/benchmarks.md)
 - [Changelog](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/CHANGELOG.md)
 

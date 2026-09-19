@@ -48,8 +48,8 @@ generated values. No dictionary crosses the C++ provider boundary.
 
 These changes remove JS orchestration calls and repeated hook subscriptions.
 They do not establish a measured provider sign-in speedup. Auth UI and network
-latency usually dominate those operations. No custom cryptography, synchronous
-network calls, or token persistence was added.
+latency usually dominate those operations. Shared C++ SHA-256 and JWT payload
+decode are decode-only helpers; they do not verify signatures or persist tokens.
 
 Use the example E2E lookup measurement for a local diagnostic only. It measures
 120 in-process API lookups and reports elapsed milliseconds, not OAuth latency.

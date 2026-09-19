@@ -202,11 +202,15 @@ object AuthAdapter {
             randomBytes,
             Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP,
         )
-        val hashed = MessageDigest.getInstance("SHA-256")
-            .digest(raw.toByteArray(Charsets.UTF_8))
-            .joinToString("") { byte ->
-                (byte.toInt() and 0xff).toString(16).padStart(2, '0')
-            }
+        val hashed = try {
+            AuthCrypto.sha256Hex(raw)
+        } catch (_: UnsatisfiedLinkError) {
+            MessageDigest.getInstance("SHA-256")
+                .digest(raw.toByteArray(Charsets.US_ASCII))
+                .joinToString("") { byte ->
+                    (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+                }
+        }
         return arrayOf(raw, hashed)
     }
 
