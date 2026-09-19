@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import {
   AuthService,
@@ -19,10 +19,45 @@ function currentPlatform(): AuthPlatform {
   return "web";
 }
 
+async function runCredentialsSweep(): Promise<{
+  nonce: string;
+  capabilities: string;
+  snapshot: string;
+}> {
+  const platform = currentPlatform();
+  let nonce = "fail:nonce";
+  try {
+    const value = await NitroModules.createHybridObject<Auth>(
+      "Auth",
+    ).createNonce();
+    nonce = `ok:raw=${value.raw.length}:hashed=${value.hashed.length}`;
+  } catch (error) {
+    nonce = `fail:${error instanceof Error ? error.message : String(error)}`;
+  }
+
+  const google = getProviderTokenCapabilities("google", platform);
+  const apple = getProviderTokenCapabilities("apple", platform);
+  const microsoft = getProviderTokenCapabilities("microsoft", platform);
+  const capabilities = `ok:${platform}:g=${google.supportsAccessToken ? 1 : 0}:a=${apple.supportsAccessToken ? 1 : 0}:m=${microsoft.supportsAccessToken ? 1 : 0}`;
+
+  const session = AuthService.getSessionSnapshot();
+  const snapshot = `ok:rev=${session.revision}:user=${session.user ? "present" : "none"}:scopes=${session.scopes.length}`;
+
+  return { nonce, capabilities, snapshot };
+}
+
 export default function CredentialsLabScreen() {
-  const [nonceStatus, setNonceStatus] = useState("(idle)");
-  const [capabilityStatus, setCapabilityStatus] = useState("(idle)");
-  const [snapshotStatus, setSnapshotStatus] = useState("(idle)");
+  const [nonceStatus, setNonceStatus] = useState("running");
+  const [capabilityStatus, setCapabilityStatus] = useState("running");
+  const [snapshotStatus, setSnapshotStatus] = useState("running");
+
+  useEffect(() => {
+    void runCredentialsSweep().then((results) => {
+      setNonceStatus(results.nonce);
+      setCapabilityStatus(results.capabilities);
+      setSnapshotStatus(results.snapshot);
+    });
+  }, []);
 
   return (
     <View
@@ -32,8 +67,8 @@ export default function CredentialsLabScreen() {
     >
       <Text style={styles.title}>Credentials lab</Text>
       <Text style={styles.subtitle}>
-        Snapshot-safe nonce, capability, and session APIs. Live identity
-        provider buttons are never shown here.
+        Auto-runs on open. Snapshot-safe nonce, capability, and session APIs.
+        Live identity provider buttons are never shown here.
       </Text>
       <Text testID="e2e-credentials-ready" style={styles.result}>
         e2e-ready
@@ -54,46 +89,16 @@ export default function CredentialsLabScreen() {
       <View style={styles.row}>
         <LabButton
           testID="e2e-credentials-nonce-run"
-          label="Create nonce"
+          label="Re-run all"
           onPress={() => {
-            void NitroModules.createHybridObject<Auth>("Auth")
-              .createNonce()
-              .then((nonce) => {
-                setNonceStatus(
-                  `ok:raw=${nonce.raw.length}:hashed=${nonce.hashed.length}`,
-                );
-              })
-              .catch((error: unknown) => {
-                const message =
-                  error instanceof Error ? error.message : String(error);
-                setNonceStatus(`fail:${message}`);
-              });
-          }}
-        />
-        <LabButton
-          testID="e2e-credentials-capabilities-run"
-          label="Capabilities"
-          onPress={() => {
-            const platform = currentPlatform();
-            const google = getProviderTokenCapabilities("google", platform);
-            const apple = getProviderTokenCapabilities("apple", platform);
-            const microsoft = getProviderTokenCapabilities(
-              "microsoft",
-              platform,
-            );
-            setCapabilityStatus(
-              `ok:${platform}:g=${google.supportsAccessToken ? 1 : 0}:a=${apple.supportsAccessToken ? 1 : 0}:m=${microsoft.supportsAccessToken ? 1 : 0}`,
-            );
-          }}
-        />
-        <LabButton
-          testID="e2e-credentials-snapshot-run"
-          label="Snapshot"
-          onPress={() => {
-            const snapshot = AuthService.getSessionSnapshot();
-            setSnapshotStatus(
-              `ok:rev=${snapshot.revision}:user=${snapshot.user ? "present" : "none"}:scopes=${snapshot.scopes.length}`,
-            );
+            setNonceStatus("running");
+            setCapabilityStatus("running");
+            setSnapshotStatus("running");
+            void runCredentialsSweep().then((results) => {
+              setNonceStatus(results.nonce);
+              setCapabilityStatus(results.capabilities);
+              setSnapshotStatus(results.snapshot);
+            });
           }}
         />
       </View>
