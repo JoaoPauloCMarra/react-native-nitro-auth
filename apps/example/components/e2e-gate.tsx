@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, Text } from "react-native";
-import { Link, type Href } from "expo-router";
+import { Link } from "expo-router";
 
 export function E2eGate() {
   return (
@@ -14,7 +14,7 @@ export function E2eGate() {
           <Text style={styles.label}>E2E lab</Text>
         </Pressable>
       </Link>
-      <Link href={"/e2e-credentials" as Href} asChild>
+      <Link href="/e2e-credentials" asChild>
         <Pressable
           testID="open-e2e-credentials"
           accessibilityRole="link"
