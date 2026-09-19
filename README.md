@@ -581,7 +581,8 @@ Profile metadata (email, name, photo) is persisted by default; set
 Supplying a custom storage adapter without an explicit token-persistence option
 keeps the pre-0.7 behavior and persists tokens.
 
-JWT decoding in this package is for display and routing only. Validate token
+JWT decoding in this package is for display and routing only. Native iOS and
+Android share a C++ payload split (`docs/native-libraries.md`). Validate token
 signatures, issuer, audience, nonce, and expiry on your server before creating
 an application session.
 
@@ -690,6 +691,7 @@ improvements. It describes future work, not new APIs or measured speedups.
 - [npm package](https://www.npmjs.com/package/react-native-nitro-auth)
 - [GitHub repository](https://github.com/JoaoPauloCMarra/react-native-nitro-auth)
 - [Issue tracker](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/issues)
+- [Native libraries](docs/native-libraries.md)
 - [Benchmark policy](docs/benchmarks.md)
 - [Changelog](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/CHANGELOG.md)
 

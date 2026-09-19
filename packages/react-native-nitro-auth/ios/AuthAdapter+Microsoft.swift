@@ -310,29 +310,38 @@ extension AuthAdapter {
   }
 
   static func decodeJwt(_ token: String) -> [String: String] {
-    let parts = token.components(separatedBy: ".")
-    guard parts.count >= 2 else { return [:] }
-
-    var base64 = parts[1]
-      .replacingOccurrences(of: "-", with: "+")
-      .replacingOccurrences(of: "_", with: "/")
-    let remainder = base64.count % 4
-    if remainder > 0 {
-      base64 += String(repeating: "=", count: 4 - remainder)
+    var payloadChars = [CChar](repeating: 0, count: max(token.utf8.count * 2, 8))
+    let written = token.withCString { pointer in
+      NitroAuthJwtPayloadJson(pointer, &payloadChars, payloadChars.count)
     }
-
-    guard let data = Data(base64Encoded: base64),
+    guard written >= 0 else { return [:] }
+    let payload = String(cString: payloadChars)
+    guard let data = payload.data(using: .utf8),
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
       return [:]
     }
 
     var result: [String: String] = [:]
     for (key, value) in json {
-      if let str = value as? String {
-        result[key] = str
+      if let string = jwtClaimString(value) {
+        result[key] = string
       }
     }
     return result
+  }
+
+  private static func jwtClaimString(_ value: Any) -> String? {
+    if let string = value as? String {
+      return string
+    }
+    if let number = value as? NSNumber {
+      let objCType = String(cString: number.objCType)
+      if objCType == "c" || objCType == "B" {
+        return number.boolValue ? "true" : "false"
+      }
+      return number.stringValue
+    }
+    return nil
   }
 
   static func requestMicrosoftTokenRefresh(

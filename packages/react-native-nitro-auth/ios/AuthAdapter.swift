@@ -77,12 +77,12 @@ public class AuthAdapter: NSObject {
       .replacingOccurrences(of: "+", with: "-")
       .replacingOccurrences(of: "/", with: "_")
       .replacingOccurrences(of: "=", with: "")
-    guard let data = raw.data(using: .ascii) else { return nil }
-    var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-    data.withUnsafeBytes {
-      _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &digest)
+    var hashedChars = [CChar](repeating: 0, count: 65)
+    let hashStatus = raw.withCString { pointer in
+      NitroAuthSha256Hex(pointer, raw.utf8.count, &hashedChars, hashedChars.count)
     }
-    let hashed = Data(digest).map { String(format: "%02x", $0) }.joined()
+    guard hashStatus == 0 else { return nil }
+    let hashed = String(cString: hashedChars)
     return ["raw": raw, "hashed": hashed] as NSDictionary
   }
 

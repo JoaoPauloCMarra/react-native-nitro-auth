@@ -25,6 +25,15 @@ const tests = [
     output: path.join(__dirname, "../cpp/__tests__/hybrid_auth_tests"),
     coverageSources: [path.join(__dirname, "../cpp/HybridAuth.cpp")],
   },
+  {
+    name: "auth-crypto",
+    sources: [
+      path.join(__dirname, "../cpp/AuthCrypto.cpp"),
+      path.join(__dirname, "../cpp/__tests__/AuthCryptoTests.cpp"),
+    ],
+    output: path.join(__dirname, "../cpp/__tests__/auth_crypto_tests"),
+    coverageSources: [path.join(__dirname, "../cpp/AuthCrypto.cpp")],
+  },
 ];
 
 function resolveTool(name) {

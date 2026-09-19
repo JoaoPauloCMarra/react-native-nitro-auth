@@ -20,6 +20,7 @@ Pod::Spec.new do |s|
     "ios/**/*.{h,m,mm,swift}",
     "cpp/**/*.{h,hpp,c,cpp}"
   ]
+  s.public_header_files = "ios/NitroAuthCrypto.h"
   s.exclude_files = "cpp/__tests__/**/*"
 
   s.pod_target_xcconfig = {

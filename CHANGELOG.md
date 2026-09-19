@@ -23,6 +23,9 @@ Breaking changes are always listed first in each release section.
   React Native stays `0.86.3`.
 - The example iOS host uses a `SceneDelegate` so the app can present a window on
   iOS 27 physical devices.
+- Native nonce hashing and JWT payload splits share `cpp/AuthCrypto.cpp`
+  (SHA-256 hex + base64url). Signatures are still not verified. See
+  [docs/native-libraries.md](docs/native-libraries.md).
 
 ## [0.11.0] - 2026-09-15
 

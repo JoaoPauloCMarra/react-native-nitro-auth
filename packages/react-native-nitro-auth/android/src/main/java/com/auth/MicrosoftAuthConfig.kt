@@ -28,10 +28,20 @@ internal object MicrosoftAuthConfig {
 
     fun decodeJwt(token: String): Map<String, String> {
         return try {
-            val parts = token.split(".")
-            if (parts.size < 2) return emptyMap()
-            val payload = String(Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP))
-            val json = JSONObject(payload)
+            val payload = try {
+                AuthCrypto.jwtPayloadJson(token)
+            } catch (_: UnsatisfiedLinkError) {
+                null
+            }
+            val json = if (payload != null) {
+                JSONObject(payload)
+            } else {
+                val parts = token.split(".")
+                if (parts.size < 2) return emptyMap()
+                JSONObject(
+                    String(Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)),
+                )
+            }
             val result = mutableMapOf<String, String>()
             json.keys().forEach { key ->
                 val value = json.optString(key)
