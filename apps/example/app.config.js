@@ -12,6 +12,20 @@ const appConfig = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.auth.example",
+      infoPlist: {
+        UIApplicationSceneManifest: {
+          UIApplicationSupportsMultipleScenes: false,
+          UISceneConfigurations: {
+            UIWindowSceneSessionRoleApplication: [
+              {
+                UISceneConfigurationName: "Default Configuration",
+                UISceneDelegateClassName:
+                  "$(PRODUCT_MODULE_NAME).SceneDelegate",
+              },
+            ],
+          },
+        },
+      },
     },
     android: {
       package: "com.auth.example",
@@ -22,6 +36,7 @@ const appConfig = {
     },
     plugins: [
       "expo-router",
+      "./plugins/with-ios-scene-lifecycle",
       [
         "expo-build-properties",
         {

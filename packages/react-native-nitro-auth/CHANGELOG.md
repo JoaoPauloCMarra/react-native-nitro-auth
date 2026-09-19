@@ -12,10 +12,17 @@ Breaking changes are always listed first in each release section.
 
 - None.
 
+### Added
+
+- Hidden example credentials lab at `auth://e2e-credentials` for nonce,
+  capability, and snapshot coverage without live OAuth.
+
 ### Changed
 
 - The example Expo pin follows SDK 57.0.24 (`expo-doctor` / `expo install --check`).
   React Native stays `0.86.3`.
+- The example iOS host uses a `SceneDelegate` so the app can present a window on
+  iOS 27 physical devices.
 
 ## [0.11.0] - 2026-09-15
 
