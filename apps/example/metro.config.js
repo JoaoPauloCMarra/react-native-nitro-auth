@@ -9,8 +9,8 @@
  * 1. We're in a monorepo and need to watch local packages
  * 2. react-native-nitro-modules doesn't support web, so we exclude it
  */
-const { getDefaultConfig } = require("expo/metro-config");
 const path = require("path");
+const { getDefaultConfig } = require("expo/metro-config");
 
 const projectRoot = __dirname;
 const monorepoRoot = path.resolve(projectRoot, "../..");

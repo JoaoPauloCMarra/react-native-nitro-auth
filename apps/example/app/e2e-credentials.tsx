@@ -27,9 +27,8 @@ async function runCredentialsSweep(): Promise<{
   const platform = currentPlatform();
   let nonce = "fail:nonce";
   try {
-    const value = await NitroModules.createHybridObject<Auth>(
-      "Auth",
-    ).createNonce();
+    const value =
+      await NitroModules.createHybridObject<Auth>("Auth").createNonce();
     nonce = `ok:raw=${value.raw.length}:hashed=${value.hashed.length}`;
   } catch (error) {
     nonce = `fail:${error instanceof Error ? error.message : String(error)}`;
