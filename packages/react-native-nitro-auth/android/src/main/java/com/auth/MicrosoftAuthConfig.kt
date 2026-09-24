@@ -3,6 +3,8 @@ package com.auth
 import android.util.Base64
 import android.util.Log
 import org.json.JSONObject
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 
 internal object MicrosoftAuthConfig {
     private const val TAG = "AuthAdapter"
@@ -28,20 +30,15 @@ internal object MicrosoftAuthConfig {
 
     fun decodeJwt(token: String): Map<String, String> {
         return try {
-            val payload = try {
-                AuthCrypto.jwtPayloadJson(token)
-            } catch (_: UnsatisfiedLinkError) {
-                null
-            }
-            val json = if (payload != null) {
-                JSONObject(payload)
-            } else {
-                val parts = token.split(".")
-                if (parts.size < 2) return emptyMap()
-                JSONObject(
-                    String(Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)),
-                )
-            }
+            val parts = token.split(".")
+            if (parts.size < 2) return emptyMap()
+            val payloadBytes = Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+            val payload = Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(payloadBytes))
+                .toString()
+            val json = JSONObject(payload)
             val result = mutableMapOf<String, String>()
             json.keys().forEach { key ->
                 val value = json.optString(key)

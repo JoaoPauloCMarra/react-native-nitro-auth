@@ -19,20 +19,3 @@ Java_com_auth_AuthCrypto_sha256Hex(JNIEnv* env, jclass, jstring input) {
     env->ReleaseStringUTFChars(input, bytes);
     return env->NewStringUTF(hex.c_str());
 }
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_auth_AuthCrypto_jwtPayloadJson(JNIEnv* env, jclass, jstring jwt) {
-    if (jwt == nullptr) {
-        return nullptr;
-    }
-    const char* bytes = env->GetStringUTFChars(jwt, nullptr);
-    if (bytes == nullptr) {
-        return nullptr;
-    }
-    const auto payload = NitroAuth::decodeJwtPayloadJson(bytes);
-    env->ReleaseStringUTFChars(jwt, bytes);
-    if (!payload.has_value()) {
-        return nullptr;
-    }
-    return env->NewStringUTF(payload->c_str());
-}
