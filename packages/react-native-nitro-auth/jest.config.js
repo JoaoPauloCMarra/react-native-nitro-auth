@@ -1,3 +1,13 @@
+const path = require("path");
+
+const authWebCoveragePath = path.join(
+  __dirname,
+  "src",
+  `file:${__dirname}`,
+  "src",
+  "Auth.web.ts",
+);
+
 module.exports = {
   testEnvironment: "jsdom",
   moduleFileExtensions: ["ts", "tsx", "js", "jsx"],
@@ -35,7 +45,7 @@ module.exports = {
     // browser-environment branches (TextDecoder fallback, window guards,
     // cross-origin popup timing) are not reachable in jsdom; statement, line,
     // and function coverage still meet the global bar.
-    "src/Auth.web.ts": {
+    [authWebCoveragePath]: {
       branches: 80,
       functions: 90,
       lines: 90,
