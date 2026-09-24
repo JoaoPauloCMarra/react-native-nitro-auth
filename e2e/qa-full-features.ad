@@ -28,6 +28,7 @@ press label="Toggle button shape"
 wait text "e2e-ready"
 wait id="e2e-lab"
 wait text "signed-out"
+scroll down
 press id="e2e-capabilities-run"
 wait text "ok:"
 press id="e2e-events-run"
@@ -43,5 +44,7 @@ wait text "ok:lookups=120:ms="
 scroll down
 wait id="smoke-run-all"
 press id="smoke-run-all"
-wait text "Complete: PASS"
+wait 7000
+open "com.auth.example"
+wait text "Complete: PASS" 30000
 close
