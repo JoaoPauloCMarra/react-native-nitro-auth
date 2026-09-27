@@ -581,6 +581,16 @@ Profile metadata (email, name, photo) is persisted by default; set
 Supplying a custom storage adapter without an explicit token-persistence option
 keeps the pre-0.7 behavior and persists tokens.
 
+Restoring a cached session rewrites the owned cache record to remove token or
+profile fields disallowed by the current policy. If the browser or adapter
+denies writes/removals, the in-memory session stays sanitized, but physical
+erasure cannot be guaranteed. Restricted browser storage falls back to memory.
+
+Apple web SDK loading has a 15-second timeout. A later sign-in attempt retries
+a failed load; package-owned failed scripts are removed, while scripts supplied
+by the app remain owned by the app. Cancelled or disposed attempts cannot start
+sign-in after a late SDK load.
+
 JWT decoding in this package is for display and routing only. Native iOS and
 Android share a C++ payload split (`docs/native-libraries.md`). Validate token
 signatures, issuer, audience, nonce, and expiry on your server before creating
