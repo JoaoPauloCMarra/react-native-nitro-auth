@@ -34,6 +34,22 @@ const STORAGE_MODE_MEMORY = "memory";
 const POPUP_POLL_INTERVAL_MS = 500;
 const POPUP_POLL_INTERVAL_CROSS_ORIGIN_MS = 1000;
 const POPUP_TIMEOUT_MS = 120000;
+const APPLE_SDK_LOAD_TIMEOUT_MS = 15000;
+const APPLE_SDK_SCRIPT_ID = "nitro-auth-apple-sdk";
+const WEB_CREDENTIAL_FIELDS = [
+  "accessToken",
+  "idToken",
+  "serverAuthCode",
+  "authorizationCode",
+  "refreshToken",
+] as const;
+const WEB_PROFILE_FIELDS = [
+  "email",
+  "name",
+  "firstName",
+  "lastName",
+  "photo",
+] as const;
 const WEB_STORAGE_MODES = new Set([
   STORAGE_MODE_SESSION,
   STORAGE_MODE_LOCAL,
@@ -69,12 +85,24 @@ const WEB_AUTH_ERROR_CODES: ReadonlySet<string> = new Set<AuthErrorCode>([
 ]);
 const JWT_BASE64_URL_RE = /^[A-Za-z0-9_-]+$/;
 const inMemoryWebStorage = new Map<string, string>();
-let _appleSdkLoadPromise: Promise<void> | undefined;
+let _appleSdkLoadState: AppleSdkLoadState | undefined;
+let _appleSdkRetryScriptId = 0;
+const _terminalAppleSdkScripts = new WeakSet<HTMLScriptElement>();
 
 type WebStorageDriver = {
   save(key: string, value: string): void;
   load(key: string): string | undefined;
   remove(key: string): void;
+};
+
+type AppleSdkLoadState = {
+  promise: Promise<void>;
+  script: HTMLScriptElement | undefined;
+  ownsScript: boolean;
+  timeoutId: number | undefined;
+  onLoad: EventListener;
+  onError: EventListener;
+  settled: boolean;
 };
 
 type AppleAuthResponse = {
@@ -118,6 +146,33 @@ class AuthWebError extends Error {
     this.underlyingError = underlyingError;
   }
 }
+
+const getSafeErrorCategory = (error: unknown): string => {
+  try {
+    if (error instanceof AuthWebError) {
+      return error.code;
+    }
+    if (error instanceof Error) {
+      const name = error.name;
+      switch (name) {
+        case "AbortError":
+        case "InvalidStateError":
+        case "NetworkError":
+        case "NotAllowedError":
+        case "NotReadableError":
+        case "QuotaExceededError":
+        case "SecurityError":
+        case "TimeoutError":
+          return name;
+        default:
+          return "Error";
+      }
+    }
+  } catch {
+    return "UnknownError";
+  }
+  return "UnknownError";
+};
 
 const isJsonObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null;
@@ -429,9 +484,11 @@ class AuthWeb implements Auth {
       return undefined;
     }
 
-    const storage =
-      mode === STORAGE_MODE_LOCAL ? window.localStorage : window.sessionStorage;
     try {
+      const storage =
+        mode === STORAGE_MODE_LOCAL
+          ? window.localStorage
+          : window.sessionStorage;
       const testKey = "__nitro_auth_storage_probe__";
       storage.setItem(testKey, "1");
       storage.removeItem(testKey);
@@ -442,7 +499,7 @@ class AuthWeb implements Auth {
         "Configured web storage is unavailable; using in-memory fallback",
         {
           mode,
-          error: String(error),
+          error: getSafeErrorCategory(error),
         },
       );
       this._browserStorageCache = undefined;
@@ -495,34 +552,139 @@ class AuthWeb implements Auth {
       return;
     }
 
-    try {
-      window.localStorage.removeItem(key);
-      window.sessionStorage.removeItem(key);
-    } catch (error) {
-      logger.debug("Failed to clear persisted browser value", {
-        key,
-        error: String(error),
-      });
+    for (const mode of [STORAGE_MODE_LOCAL, STORAGE_MODE_SESSION] as const) {
+      try {
+        const storage =
+          mode === STORAGE_MODE_LOCAL
+            ? window.localStorage
+            : window.sessionStorage;
+        storage.removeItem(key);
+      } catch (error) {
+        logger.debug("Failed to clear persisted browser value", {
+          key,
+          mode,
+          error: getSafeErrorCategory(error),
+        });
+      }
     }
   }
 
-  private sanitizeUserForPersistence(user: AuthUser): AuthUser {
+  private sanitizeOtherBrowserUserCaches(
+    selectedBrowserMode:
+      typeof STORAGE_MODE_LOCAL | typeof STORAGE_MODE_SESSION | undefined,
+  ): void {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    for (const mode of [STORAGE_MODE_LOCAL, STORAGE_MODE_SESSION] as const) {
+      if (mode === selectedBrowserMode) {
+        continue;
+      }
+
+      let storage: Storage;
+      let cached: string | null;
+      try {
+        storage =
+          mode === STORAGE_MODE_LOCAL
+            ? window.localStorage
+            : window.sessionStorage;
+        cached = storage.getItem(CACHE_KEY);
+      } catch (error) {
+        logger.warn("Failed to inspect cached auth user in browser storage", {
+          mode,
+          error: getSafeErrorCategory(error),
+        });
+        continue;
+      }
+
+      if (cached === null) {
+        continue;
+      }
+
+      let parsedValue: unknown;
+      try {
+        parsedValue = JSON.parse(cached);
+      } catch (error) {
+        logger.warn(
+          "Failed to parse cached auth user in browser storage; removing it",
+          { mode, error: getSafeErrorCategory(error) },
+        );
+        this.removeInvalidBrowserUserCache(storage, mode);
+        continue;
+      }
+
+      if (!isJsonObject(parsedValue) || !parseAuthUser(parsedValue)) {
+        logger.warn(
+          "Invalid cached auth user in browser storage; removing it",
+          {
+            mode,
+          },
+        );
+        this.removeInvalidBrowserUserCache(storage, mode);
+        continue;
+      }
+
+      const sanitizedCache = JSON.stringify(
+        this.sanitizeUserForPersistence(parsedValue),
+      );
+      if (sanitizedCache === cached) {
+        continue;
+      }
+
+      try {
+        storage.setItem(CACHE_KEY, sanitizedCache);
+      } catch (error) {
+        logger.warn(
+          "Failed to sanitize cached auth user in browser storage; sensitive fields may remain persisted",
+          { mode, error: getSafeErrorCategory(error) },
+        );
+      }
+    }
+  }
+
+  private removeInvalidBrowserUserCache(
+    storage: Storage,
+    mode: typeof STORAGE_MODE_LOCAL | typeof STORAGE_MODE_SESSION,
+  ): void {
+    try {
+      storage.removeItem(CACHE_KEY);
+    } catch (error) {
+      logger.warn(
+        "Failed to remove invalid cached auth user from browser storage",
+        { mode, error: getSafeErrorCategory(error) },
+      );
+    }
+  }
+
+  private sanitizeUserForPersistence(user: AuthUser): AuthUser;
+  private sanitizeUserForPersistence(user: JsonObject): JsonObject;
+  private sanitizeUserForPersistence(
+    user: AuthUser | JsonObject,
+  ): AuthUser | JsonObject {
     const safeUser = { ...user };
     if (!this.shouldPersistTokensInStorage()) {
-      delete safeUser.accessToken;
-      delete safeUser.idToken;
-      delete safeUser.serverAuthCode;
-      delete safeUser.authorizationCode;
-      delete safeUser.refreshToken;
+      for (const field of WEB_CREDENTIAL_FIELDS) {
+        Reflect.deleteProperty(safeUser, field);
+      }
     }
     if (!this.shouldPersistProfile()) {
-      delete safeUser.email;
-      delete safeUser.name;
-      delete safeUser.firstName;
-      delete safeUser.lastName;
-      delete safeUser.photo;
+      for (const field of WEB_PROFILE_FIELDS) {
+        Reflect.deleteProperty(safeUser, field);
+      }
     }
     return safeUser;
+  }
+
+  private removeInvalidCacheValue(key: string): void {
+    try {
+      this.removeFromCache(key);
+    } catch (error) {
+      logger.warn("Failed to remove invalid cached auth data", {
+        key,
+        error: getSafeErrorCategory(error),
+      });
+    }
   }
 
   private saveRefreshToken(refreshToken: string): void {
@@ -545,35 +707,36 @@ class AuthWeb implements Auth {
   private loadFromCache() {
     const cached = this.loadValue(CACHE_KEY);
 
-    if (cached) {
+    if (cached !== undefined) {
       try {
-        const parsedUser = parseAuthUser(JSON.parse(cached));
+        const parsedValue: unknown = JSON.parse(cached);
+        if (!isJsonObject(parsedValue)) {
+          throw new Error("Expected cached auth user to be an object");
+        }
+        const parsedUser = parseAuthUser(parsedValue);
         if (!parsedUser) {
           throw new Error("Expected cached auth user to be a valid AuthUser");
         }
-        if (this.shouldPersistTokensInStorage()) {
-          this._currentUser = parsedUser;
-        } else {
-          const safeUser = { ...parsedUser };
-          delete safeUser.accessToken;
-          delete safeUser.idToken;
-          delete safeUser.serverAuthCode;
-          delete safeUser.authorizationCode;
-          delete safeUser.refreshToken;
-          this._currentUser = safeUser;
+
+        const safeRecord = this.sanitizeUserForPersistence(parsedValue);
+        const sanitizedCache = JSON.stringify(safeRecord);
+        if (sanitizedCache !== cached) {
+          try {
+            this.saveValue(CACHE_KEY, sanitizedCache);
+          } catch (error) {
+            logger.warn(
+              "Failed to sanitize cached auth user; keeping the in-memory session safe",
+              { error: getSafeErrorCategory(error) },
+            );
+          }
         }
-        if (!this.shouldPersistProfile()) {
-          delete this._currentUser.email;
-          delete this._currentUser.name;
-          delete this._currentUser.firstName;
-          delete this._currentUser.lastName;
-          delete this._currentUser.photo;
-        }
+
+        this._currentUser = this.sanitizeUserForPersistence(parsedUser);
       } catch (error) {
         logger.warn("Failed to parse cached auth user; clearing cache", {
-          error: String(error),
+          error: getSafeErrorCategory(error),
         });
-        this.removeFromCache(CACHE_KEY);
+        this.removeInvalidCacheValue(CACHE_KEY);
       }
     }
 
@@ -588,16 +751,32 @@ class AuthWeb implements Auth {
         this._grantedScopes = parsedScopes;
       } catch (error) {
         logger.warn("Failed to parse cached scopes; clearing cache", {
-          error: String(error),
+          error: getSafeErrorCategory(error),
         });
-        this.removeFromCache(SCOPES_KEY);
+        this.removeInvalidCacheValue(SCOPES_KEY);
       }
     }
 
+    const configuredStorageMode = this.getWebStorageMode();
+    const selectedBrowserMode = this._storageAdapter
+      ? undefined
+      : configuredStorageMode === STORAGE_MODE_MEMORY
+        ? undefined
+        : configuredStorageMode;
+    this.sanitizeOtherBrowserUserCaches(selectedBrowserMode);
+
     if (!this.shouldPersistTokensInStorage()) {
       this.removePersistedBrowserValue(MS_REFRESH_TOKEN_KEY);
+      inMemoryWebStorage.delete(MS_REFRESH_TOKEN_KEY);
       if (this._storageAdapter) {
-        this.removeValue(MS_REFRESH_TOKEN_KEY);
+        try {
+          this.removeValue(MS_REFRESH_TOKEN_KEY);
+        } catch (error) {
+          logger.warn(
+            "Failed to clear the Microsoft refresh token from the configured web storage adapter",
+            { error: getSafeErrorCategory(error) },
+          );
+        }
       }
     }
   }
@@ -1788,58 +1967,106 @@ class AuthWeb implements Auth {
       return;
     }
 
-    if (_appleSdkLoadPromise) {
-      return _appleSdkLoadPromise;
+    if (_appleSdkLoadState) {
+      return _appleSdkLoadState.promise;
     }
 
-    _appleSdkLoadPromise = new Promise<void>((resolve, reject) => {
-      const scriptId = "nitro-auth-apple-sdk";
-      const existingScript = document.getElementById(
-        scriptId,
-      ) as HTMLScriptElement | null;
+    let resolveLoad!: () => void;
+    let rejectLoad!: (error: unknown) => void;
+    const promise = new Promise<void>((resolve, reject) => {
+      resolveLoad = resolve;
+      rejectLoad = reject;
+    });
+    const state: AppleSdkLoadState = {
+      promise,
+      script: undefined,
+      ownsScript: false,
+      timeoutId: undefined,
+      onLoad: () => undefined,
+      onError: () => undefined,
+      settled: false,
+    };
+    _appleSdkLoadState = state;
 
-      if (existingScript) {
-        if (window.AppleID) {
-          resolve();
-          return;
-        }
-
-        existingScript.addEventListener(
-          "load",
-          () => {
-            resolve();
-          },
-          {
-            once: true,
-          },
-        );
-        existingScript.addEventListener(
-          "error",
-          () => {
-            _appleSdkLoadPromise = undefined;
-            reject(new Error("Failed to load Apple SDK"));
-          },
-          { once: true },
-        );
+    const settle = (error?: Error): void => {
+      if (state.settled || _appleSdkLoadState !== state) {
         return;
       }
+      state.settled = true;
+      if (state.timeoutId !== undefined) {
+        window.clearTimeout(state.timeoutId);
+      }
 
-      const script = document.createElement("script");
-      script.id = scriptId;
-      script.src =
-        "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js";
-      script.async = true;
-      script.onload = () => {
-        resolve();
-      };
-      script.onerror = () => {
-        _appleSdkLoadPromise = undefined;
-        reject(new Error("Failed to load Apple SDK"));
-      };
-      document.head.appendChild(script);
-    });
+      const script = state.script;
+      if (script) {
+        script.removeEventListener("load", state.onLoad);
+        script.removeEventListener("error", state.onError);
+        _terminalAppleSdkScripts.add(script);
+        if (error && state.ownsScript && script.parentNode) {
+          try {
+            script.parentNode.removeChild(script);
+          } catch (cleanupError) {
+            logger.debug("Failed to remove a failed Apple SDK script", {
+              error: getSafeErrorCategory(cleanupError),
+            });
+          }
+        }
+      }
 
-    return _appleSdkLoadPromise;
+      _appleSdkLoadState = undefined;
+      if (error) {
+        rejectLoad(error);
+      } else {
+        resolveLoad();
+      }
+    };
+
+    state.onLoad = () => {
+      if (window.AppleID) {
+        settle();
+      } else {
+        settle(new Error("Failed to load Apple SDK"));
+      }
+    };
+    state.onError = () => {
+      settle(new Error("Failed to load Apple SDK"));
+    };
+
+    try {
+      const existingElement = document.getElementById(APPLE_SDK_SCRIPT_ID);
+      const existingScript =
+        existingElement instanceof HTMLScriptElement ? existingElement : null;
+      const canReuseExistingScript =
+        existingScript !== null &&
+        !_terminalAppleSdkScripts.has(existingScript);
+      const script = canReuseExistingScript
+        ? existingScript
+        : document.createElement("script");
+
+      state.script = script;
+      state.ownsScript = !canReuseExistingScript;
+      if (state.ownsScript) {
+        script.id = existingElement
+          ? `${APPLE_SDK_SCRIPT_ID}-${++_appleSdkRetryScriptId}`
+          : APPLE_SDK_SCRIPT_ID;
+        script.src =
+          "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js";
+        script.async = true;
+      }
+
+      script.addEventListener("load", state.onLoad);
+      script.addEventListener("error", state.onError);
+      state.timeoutId = window.setTimeout(() => {
+        settle(new AuthWebError("timeout", "Apple SDK script load timed out"));
+      }, APPLE_SDK_LOAD_TIMEOUT_MS);
+      if (state.ownsScript) {
+        document.head.appendChild(script);
+      }
+    } catch (error) {
+      settle(error instanceof Error ? error : new Error(String(error)));
+    }
+
+    return promise;
   }
 
   private async loginApple(
@@ -1855,6 +2082,9 @@ class AuthWeb implements Auth {
     }
 
     await this.ensureAppleSdkLoaded();
+    if (generation !== undefined) {
+      this.assertActiveGeneration(generation);
+    }
     if (!window.AppleID) {
       throw new Error("Apple SDK not loaded");
     }

@@ -3,6 +3,7 @@ import { TextDecoder, TextEncoder } from "util";
 const CACHE_KEY = "nitro_auth_user";
 const SCOPES_KEY = "nitro_auth_scopes";
 const MS_REFRESH_TOKEN_KEY = "nitro_auth_microsoft_refresh_token";
+const originalStorageRemoveItem = Storage.prototype.removeItem;
 
 type TestAuthUser = {
   provider: string;
@@ -117,9 +118,7 @@ const createJwtWithPayload = (payload: Record<string, unknown>) => {
   return `${header}.${body}.sig`;
 };
 
-const loadAuthModule = async (
-  extra?: Record<string, unknown>,
-): Promise<TestAuthModule> => {
+const mockAuthConfig = (extra?: Record<string, unknown>): void => {
   jest.resetModules();
   jest.doMock(
     "expo-constants",
@@ -129,8 +128,27 @@ const loadAuthModule = async (
     }),
     { virtual: true },
   );
+};
+
+const loadAuthModule = async (
+  extra?: Record<string, unknown>,
+): Promise<TestAuthModule> => {
+  mockAuthConfig(extra);
   const module = await import("../Auth.web");
   return module.AuthModule as unknown as TestAuthModule;
+};
+
+const loadAuthInstances = async (
+  extra?: Record<string, unknown>,
+): Promise<{ first: TestAuthModule; second: TestAuthModule }> => {
+  mockAuthConfig(extra);
+  const module = await import("../Auth.web");
+  const first = module.AuthModule as unknown as TestAuthModule;
+  module.resetAuthModule(module.AuthModule);
+  return {
+    first,
+    second: module.AuthModule as unknown as TestAuthModule,
+  };
 };
 
 const loadAuthService = async (extra?: Record<string, unknown>) => {
@@ -378,9 +396,378 @@ describe("AuthModule (web)", () => {
     expect(localStorage.getItem(MS_REFRESH_TOKEN_KEY)).toBe(
       "persisted-refresh-token",
     );
+    expect(JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}")).toMatchObject({
+      accessToken: "persisted-access-token",
+      idToken: "persisted-id-token",
+    });
+  });
+
+  it.each(["local", "session"] as const)(
+    "uses memory storage when the selected %s storage getter throws",
+    async (mode) => {
+      mockAuthConfig({ nitroAuthWebStorage: mode });
+      const propertyName = mode === "local" ? "localStorage" : "sessionStorage";
+      const storageDescriptor = Object.getOwnPropertyDescriptor(
+        window,
+        propertyName,
+      );
+      Object.defineProperty(window, propertyName, {
+        configurable: true,
+        get() {
+          throw new DOMException(`${mode} storage is blocked`, "SecurityError");
+        },
+      });
+
+      try {
+        const module = await import("../Auth.web");
+        const auth = module.AuthModule as unknown as TestAuthModule;
+        expect(auth.currentUser).toBeUndefined();
+        expect(() => {
+          auth.logout();
+        }).not.toThrow();
+      } finally {
+        if (storageDescriptor) {
+          Object.defineProperty(window, propertyName, storageDescriptor);
+        } else {
+          Reflect.deleteProperty(window, propertyName);
+        }
+      }
+    },
+  );
+
+  it("keeps the selected storage usable when the unselected getter throws", async () => {
+    sessionStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({ provider: "google", userId: "session-user" }),
+    );
+    mockAuthConfig({ nitroAuthWebStorage: "session" });
+    const storageDescriptor = Object.getOwnPropertyDescriptor(
+      window,
+      "localStorage",
+    );
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("local storage is blocked", "SecurityError");
+      },
+    });
+
+    try {
+      const module = await import("../Auth.web");
+      const auth = module.AuthModule as unknown as TestAuthModule;
+      expect(auth.currentUser).toMatchObject({
+        provider: "google",
+        userId: "session-user",
+      });
+    } finally {
+      if (storageDescriptor) {
+        Object.defineProperty(window, "localStorage", storageDescriptor);
+      } else {
+        Reflect.deleteProperty(window, "localStorage");
+      }
+    }
+  });
+
+  it("rewrites previously persisted credentials using the current opt-out policy", async () => {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "microsoft",
+        email: "person@example.com",
+        accessToken: "old-access-token",
+        idToken: "old-id-token",
+        refreshToken: "old-user-refresh-token",
+        serverAuthCode: "old-server-auth-code",
+        authorizationCode: "old-authorization-code",
+        userId: "user-123",
+        customMetadata: { source: "legacy-cache" },
+      }),
+    );
+    localStorage.setItem(MS_REFRESH_TOKEN_KEY, "old-microsoft-refresh-token");
+    sessionStorage.setItem(MS_REFRESH_TOKEN_KEY, "old-session-refresh-token");
+
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: false,
+    });
+
+    const persistedUser = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}");
+    expect(auth.currentUser).toMatchObject({
+      provider: "microsoft",
+      email: "person@example.com",
+      userId: "user-123",
+    });
+    expect(auth.currentUser?.accessToken).toBeUndefined();
+    expect(persistedUser).toEqual({
+      provider: "microsoft",
+      email: "person@example.com",
+      userId: "user-123",
+      customMetadata: { source: "legacy-cache" },
+    });
+    expect(localStorage.getItem(MS_REFRESH_TOKEN_KEY)).toBeNull();
+    expect(sessionStorage.getItem(MS_REFRESH_TOKEN_KEY)).toBeNull();
+
+    const sanitizedValue = localStorage.getItem(CACHE_KEY);
+    await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: false,
+    });
+    expect(localStorage.getItem(CACHE_KEY)).toBe(sanitizedValue);
+  });
+
+  it("rewrites cached profile fields when profile persistence is disabled", async () => {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "google",
+        email: "private@example.com",
+        name: "Private Name",
+        firstName: "Private",
+        lastName: "Name",
+        photo: "https://example.com/private.png",
+        idToken: "old-id-token",
+        accessToken: "old-access-token",
+        userId: "subject-123",
+        scopes: ["openid"],
+      }),
+    );
+
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: false,
+      nitroAuthPersistProfileOnWeb: false,
+    });
+
+    expect(auth.currentUser).toMatchObject({
+      provider: "google",
+      userId: "subject-123",
+      scopes: ["openid"],
+    });
+    expect(JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}")).toEqual({
+      provider: "google",
+      userId: "subject-123",
+      scopes: ["openid"],
+    });
+  });
+
+  it.each([
+    ["local", "session"],
+    ["session", "local"],
+  ] as const)(
+    "sanitizes both browser caches while restoring only the selected %s cache",
+    async (selectedMode, otherMode) => {
+      const storeByMode = { local: localStorage, session: sessionStorage };
+      const selectedStore = storeByMode[selectedMode];
+      const otherStore = storeByMode[otherMode];
+      const createCachedUser = (mode: string) => ({
+        provider: "microsoft",
+        userId: `${mode}-user`,
+        accessToken: `${mode}-access-token`,
+        idToken: `${mode}-id-token`,
+        refreshToken: `${mode}-refresh-token`,
+        serverAuthCode: `${mode}-server-auth-code`,
+        authorizationCode: `${mode}-authorization-code`,
+        email: `${mode}@example.com`,
+        name: `${mode} name`,
+        firstName: mode,
+        lastName: "user",
+        photo: `https://example.com/${mode}.png`,
+        customMetadata: { source: mode },
+      });
+      const originalValues = {
+        selected: createCachedUser(selectedMode),
+        other: createCachedUser(otherMode),
+      };
+      selectedStore.setItem(CACHE_KEY, JSON.stringify(originalValues.selected));
+      otherStore.setItem(CACHE_KEY, JSON.stringify(originalValues.other));
+      localStorage.setItem("unrelated-local-key", "preserve-local");
+      sessionStorage.setItem("unrelated-session-key", "preserve-session");
+
+      const auth = await loadAuthModule({
+        nitroAuthWebStorage: selectedMode,
+        nitroAuthPersistTokensOnWeb: false,
+        nitroAuthPersistProfileOnWeb: false,
+      });
+
+      expect(auth.currentUser).toMatchObject({
+        provider: "microsoft",
+        userId: `${selectedMode}-user`,
+      });
+      expect(auth.currentUser?.accessToken).toBeUndefined();
+      expect(auth.currentUser?.email).toBeUndefined();
+      expect(JSON.parse(selectedStore.getItem(CACHE_KEY) ?? "{}")).toEqual({
+        provider: "microsoft",
+        userId: `${selectedMode}-user`,
+        customMetadata: { source: selectedMode },
+      });
+      expect(JSON.parse(otherStore.getItem(CACHE_KEY) ?? "{}")).toEqual({
+        provider: "microsoft",
+        userId: `${otherMode}-user`,
+        customMetadata: { source: otherMode },
+      });
+      expect(localStorage.getItem("unrelated-local-key")).toBe(
+        "preserve-local",
+      );
+      expect(sessionStorage.getItem("unrelated-session-key")).toBe(
+        "preserve-session",
+      );
+      expect(originalValues.selected.userId).toBe(`${selectedMode}-user`);
+    },
+  );
+
+  it("sanitizes browser user caches in memory mode without restoring them", async () => {
+    const createCachedUser = (mode: string) => ({
+      provider: "google",
+      userId: `${mode}-user`,
+      accessToken: `${mode}-access-token`,
+      email: `${mode}@example.com`,
+      customMetadata: { source: mode },
+    });
+    localStorage.setItem(CACHE_KEY, JSON.stringify(createCachedUser("local")));
+    sessionStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify(createCachedUser("session")),
+    );
+    localStorage.setItem("unrelated-local-key", "preserve-local");
+    sessionStorage.setItem("unrelated-session-key", "preserve-session");
+
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "memory",
+      nitroAuthPersistTokensOnWeb: false,
+      nitroAuthPersistProfileOnWeb: false,
+    });
+
+    expect(auth.currentUser).toBeUndefined();
+    expect(JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}")).toEqual({
+      provider: "google",
+      userId: "local-user",
+      customMetadata: { source: "local" },
+    });
+    expect(JSON.parse(sessionStorage.getItem(CACHE_KEY) ?? "{}")).toEqual({
+      provider: "google",
+      userId: "session-user",
+      customMetadata: { source: "session" },
+    });
+    expect(localStorage.getItem("unrelated-local-key")).toBe("preserve-local");
+    expect(sessionStorage.getItem("unrelated-session-key")).toBe(
+      "preserve-session",
+    );
+  });
+
+  it("keeps the selected session when the unselected local storage getter is denied", async () => {
+    const localStorageRef = window.localStorage;
+    const storageDescriptor = Object.getOwnPropertyDescriptor(
+      window,
+      "localStorage",
+    );
+    const selectedUserValue = JSON.stringify({
+      provider: "google",
+      userId: "selected-session-user",
+      accessToken: "selected-session-token",
+    });
+    const staleLocalValue = JSON.stringify({
+      provider: "google",
+      userId: "stale-local-user",
+      accessToken: "stale-local-token",
+    });
+    localStorageRef.setItem(CACHE_KEY, staleLocalValue);
+    sessionStorage.setItem(CACHE_KEY, selectedUserValue);
+    mockAuthConfig({
+      nitroAuthWebStorage: "session",
+      nitroAuthPersistTokensOnWeb: false,
+    });
+    const { logger } = await import("../utils/logger");
+    const warningSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    logger.setEnabled(true);
+
+    try {
+      Object.defineProperty(window, "localStorage", {
+        configurable: true,
+        get() {
+          throw new DOMException("local storage is blocked", "SecurityError");
+        },
+      });
+      const module = await import("../Auth.web");
+      const auth = module.AuthModule as unknown as TestAuthModule;
+
+      expect(auth.currentUser).toMatchObject({
+        provider: "google",
+        userId: "selected-session-user",
+      });
+      expect(auth.currentUser?.accessToken).toBeUndefined();
+      expect(localStorageRef.getItem(CACHE_KEY)).toBe(staleLocalValue);
+      expect(warningSpy).toHaveBeenCalledWith(
+        "[NitroAuth]",
+        "Failed to inspect cached auth user in browser storage",
+        expect.objectContaining({ mode: "local", error: "SecurityError" }),
+      );
+    } finally {
+      logger.setEnabled(false);
+      warningSpy.mockRestore();
+      if (storageDescriptor) {
+        Object.defineProperty(window, "localStorage", storageDescriptor);
+      } else {
+        Reflect.deleteProperty(window, "localStorage");
+      }
+    }
+  });
+
+  it("reports denied removal of an invalid unselected cache without affecting the selected session", async () => {
+    const localStorageRef = window.localStorage;
+    let removalAttempted = false;
+    localStorageRef.setItem(CACHE_KEY, "not-json");
+    localStorageRef.setItem("unrelated-local-key", "preserve-local");
+    sessionStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({ provider: "google", userId: "selected-session-user" }),
+    );
+    const removeItemSpy = jest
+      .spyOn(Storage.prototype, "removeItem")
+      .mockImplementation(function removeItem(this: Storage, key: string) {
+        if (this === localStorageRef && key === CACHE_KEY) {
+          removalAttempted = true;
+          throw new Error("cache removal denied");
+        }
+        originalStorageRemoveItem.call(this, key);
+      });
+    mockAuthConfig({
+      nitroAuthWebStorage: "session",
+      nitroAuthPersistTokensOnWeb: false,
+    });
+    const { logger } = await import("../utils/logger");
+    const warningSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      logger.setEnabled(true);
+      const module = await import("../Auth.web");
+      const restoredAuth = module.AuthModule as unknown as TestAuthModule;
+
+      expect(restoredAuth.currentUser).toMatchObject({
+        provider: "google",
+        userId: "selected-session-user",
+      });
+      expect(localStorageRef.getItem(CACHE_KEY)).toBe("not-json");
+      expect(localStorageRef.getItem("unrelated-local-key")).toBe(
+        "preserve-local",
+      );
+      expect(removalAttempted).toBe(true);
+      expect(warningSpy).toHaveBeenCalledWith(
+        "[NitroAuth]",
+        "Failed to remove invalid cached auth user from browser storage",
+        expect.objectContaining({ mode: "local", error: "Error" }),
+      );
+    } finally {
+      logger.setEnabled(false);
+      warningSpy.mockRestore();
+      removeItemSpy.mockRestore();
+    }
   });
 
   it("clears the Microsoft refresh token on logout", async () => {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({ provider: "microsoft", userId: "logout-user" }),
+    );
     const auth = await loadAuthModule({
       nitroAuthWebStorage: "local",
       nitroAuthPersistTokensOnWeb: true,
@@ -389,6 +776,7 @@ describe("AuthModule (web)", () => {
     localStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
     auth.logout();
 
+    expect(localStorage.getItem(CACHE_KEY)).toBeNull();
     expect(localStorage.getItem(MS_REFRESH_TOKEN_KEY)).toBeNull();
   });
 
@@ -862,7 +1250,7 @@ describe("AuthModule (web)", () => {
               },
             },
           });
-          scriptNode.onload?.(new Event("load"));
+          scriptNode.dispatchEvent(new Event("load"));
         }, 0);
         return node;
       });
@@ -1657,6 +2045,128 @@ describe("AuthModule (web)", () => {
     expect(sessionStorage.getItem(SCOPES_KEY)).toBeNull();
   });
 
+  it("does not fail initialization when malformed cache removal is denied", async () => {
+    localStorage.setItem(CACHE_KEY, "not-json");
+    const originalRemoveItem = Storage.prototype.removeItem;
+    const removeItemSpy = jest
+      .spyOn(Storage.prototype, "removeItem")
+      .mockImplementation(function removeItem(this: Storage, key: string) {
+        if (key === CACHE_KEY) {
+          throw new Error("cache removal denied");
+        }
+        originalRemoveItem.call(this, key);
+      });
+
+    try {
+      const auth = await loadAuthModule({ nitroAuthWebStorage: "local" });
+      expect(auth.currentUser).toBeUndefined();
+      expect(localStorage.getItem(CACHE_KEY)).toBe("not-json");
+    } finally {
+      removeItemSpy.mockRestore();
+    }
+  });
+
+  it("keeps restored users safe when cache writes and refresh-token removal are denied", async () => {
+    const cachedUserValue = JSON.stringify({
+      provider: "microsoft",
+      userId: "safe-user",
+      accessToken: "cached-access-token",
+      idToken: "cached-id-token",
+      refreshToken: "cached-refresh-token",
+    });
+    localStorage.setItem(CACHE_KEY, cachedUserValue);
+    localStorage.setItem(MS_REFRESH_TOKEN_KEY, "cached-ms-refresh-token");
+    const originalSetItem = Storage.prototype.setItem;
+    const originalRemoveItem = Storage.prototype.removeItem;
+    const setItemSpy = jest
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function setItem(
+        this: Storage,
+        key: string,
+        value: string,
+      ) {
+        if (key === CACHE_KEY) {
+          throw new Error("cache write denied");
+        }
+        originalSetItem.call(this, key, value);
+      });
+    const removeItemSpy = jest
+      .spyOn(Storage.prototype, "removeItem")
+      .mockImplementation(function removeItem(this: Storage, key: string) {
+        if (key === MS_REFRESH_TOKEN_KEY) {
+          throw new Error("refresh-token removal denied");
+        }
+        originalRemoveItem.call(this, key);
+      });
+
+    try {
+      const auth = await loadAuthModule({ nitroAuthWebStorage: "local" });
+      const attemptedSafeWrites = setItemSpy.mock.calls
+        .filter(([key]) => key === CACHE_KEY)
+        .map(([, value]) => JSON.parse(value));
+
+      expect(auth.currentUser).toMatchObject({
+        provider: "microsoft",
+        userId: "safe-user",
+      });
+      expect(auth.currentUser?.accessToken).toBeUndefined();
+      expect(auth.currentUser?.idToken).toBeUndefined();
+      expect(auth.currentUser?.refreshToken).toBeUndefined();
+      expect(attemptedSafeWrites).toEqual([
+        { provider: "microsoft", userId: "safe-user" },
+      ]);
+      expect(localStorage.getItem(CACHE_KEY)).toBe(cachedUserValue);
+      expect(localStorage.getItem(MS_REFRESH_TOKEN_KEY)).toBe(
+        "cached-ms-refresh-token",
+      );
+    } finally {
+      setItemSpy.mockRestore();
+      removeItemSpy.mockRestore();
+    }
+  });
+
+  it("omits credential-bearing adapter errors from cache warnings", async () => {
+    const sentinel = "sentinel-adapter-credential-7f31";
+    const auth = await loadAuthModule({
+      nitroAuthPersistTokensOnWeb: false,
+    });
+    const warningSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const adapter = {
+      save: () => {
+        throw new Error(`save failed with ${sentinel}`);
+      },
+      load: (key: string) => {
+        if (key === CACHE_KEY) {
+          return JSON.stringify({
+            provider: "microsoft",
+            userId: "safe-user",
+            accessToken: sentinel,
+          });
+        }
+        return key === SCOPES_KEY ? "not-json" : undefined;
+      },
+      remove: () => {
+        throw new Error(`remove failed with ${sentinel}`);
+      },
+    };
+
+    try {
+      auth.setLoggingEnabled(true);
+      auth.setWebStorageAdapter(adapter);
+
+      expect(auth.currentUser?.accessToken).toBeUndefined();
+      expect(JSON.stringify(warningSpy.mock.calls)).not.toContain(sentinel);
+      expect(warningSpy).toHaveBeenCalledWith(
+        "[NitroAuth]",
+        "Failed to sanitize cached auth user; keeping the in-memory session safe",
+        expect.objectContaining({ error: expect.any(String) }),
+      );
+    } finally {
+      auth.setLoggingEnabled(false);
+      warningSpy.mockRestore();
+    }
+  });
+
   it("falls back to defaults when expo-constants throws", async () => {
     jest.resetModules();
     jest.doMock(
@@ -1949,7 +2459,7 @@ describe("AuthModule (web)", () => {
       .mockImplementation((node: Node) => {
         const scriptNode = node as HTMLScriptElement;
         setTimeout(() => {
-          scriptNode.onerror?.(new Event("error"));
+          scriptNode.dispatchEvent(new Event("error"));
         }, 0);
         return node;
       });
@@ -1960,6 +2470,295 @@ describe("AuthModule (web)", () => {
 
     await expect(auth.login("apple")).rejects.toThrow("unknown");
     appendSpy.mockRestore();
+  });
+
+  it("does not remove an externally owned Apple SDK script after failure", async () => {
+    jest.useFakeTimers();
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+    const externalScript = document.createElement("script");
+    externalScript.id = "nitro-auth-apple-sdk";
+    document.head.appendChild(externalScript);
+    const auth = await loadAuthModule({ appleWebClientId: "apple-client-id" });
+
+    const login = auth.login("apple", { nonce: "external-script-nonce" });
+    setTimeout(() => externalScript.dispatchEvent(new Event("error")), 0);
+    await Promise.all([
+      expect(login).rejects.toThrow("unknown"),
+      jest.advanceTimersByTimeAsync(0),
+    ]);
+
+    expect(externalScript.isConnected).toBe(true);
+    auth.dispose();
+    externalScript.remove();
+  });
+
+  it("retries Apple SDK loading after a failed owned script", async () => {
+    jest.useFakeTimers();
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+    const originalAppendChild = document.head.appendChild.bind(document.head);
+    const scripts: HTMLScriptElement[] = [];
+    const appendSpy = jest
+      .spyOn(document.head, "appendChild")
+      .mockImplementation((node: Node) => {
+        const script = node as HTMLScriptElement;
+        scripts.push(script);
+        const appended = originalAppendChild(node);
+        if (appendSpy.mock.calls.length === 1) {
+          setTimeout(() => script.dispatchEvent(new Event("error")), 0);
+        } else {
+          setTimeout(() => {
+            Object.defineProperty(window, "AppleID", {
+              configurable: true,
+              writable: true,
+              value: {
+                auth: {
+                  init: jest.fn(),
+                  signIn: jest.fn(async () => ({
+                    authorization: {
+                      id_token: createJwtWithPayload({ nonce: "retry-nonce" }),
+                    },
+                  })),
+                },
+              },
+            });
+            script.dispatchEvent(new Event("load"));
+          }, 0);
+        }
+        return appended;
+      });
+
+    const auth = await loadAuthModule({ appleWebClientId: "apple-client-id" });
+    const failedLogin = auth.login("apple", { nonce: "retry-nonce" });
+    await Promise.all([
+      expect(failedLogin).rejects.toThrow("unknown"),
+      jest.advanceTimersByTimeAsync(0),
+    ]);
+
+    const retry = auth.login("apple", { nonce: "retry-nonce" });
+    const retryOutcome = retry.then(
+      () => "resolved",
+      () => "rejected",
+    );
+    const pendingDeadline = new Promise<string>((resolve) => {
+      setTimeout(() => {
+        resolve("pending");
+      }, 16_000);
+    });
+    await jest.advanceTimersByTimeAsync(16_000);
+    const outcome = await Promise.race([retryOutcome, pendingDeadline]);
+    const appendCount = appendSpy.mock.calls.length;
+    auth.dispose();
+    scripts.forEach((script) => {
+      script.remove();
+    });
+    appendSpy.mockRestore();
+
+    expect(appendCount).toBe(2);
+    expect(outcome).toBe("resolved");
+  });
+
+  it("shares one Apple SDK load across concurrent module instances", async () => {
+    jest.useFakeTimers();
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+    const idToken = createJwtWithPayload({ nonce: "parallel-nonce" });
+    const init = jest.fn();
+    const signIn = jest.fn(async () => ({
+      authorization: { id_token: idToken },
+    }));
+    const originalAppendChild = document.head.appendChild.bind(document.head);
+    const scripts: HTMLScriptElement[] = [];
+    const appendSpy = jest
+      .spyOn(document.head, "appendChild")
+      .mockImplementation((node: Node) => {
+        const script = node as HTMLScriptElement;
+        scripts.push(script);
+        const appended = originalAppendChild(node);
+        setTimeout(() => {
+          Object.defineProperty(window, "AppleID", {
+            configurable: true,
+            writable: true,
+            value: { auth: { init, signIn } },
+          });
+          script.dispatchEvent(new Event("load"));
+        }, 0);
+        return appended;
+      });
+    const { first, second } = await loadAuthInstances({
+      appleWebClientId: "apple-client-id",
+    });
+
+    const firstLogin = first.login("apple", { nonce: "parallel-nonce" });
+    const secondLogin = second.login("apple", { nonce: "parallel-nonce" });
+    await jest.advanceTimersByTimeAsync(0);
+    await Promise.all([firstLogin, secondLogin]);
+
+    expect(appendSpy).toHaveBeenCalledTimes(1);
+    expect(signIn).toHaveBeenCalledTimes(2);
+    first.dispose();
+    second.dispose();
+    scripts.forEach((script) => {
+      script.remove();
+    });
+    appendSpy.mockRestore();
+  });
+
+  it("times out and removes an owned Apple SDK script", async () => {
+    jest.useFakeTimers();
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+    const originalAppendChild = document.head.appendChild.bind(document.head);
+    const scripts: HTMLScriptElement[] = [];
+    const appendSpy = jest
+      .spyOn(document.head, "appendChild")
+      .mockImplementation((node: Node) => {
+        scripts.push(node as HTMLScriptElement);
+        return originalAppendChild(node);
+      });
+    const auth = await loadAuthModule({ appleWebClientId: "apple-client-id" });
+
+    const login = auth.login("apple", { nonce: "timeout-nonce" });
+    const loginOutcome = login.then(
+      () => "resolved",
+      (error: unknown) =>
+        error instanceof Error ? error.message : String(error),
+    );
+    const pendingDeadline = new Promise<string>((resolve) => {
+      setTimeout(() => {
+        resolve("pending");
+      }, 16_000);
+    });
+    await jest.advanceTimersByTimeAsync(16_000);
+    const outcome = await Promise.race([loginOutcome, pendingDeadline]);
+    const remainingScript = document.getElementById("nitro-auth-apple-sdk");
+    auth.dispose();
+    scripts.forEach((script) => {
+      script.remove();
+    });
+    appendSpy.mockRestore();
+
+    expect(outcome).toBe("timeout");
+    expect(remainingScript).toBeNull();
+  });
+
+  it("does not start Apple sign-in after disposal while the SDK loads", async () => {
+    jest.useFakeTimers();
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+    let script: HTMLScriptElement | undefined;
+    const originalAppendChild = document.head.appendChild.bind(document.head);
+    const appendSpy = jest
+      .spyOn(document.head, "appendChild")
+      .mockImplementation((node: Node) => {
+        script = node as HTMLScriptElement;
+        return originalAppendChild(node);
+      });
+    const auth = await loadAuthModule({ appleWebClientId: "apple-client-id" });
+    const init = jest.fn();
+    const signIn = jest.fn(async () => ({
+      authorization: {
+        id_token: createJwtWithPayload({ nonce: "dispose-nonce" }),
+      },
+    }));
+    const login = auth.login("apple", { nonce: "dispose-nonce" });
+    await jest.advanceTimersByTimeAsync(0);
+    auth.dispose();
+    await expect(login).rejects.toThrow("cancelled");
+
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: { auth: { init, signIn } },
+    });
+    script?.dispatchEvent(new Event("load"));
+    await jest.advanceTimersByTimeAsync(0);
+    script?.remove();
+    appendSpy.mockRestore();
+
+    expect(init).not.toHaveBeenCalled();
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stale Apple SDK event after a timed out load is retried", async () => {
+    jest.useFakeTimers();
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+    const scripts: HTMLScriptElement[] = [];
+    const originalAppendChild = document.head.appendChild.bind(document.head);
+    const appendSpy = jest
+      .spyOn(document.head, "appendChild")
+      .mockImplementation((node: Node) => {
+        scripts.push(node as HTMLScriptElement);
+        return originalAppendChild(node);
+      });
+    const auth = await loadAuthModule({ appleWebClientId: "apple-client-id" });
+
+    const firstLogin = auth.login("apple", { nonce: "first-nonce" });
+    const firstOutcome = firstLogin.then(
+      () => "resolved",
+      (error: unknown) =>
+        error instanceof Error ? error.message : String(error),
+    );
+    const firstDeadline = new Promise<string>((resolve) => {
+      setTimeout(() => {
+        resolve("pending");
+      }, 16_000);
+    });
+    await jest.advanceTimersByTimeAsync(16_000);
+    const firstResult = await Promise.race([firstOutcome, firstDeadline]);
+
+    const init = jest.fn();
+    const signIn = jest.fn(async () => ({
+      authorization: {
+        id_token: createJwtWithPayload({ nonce: "second-nonce" }),
+      },
+    }));
+    const secondLogin = auth.login("apple", { nonce: "second-nonce" });
+    const secondOutcomePromise = secondLogin.then(
+      () => "resolved",
+      () => "rejected",
+    );
+    await jest.advanceTimersByTimeAsync(0);
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: { auth: { init, signIn } },
+    });
+    scripts[0]?.dispatchEvent(new Event("load"));
+    await jest.advanceTimersByTimeAsync(0);
+    const settledByStaleEvent = init.mock.calls.length > 0;
+    scripts[1]?.dispatchEvent(new Event("load"));
+    const secondOutcome = await secondOutcomePromise;
+    auth.dispose();
+    scripts.forEach((script) => {
+      script.remove();
+    });
+    appendSpy.mockRestore();
+
+    expect(firstResult).toBe("timeout");
+    expect(scripts).toHaveLength(2);
+    expect(secondOutcome).toBe("resolved");
+    expect(settledByStaleEvent).toBe(false);
   });
 
   it("keeps the session when Google revocation returns an HTTP failure", async () => {

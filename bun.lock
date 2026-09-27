@@ -53,7 +53,7 @@
     },
     "packages/react-native-nitro-auth": {
       "name": "react-native-nitro-auth",
-      "version": "0.11.2",
+      "version": "0.11.3",
       "dependencies": {
         "expo-build-properties": "~57.0.22",
         "react-native-svg": "15.15.5",

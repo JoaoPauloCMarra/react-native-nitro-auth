@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [0.11.3] - 2026-09-27
+
+### Breaking changes
+
+- None.
+
+### Fixed
+
+- Web cache restoration removes stored credential and profile fields when their persistence policies are disabled. Failed storage cleanup leaves the in-memory session sanitized and emits credential-safe diagnostics.
+- Restricted browser storage getters now fall back to memory instead of crashing initialization.
+- Apple web SDK loading now times out after 15 seconds and can retry failed loads without reusing failed package-owned scripts. Concurrent requests share loading, and cancellation prevents a late load from starting sign-in.
+
 ## [0.11.2] - 2026-09-24
 
 ### Breaking changes

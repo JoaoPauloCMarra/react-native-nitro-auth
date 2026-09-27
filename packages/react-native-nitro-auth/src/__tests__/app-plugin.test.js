@@ -436,21 +436,29 @@ describe("optional Google button font", () => {
       PACKAGE_ROOT,
       "assets/fonts/GoogleSans-OFL.txt",
     );
+    const sourceFontBytes = await fs.readFile(sourceFont);
+    const sourceLicenseBytes = await fs.readFile(sourceLicense);
     expect(
-      await fs.readFile(
-        path.join(androidFontsDirectory, "NitroAuthGoogleSans-Medium.ttf"),
-      ),
-    ).toEqual(await fs.readFile(sourceFont));
+      (
+        await fs.readFile(
+          path.join(androidFontsDirectory, "NitroAuthGoogleSans-Medium.ttf"),
+        )
+      ).equals(sourceFontBytes),
+    ).toBe(true);
     expect(
-      await fs.readFile(
-        path.join(fixture.iosRoot, GOOGLE_BUTTON_FONT_IOS_FILENAME),
-      ),
-    ).toEqual(await fs.readFile(sourceFont));
+      (
+        await fs.readFile(
+          path.join(fixture.iosRoot, GOOGLE_BUTTON_FONT_IOS_FILENAME),
+        )
+      ).equals(sourceFontBytes),
+    ).toBe(true);
     expect(
-      await fs.readFile(
-        path.join(fixture.iosRoot, GOOGLE_BUTTON_FONT_IOS_LICENSE_FILENAME),
-      ),
-    ).toEqual(await fs.readFile(sourceLicense));
+      (
+        await fs.readFile(
+          path.join(fixture.iosRoot, GOOGLE_BUTTON_FONT_IOS_LICENSE_FILENAME),
+        )
+      ).equals(sourceLicenseBytes),
+    ).toBe(true);
     expect(enabledPlist.UIAppFonts).toEqual([
       "Existing-Regular.ttf",
       GOOGLE_BUTTON_FONT_IOS_FILENAME,
