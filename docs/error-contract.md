@@ -85,17 +85,17 @@ failures as `token_error`; `refresh` surfaces them as `refresh_failed`.
 The scenario corpus `SC-01…SC-09` runs against the web module, the native
 service boundary, and the C++ coordinator:
 
-| Scenario | Contract                                                                |
-| -------- | ----------------------------------------------------------------------- |
-| SC-01    | Login success exposes the user and notifies state listeners.            |
-| SC-02    | Login failure leaves no user and a typed code.                          |
-| SC-03    | Logout cancels an in-flight refresh; it settles with `not_signed_in`.   |
-| SC-04    | Logout clears user and scopes and notifies listeners.                   |
-| SC-05    | Dispose rejects a pending login with `cancelled`.                       |
-| SC-06    | Concurrent refresh calls share one in-flight operation.                 |
-| SC-07    | Silent restore without a session resolves without a user.               |
-| SC-08    | Refresh failure settles with a typed code and the `refreshToken` phase. |
-| SC-09    | Concurrent login settles every promise with a typed result.             |
+| Scenario | Contract                                                                   |
+| -------- | -------------------------------------------------------------------------- |
+| SC-01    | Login success exposes the user and notifies state listeners.               |
+| SC-02    | Login failure leaves no user and a typed code.                             |
+| SC-03    | Logout cancels an in-flight refresh; it settles with `not_signed_in`.      |
+| SC-04    | Logout clears user and scopes and notifies listeners.                      |
+| SC-05    | Dispose rejects a pending login with `cancelled`.                          |
+| SC-06    | Concurrent refresh calls share one in-flight operation.                    |
+| SC-07    | Silent restore without a session resolves without a user.                  |
+| SC-08    | Refresh failure settles with a typed code and the `refreshToken` phase.    |
+| SC-09    | Concurrent login settles every promise with a typed result.                |
 | SC-10    | Refresh during a pending login, scope request or restore never cancels it. |
 
 SC-09 divergence (documented, not a parity defect): native cancels the first
@@ -158,11 +158,8 @@ parse identical responses; the fixture corpus in
 
 ## 6. Persistence and PII (U4 item 12, U6 item 23)
 
-- With the default browser storage, web tokens are memory-only unless
-  `nitroAuthPersistTokensOnWeb` is explicitly enabled. A custom storage
-  adapter keeps the pre-0.7 token-persistence behavior when the option is
-  omitted; set the option explicitly in new integrations. Persisted tokens
-  widen the XSS exposure.
+- Web tokens are memory-only unless `nitroAuthPersistTokensOnWeb` is `true`
+  (default `false`). Persisted tokens widen the XSS exposure.
 - Profile metadata (email, name, photo) is persisted by default; set
   `nitroAuthPersistProfileOnWeb: false` to keep it memory-only. Token fields
   and the Microsoft refresh token remain memory-only with the default browser
@@ -188,7 +185,7 @@ Snapshot consumers read after registration to close that gap.
 
 Refresh dispatches state, token data, then its named lifecycle event. Native JS
 callbacks are asynchronous: do not assume ordering against promise settlement
-or operation-event delivery. See [architecture](native-performance-plan.md).
+or operation-event delivery. See [architecture](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/docs/native-performance-plan.md).
 
 ## 8. Revocation (U6, item 22)
 

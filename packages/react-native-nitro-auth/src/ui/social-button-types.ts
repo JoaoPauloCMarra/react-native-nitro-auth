@@ -18,6 +18,10 @@ export type SocialButtonContentProps = {
   readonly iconOnly: boolean;
   readonly disabled: boolean;
   readonly loading: boolean;
+  /**
+   * Button width for Google and Apple. For Microsoft, the window width; the
+   * Microsoft button fills its parent, so size its content from layout.
+   */
   readonly width: number;
   readonly height: number;
   readonly textStyle?: StyleProp<TextStyle>;

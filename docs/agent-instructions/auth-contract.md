@@ -74,7 +74,6 @@ summarizes the invariants agents must preserve.
 - Public API must not reintroduce storage-adapter exports/functions.
 - `AuthUser.underlyingError` is deprecated; structured details live on
   `AuthError`.
-- Default browser storage requires explicit `nitroAuthPersistTokensOnWeb`
-  opt-in; custom storage adapters retain legacy token persistence when the
-  option is omitted. Profile PII persistence is controlled by
+- Web token persistence requires explicit `nitroAuthPersistTokensOnWeb: true`
+  (default `false`). Profile PII persistence is controlled by
   `nitroAuthPersistProfileOnWeb`.
