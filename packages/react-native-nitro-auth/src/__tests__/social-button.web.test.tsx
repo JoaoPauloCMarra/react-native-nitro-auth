@@ -1,255 +1,45 @@
-import type { ReactNode } from "react";
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { socialButtonEnv } from "./support/social-button-env";
 import { SocialButton, SocialProviderIcon } from "../ui/social-button.web";
 import { AuthError } from "../utils/auth-error";
-import type { AuthProvider, AuthUser, LoginOptions } from "../Auth.nitro";
+import type { SocialButtonProps } from "../ui/social-button.web";
 
-let mockCurrentUser: AuthUser | undefined;
-let mockPlatformOS: "web" | "ios" | "android" = "web";
-let mockFontScale = 1;
+jest.mock("react-native", () =>
+  jest
+    .requireActual<typeof import("./support/social-button-env")>(
+      "./support/social-button-env",
+    )
+    .createReactNativeMock(),
+);
 
-type LoginFn = (
-  provider: AuthProvider,
-  options?: LoginOptions,
-) => Promise<void>;
+jest.mock("../ui/social-button-marks", () =>
+  jest
+    .requireActual<typeof import("./support/social-button-env")>(
+      "./support/social-button-env",
+    )
+    .createMarksMock(),
+);
 
-const mockLogin = jest.fn<ReturnType<LoginFn>, Parameters<LoginFn>>();
-
-type MockHostProps = {
-  testID?: string;
-  accessibilityLabel?: string;
-  accessibilityRole?: string;
-  accessibilityState?: { busy?: boolean; disabled?: boolean };
-  accessible?: boolean;
-  accessibilityElementsHidden?: boolean;
-  allowFontScaling?: boolean;
-  importantForAccessibility?: string;
-  children?: ReactNode;
-  disabled?: boolean;
-  onPress?: () => void;
-  pointerEvents?: string;
-  resizeMode?: string;
-  source?: unknown;
-  style?: unknown;
-  xml?: string;
-  width?: number;
-  height?: number;
-  [key: string]: unknown;
-};
-
-jest.mock("react-native", () => {
-  const ReactModule = jest.requireActual<typeof import("react")>("react");
-
-  const flattenStyle = (style: unknown): Record<string, unknown> => {
-    if (Array.isArray(style)) {
-      return Object.assign({}, ...style.map(flattenStyle));
-    }
-    return style !== null && typeof style === "object"
-      ? (style as Record<string, unknown>)
-      : {};
-  };
-
-  const createHost =
-    (tag: string) =>
-    ({
-      accessibilityElementsHidden: _accessibilityElementsHidden,
-      accessibilityLabel,
-      accessibilityRole,
-      accessibilityState,
-      accessible: _accessible,
-      children,
-      disabled,
-      allowFontScaling: _allowFontScaling,
-      importantForAccessibility: _importantForAccessibility,
-      onPress,
-      pointerEvents: _pointerEvents,
-      style,
-      testID,
-      ...props
-    }: MockHostProps) => {
-      const domProps = {
-        ...props,
-        "data-testid": testID,
-        "aria-label": accessibilityLabel,
-        "aria-busy": accessibilityState?.busy,
-        "aria-disabled": accessibilityState?.disabled,
-        "data-role": accessibilityRole,
-        style: flattenStyle(style),
-        ...(tag === "button"
-          ? {
-              disabled,
-              onClick: disabled ? undefined : onPress,
-              type: "button",
-            }
-          : {}),
-      };
-
-      return ReactModule.createElement(tag, domProps, children);
-    };
-
-  const image = ({ source, style }: MockHostProps): React.ReactElement => {
-    const uri =
-      source !== null && typeof source === "object" && "uri" in source
-        ? String(source.uri)
-        : "unknown-image";
-
-    return ReactModule.createElement("img", {
-      alt: "",
-      "data-testid": uri,
-      src: uri,
-      style: flattenStyle(style),
-    });
-  };
-
-  return {
-    ActivityIndicator: createHost("span"),
-    Image: image,
-    Platform: {
-      get OS() {
-        return mockPlatformOS;
-      },
-    },
-    Pressable: createHost("button"),
-    StyleSheet: { create: <T,>(styles: T) => styles },
-    Text: createHost("span"),
-    View: createHost("div"),
-    useWindowDimensions: () => ({
-      width: 360,
-      height: 800,
-      fontScale: mockFontScale,
-    }),
-  };
+jest.mock("../ui/social-button-assets", () => {
+  throw new Error("The root SocialButton must not load official artwork");
 });
 
 jest.mock("react-native-svg", () => {
-  const ReactModule = jest.requireActual<typeof import("react")>("react");
-
-  return {
-    SvgXml: ({
-      height,
-      width,
-      xml,
-    }: {
-      height?: number;
-      width?: number;
-      xml: string;
-    }) => {
-      const artworkId = xml.match(/data-id="([^"]+)"/u)?.[1] ?? "unknown-svg";
-      return ReactModule.createElement("svg", {
-        "data-testid": artworkId,
-        height,
-        width,
-      });
-    },
-  };
+  throw new Error("The root SocialButton must not load react-native-svg");
 });
 
-jest.mock("../ui/social-button-assets", () => {
-  const makeArtwork = (id: string, width: number, height: number) => ({
-    image: { uri: `${id}.png` },
-    svg: `<svg data-id="${id}.svg" />`,
-    width,
-    height,
-  });
-
-  const makeProviderArtwork = (
-    provider: string,
-    width: number,
-    height: number,
-    iosWidth = width + 8,
-    iosHeight = height + 4,
-  ) => ({
-    android: {
-      light: {
-        pill: makeArtwork(`${provider}-android-light-pill`, width, height),
-        rectangular: makeArtwork(
-          `${provider}-android-light-rectangular`,
-          width,
-          height,
-        ),
-      },
-      dark: {
-        pill: makeArtwork(`${provider}-android-dark-pill`, width, height),
-        rectangular: makeArtwork(
-          `${provider}-android-dark-rectangular`,
-          width,
-          height,
-        ),
-      },
-    },
-    ios: {
-      light: {
-        pill: makeArtwork(`${provider}-ios-light-pill`, iosWidth, iosHeight),
-        rectangular: makeArtwork(
-          `${provider}-ios-light-rectangular`,
-          iosWidth,
-          iosHeight,
-        ),
-      },
-      dark: {
-        pill: makeArtwork(`${provider}-ios-dark-pill`, iosWidth, iosHeight),
-        rectangular: makeArtwork(
-          `${provider}-ios-dark-rectangular`,
-          iosWidth,
-          iosHeight,
-        ),
-      },
-    },
-  });
-
-  return {
-    appleMarks: {
-      dark: { uri: "apple-mark-dark.png" },
-      light: { uri: "apple-mark-light.png" },
-    },
-    googleMark: { uri: "google-mark.png" },
-    iconOnlyArtwork: {
-      apple: makeProviderArtwork("apple-icon", 40, 40, 44, 44),
-      google: makeProviderArtwork("google-icon", 40, 40, 44, 44),
-    },
-    socialButtonArtwork: {
-      apple: makeProviderArtwork("apple", 188, 44),
-      google: makeProviderArtwork("google", 180, 40),
-    },
-  };
-});
-
-jest.mock("../Auth.web", () => ({
-  AuthModule: {
-    get currentUser() {
-      return mockCurrentUser;
-    },
-    get name() {
-      return "Auth";
-    },
-    get grantedScopes() {
-      return [];
-    },
-    get hasPlayServices() {
-      return true;
-    },
-    login: (...args: Parameters<LoginFn>) => mockLogin(...args),
-    requestScopes: jest.fn(),
-    revokeScopes: jest.fn(),
-    getAccessToken: jest.fn(),
-    refreshToken: jest.fn(),
-    logout: jest.fn(),
-    silentRestore: jest.fn(),
-    onAuthStateChanged: jest.fn(() => () => {}),
-    onTokensRefreshed: jest.fn(() => () => {}),
-    setLoggingEnabled: jest.fn(),
-    dispose: jest.fn(),
-    equals: jest.fn(() => false),
-  },
-}));
+jest.mock("../Auth.web", () =>
+  jest
+    .requireActual<typeof import("./support/social-button-env")>(
+      "./support/social-button-env",
+    )
+    .createAuthWebMock(),
+);
 
 describe("SocialButton (web)", () => {
   beforeEach(() => {
-    mockCurrentUser = undefined;
-    mockPlatformOS = "web";
-    mockFontScale = 1;
-    mockLogin.mockReset();
+    socialButtonEnv.reset();
   });
 
   it("renders an accessible Google icon-only button without a text label", () => {
@@ -267,58 +57,45 @@ describe("SocialButton (web)", () => {
     expect(button.style.height).toBe("48px");
   });
 
-  it("uses the dedicated square asset for image-mode icon-only buttons", () => {
-    render(
-      React.createElement(SocialButton, {
-        provider: "google",
-        renderMode: "image",
-        iconOnly: true,
-        appearance: "dark",
-        shape: "rectangular",
-      }),
-    );
+  it("sizes labeled custom buttons without the official artwork table", () => {
+    render(React.createElement(SocialButton, { provider: "apple" }));
 
-    expect(
-      screen.getByRole("button", { name: "Sign in with Google" }),
-    ).toBeTruthy();
-    const image = screen.getByTestId(
-      "google-icon-android-dark-rectangular.png",
-    );
-    expect((image as HTMLImageElement).style.height).toBe("48px");
-    expect((image as HTMLImageElement).style.width).toBe("48px");
+    const button = screen.getByRole("button", { name: "Sign in with Apple" });
+    expect(button.style.width).toBe("264px");
+    expect(button.style.height).toBe("48px");
+    expect(screen.getByText("Sign in with Apple")).toBeTruthy();
+    expect(screen.getByTestId("apple-mark-light.png")).toBeTruthy();
   });
 
-  it("renders Apple square SVG art and keeps the full accessible name", () => {
-    render(
-      React.createElement(SocialButton, {
-        provider: "apple",
-        renderMode: "svg",
-        iconOnly: true,
-        appearance: "light",
-      }),
-    );
+  it.each(["image", "svg"])(
+    "falls back to custom content when untyped callers pass %s",
+    (renderMode) => {
+      const globals = globalThis as { __DEV__?: boolean | undefined };
+      const previousDev = globals.__DEV__;
+      globals.__DEV__ = true;
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const props = {
+          provider: "google",
+          renderMode,
+        } as unknown as SocialButtonProps;
+        render(React.createElement(SocialButton, props));
 
-    expect(
-      screen.getByRole("button", { name: "Sign in with Apple" }),
-    ).toBeTruthy();
-    expect(
-      screen.getByTestId("apple-icon-android-light-pill.svg"),
-    ).toBeTruthy();
-    expect(screen.queryByText("Sign in with Apple")).toBeNull();
-  });
-
-  it("uses Android artwork on web and preserves the source ratio", () => {
-    render(
-      React.createElement(SocialButton, {
-        provider: "google",
-        renderMode: "image",
-      }),
-    );
-
-    const image = screen.getByTestId("google-android-light-pill.png");
-    expect((image as HTMLImageElement).style.height).toBe("48px");
-    expect((image as HTMLImageElement).style.width).toBe("216px");
-  });
+        const button = screen.getByRole("button", {
+          name: "Sign in with Google",
+        });
+        expect(button.style.width).toBe("264px");
+        expect(screen.getByText("Sign in with Google")).toBeTruthy();
+        expect(screen.getByTestId("google-mark.png")).toBeTruthy();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("react-native-nitro-auth/official-buttons"),
+        );
+      } finally {
+        warn.mockRestore();
+        globals.__DEV__ = previousDev;
+      }
+    },
+  );
 
   it("keeps a custom provider renderer visual-only and receives iconOnly", () => {
     const customComponent = jest.fn(
@@ -384,39 +161,34 @@ describe("SocialButton (web)", () => {
     expect((button as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it.each(["custom", "image", "svg"] as const)(
-    "keeps the provider mark and the indicator inside %s buttons",
-    (renderMode) => {
-      const { unmount } = render(
-        React.createElement(SocialButton, {
-          provider: "google",
-          renderMode,
-        }),
-      );
-      const idle = screen.getByRole("button", { name: "Sign in with Google" });
-      const idleSize = [idle.style.width, idle.style.height];
-      unmount();
+  it("keeps the provider mark and the indicator inside custom buttons", () => {
+    const { unmount } = render(
+      React.createElement(SocialButton, {
+        provider: "google",
+      }),
+    );
+    const idle = screen.getByRole("button", { name: "Sign in with Google" });
+    const idleSize = [idle.style.width, idle.style.height];
+    unmount();
 
-      render(
-        React.createElement(SocialButton, {
-          provider: "google",
-          renderMode,
-          loading: true,
-          loadingIndicator: React.createElement("span", {
-            "data-testid": "busy-indicator",
-          }),
+    render(
+      React.createElement(SocialButton, {
+        provider: "google",
+        loading: true,
+        loadingIndicator: React.createElement("span", {
+          "data-testid": "busy-indicator",
         }),
-      );
-      const button = screen.getByRole("button", {
-        name: "Sign in with Google",
-      });
-      const indicator = screen.getByTestId("busy-indicator").parentElement;
-      expect(button.contains(indicator)).toBe(true);
-      expect(button.contains(screen.getByTestId("google-mark.png"))).toBe(true);
-      expect([button.style.width, button.style.height]).toEqual(idleSize);
-      expect(button.style.marginBottom || "0px").toBe("0px");
-    },
-  );
+      }),
+    );
+    const button = screen.getByRole("button", {
+      name: "Sign in with Google",
+    });
+    const indicator = screen.getByTestId("busy-indicator").parentElement;
+    expect(button.contains(indicator)).toBe(true);
+    expect(button.contains(screen.getByTestId("google-mark.png"))).toBe(true);
+    expect([button.style.width, button.style.height]).toEqual(idleSize);
+    expect(button.style.marginBottom || "0px").toBe("0px");
+  });
 
   it("lets custom content own loading without a second indicator or reserved gap", () => {
     render(
@@ -438,7 +210,7 @@ describe("SocialButton (web)", () => {
   it.each(["ios", "android"] as const)(
     "renders font-free provider icons on %s",
     (platform) => {
-      mockPlatformOS = platform;
+      socialButtonEnv.platformOS = platform;
       render(
         React.createElement(
           "div",
@@ -483,7 +255,7 @@ describe("SocialButton (web)", () => {
   });
 
   it("preserves Microsoft custom-mode login and normalizes AuthError", async () => {
-    mockLogin.mockRejectedValueOnce(
+    socialButtonEnv.login.mockRejectedValueOnce(
       new Error("token_error: No authorization code in response"),
     );
     const onError = jest.fn();

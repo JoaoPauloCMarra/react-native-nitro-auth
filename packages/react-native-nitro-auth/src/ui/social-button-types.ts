@@ -4,7 +4,8 @@ import type { AuthProvider, AuthUser } from "../Auth.nitro";
 import type { AuthError } from "../utils/auth-error";
 
 export type SocialButtonVariant = "primary" | "outline" | "white" | "black";
-export type SocialButtonRenderMode = "custom" | "image" | "svg";
+export type SocialButtonRenderMode = "custom";
+export type OfficialSocialButtonRenderMode = "image" | "svg";
 export type SocialButtonAppearance = "light" | "dark";
 export type SocialButtonShape = "pill" | "rectangular";
 
@@ -26,32 +27,15 @@ export type SocialButtonContentProps = {
 export type SocialButtonContentComponent =
   ComponentType<SocialButtonContentProps>;
 
-type SocialButtonCommonProps = {
+type SocialButtonBehaviorProps = {
   /** Test identifier for the package-owned Pressable. */
   testID?: string;
-  /**
-   * `custom` renders provider-aware React Native content; `image` and `svg`
-   * render official Google or Apple artwork. Defaults to `custom`.
-   */
   appearance?: SocialButtonAppearance;
   shape?: SocialButtonShape;
   /** @deprecated Use `appearance`. Retained for source compatibility. */
   variant?: SocialButtonVariant;
-  /**
-   * Custom visual content for each provider. The package-owned Pressable keeps
-   * control of pressing and accessibility state.
-   */
-  customComponents?: Partial<
-    Record<AuthProvider, SocialButtonContentComponent>
-  >;
   /** Layout styles for the package-owned Pressable. */
   style?: StyleProp<ViewStyle>;
-  /** Applied only to the default custom renderer and Microsoft. */
-  textStyle?: StyleProp<TextStyle>;
-  /** Applied only to the default custom renderer and Microsoft. */
-  borderRadius?: number;
-  /** Provider mark only; supported by Google and Apple. Defaults to false. */
-  iconOnly?: boolean;
   /** External busy state, combined with package-managed login progress. */
   loading?: boolean;
   /** Google/Apple in-button indicator override; null lets custom content own busy visuals. */
@@ -63,19 +47,45 @@ type SocialButtonCommonProps = {
   onPress?: () => void | Promise<void>;
 };
 
-/** Google and Apple support package-provided custom, image, and SVG artwork. */
+type SocialButtonCommonProps = SocialButtonBehaviorProps & {
+  /**
+   * `custom` renders provider-aware React Native content and is the only mode
+   * of the root `SocialButton`. Official artwork lives in
+   * `react-native-nitro-auth/official-buttons`.
+   */
+  renderMode?: SocialButtonRenderMode;
+  /**
+   * Custom visual content for each provider. The package-owned Pressable keeps
+   * control of pressing and accessibility state.
+   */
+  customComponents?: Partial<
+    Record<AuthProvider, SocialButtonContentComponent>
+  >;
+  /** Applied only to the default custom renderer and Microsoft. */
+  textStyle?: StyleProp<TextStyle>;
+  /** Applied only to the default custom renderer and Microsoft. */
+  borderRadius?: number;
+};
+
+/** Google and Apple support package-provided custom content. */
 type BrandedSocialButtonProps = SocialButtonCommonProps & {
   provider: "google" | "apple";
-  renderMode?: SocialButtonRenderMode;
+  /** Provider mark only; supported by Google and Apple. Defaults to false. */
   iconOnly?: boolean;
 };
 
 /** Microsoft retains its existing custom renderer and accepts dynamic providers. */
 type CustomSocialButtonProps = SocialButtonCommonProps & {
   provider: AuthProvider;
-  renderMode?: "custom";
   iconOnly?: false;
 };
 
 export type SocialButtonProps =
   BrandedSocialButtonProps | CustomSocialButtonProps;
+
+export type OfficialSocialButtonProps = SocialButtonBehaviorProps & {
+  provider: "google" | "apple";
+  /** Official PNG or SVG artwork. Defaults to `image`. */
+  renderMode?: OfficialSocialButtonRenderMode;
+  iconOnly?: boolean;
+};

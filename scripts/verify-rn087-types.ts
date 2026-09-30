@@ -58,6 +58,7 @@ async function main(): Promise<void> {
     "/src",
   );
   const sourceEntry = join(sourceDirectory, "index.ts");
+  const officialButtonsEntry = join(sourceDirectory, "official-buttons.ts");
   const temporaryRoot = await mkdtemp(join(tmpdir(), "nitro-rn087-types-"));
 
   try {
@@ -124,7 +125,11 @@ async function main(): Promise<void> {
             target: "ES2020",
             types: ["node", "react", "react-native"],
           },
-          include: [sourceEntry, `${sourceDirectory}/**/*.d.ts`],
+          include: [
+            sourceEntry,
+            officialButtonsEntry,
+            `${sourceDirectory}/**/*.d.ts`,
+          ],
         },
         null,
         2,

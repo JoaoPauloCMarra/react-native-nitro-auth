@@ -1,0 +1,8 @@
+{
+  "main": "../lib/commonjs/official-buttons.js",
+  "module": "../lib/module/official-buttons.js",
+  "types": "../lib/typescript/commonjs/official-buttons.d.ts",
+  "react-native": "../src/official-buttons.ts",
+  "browser": "../src/official-buttons.web.ts",
+  "source": "../src/official-buttons.ts"
+}

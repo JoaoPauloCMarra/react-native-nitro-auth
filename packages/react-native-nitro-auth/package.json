@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-auth",
-  "version": "0.11.3",
+  "version": "0.12.0",
   "description": "High-performance authentication library for React Native with Google Sign-In, Apple Sign-In, and Microsoft Sign-In support, powered by Nitro Modules (JSI)",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -13,6 +13,7 @@
     "src",
     "assets",
     "lib",
+    "official-buttons",
     "cpp",
     "android",
     "ios",
@@ -149,6 +150,18 @@
       "require": {
         "types": "./lib/typescript/commonjs/index.d.ts",
         "default": "./lib/commonjs/index.js"
+      }
+    },
+    "./official-buttons": {
+      "react-native": "./src/official-buttons.ts",
+      "browser": "./src/official-buttons.web.ts",
+      "import": {
+        "types": "./lib/typescript/module/official-buttons.d.ts",
+        "default": "./lib/module/official-buttons.js"
+      },
+      "require": {
+        "types": "./lib/typescript/commonjs/official-buttons.d.ts",
+        "default": "./lib/commonjs/official-buttons.js"
       }
     },
     "./app.plugin": "./app.plugin.js",
