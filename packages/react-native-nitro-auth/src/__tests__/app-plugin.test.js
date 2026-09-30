@@ -659,7 +659,7 @@ describe("Google Sign-In Podfile properties", () => {
 });
 
 describe("Microsoft Expo configuration", () => {
-  const microsoftFilter = (packageName, clientId) => [
+  const microsoftFilter = (clientId) => [
     {
       action: [{ $: { "android:name": "android.intent.action.VIEW" } }],
       category: [
@@ -670,7 +670,7 @@ describe("Microsoft Expo configuration", () => {
         {
           $: {
             "android:scheme": "msauth",
-            "android:host": packageName,
+            "android:host": "${applicationId}",
             "android:path": `/${clientId}`,
           },
         },
@@ -714,7 +714,7 @@ describe("Microsoft Expo configuration", () => {
     expect(microsoft).toHaveLength(1);
     expect(microsoft[0].$["android:exported"]).toBe("true");
     expect(microsoft[0]["intent-filter"]).toEqual(
-      microsoftFilter("com.example", "NEW-CLIENT"),
+      microsoftFilter("NEW-CLIENT"),
     );
     expect(activities).toContainEqual(mainActivity);
 
@@ -722,13 +722,14 @@ describe("Microsoft Expo configuration", () => {
     expect(manifest.manifest.application[0].activity).toEqual([mainActivity]);
   });
 
-  it("does not throw when android.package is missing", async () => {
+  it("uses the applicationId placeholder so suffixes and flavors match", async () => {
     const manifest = await applyManifest(
       { name: "Example", slug: "example" },
       { android: { microsoftClientId: "CLIENT" } },
       { manifest: { application: [{ activity: [] }] } },
     );
-    expect(manifest.manifest.application[0].activity).toEqual([]);
+    const [activity] = manifest.manifest.application[0].activity;
+    expect(activity["intent-filter"]).toEqual(microsoftFilter("CLIENT"));
   });
 
   it("removes stale Microsoft and Google strings when their options are removed", async () => {

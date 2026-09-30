@@ -379,7 +379,7 @@ extension AuthAdapter {
   }
 
   static func clearMicrosoftRefreshTokenOnClientError(_ statusCode: Int, operation: AuthAdapter.AuthOperationToken) {
-    guard (400...499).contains(statusCode) else { return }
+    guard (400...499).contains(statusCode), statusCode != 408, statusCode != 429 else { return }
     _ = commitCurrentOperation(operation) {
       inMemoryMicrosoftRefreshToken = nil
     }

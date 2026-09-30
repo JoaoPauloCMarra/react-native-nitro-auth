@@ -103,9 +103,9 @@ dependencies {
   implementation "androidx.browser:browser:1.8.0"
   
   // Google Credential Manager (One-Tap / Passkeys)
-  implementation "androidx.credentials:credentials:1.5.0"
-  implementation "androidx.credentials:credentials-play-services-auth:1.5.0"
-  implementation "com.google.android.libraries.identity.googleid:googleid:1.1.1"
+  implementation "androidx.credentials:credentials:1.6.0"
+  implementation "androidx.credentials:credentials-play-services-auth:1.6.0"
+  implementation "com.google.android.libraries.identity.googleid:googleid:1.2.0"
 
   testImplementation "junit:junit:4.13.2"
   testImplementation "org.robolectric:robolectric:4.13"

@@ -101,6 +101,9 @@ const MANAGED_ANDROID_STRINGS = [
   "nitro_auth_microsoft_b2c_domain",
 ];
 const MICROSOFT_AUTH_ACTIVITY = "com.auth.MicrosoftAuthActivity";
+// Manifest merge replaces the placeholder with the final applicationId, so
+// applicationIdSuffix and product flavors keep a matching redirect host.
+const ANDROID_APPLICATION_ID_PLACEHOLDER = "${applicationId}";
 
 const GOOGLE_IOS_CLIENT_ID_SUFFIX = ".apps.googleusercontent.com";
 
@@ -524,9 +527,7 @@ const withNitroAuth = (config, props = {}) => {
     application.activity = (application.activity || []).filter(
       (entry) => entry.$?.["android:name"] !== MICROSOFT_AUTH_ACTIVITY,
     );
-    const packageName =
-      config.android?.package || AndroidConfig.Package.getPackage(config);
-    if (!android.microsoftClientId || !packageName) {
+    if (!android.microsoftClientId) {
       return config;
     }
     application.activity.push({
@@ -545,7 +546,7 @@ const withNitroAuth = (config, props = {}) => {
             {
               $: {
                 "android:scheme": "msauth",
-                "android:host": packageName,
+                "android:host": ANDROID_APPLICATION_ID_PLACEHOLDER,
                 "android:path": `/${android.microsoftClientId}`,
               },
             },

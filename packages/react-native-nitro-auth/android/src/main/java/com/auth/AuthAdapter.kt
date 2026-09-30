@@ -1806,7 +1806,7 @@ object AuthAdapter {
 
         val credentialManager = CredentialManager.create(activity)
         val requestBuilder = GetCredentialRequest.Builder()
-        if ((nonce != null && forceAccountPicker) || hostedDomain != null) {
+        if (nonce != null && forceAccountPicker) {
             val signInOption = GetSignInWithGoogleOption.Builder(clientId)
                 .apply {
                     setNonce(nonce)
@@ -1822,6 +1822,7 @@ object AuthAdapter {
                 .setRequestVerifiedPhoneNumber(requestVerifiedPhoneNumber)
                 .apply {
                     if (nonce != null) setNonce(nonce)
+                    if (hostedDomain != null) setHostedDomainFilter(hostedDomain)
                 }
                 .build()
             requestBuilder.addCredentialOption(googleIdOption)
@@ -1943,7 +1944,7 @@ object AuthAdapter {
                 null, null,
                 googleIdTokenCredential.id,
                 googleIdTokenCredential.phoneNumber,
-                hostedDomain,
+                claims["hd"] ?: hostedDomain,
                 scopes.toTypedArray(),
                 expirationTime,
                 generation,
@@ -2060,7 +2061,7 @@ object AuthAdapter {
                 null, null,
                 credential.id,
                 credential.phoneNumber,
-                oneTapSession.hostedDomain,
+                claims["hd"] ?: oneTapSession.hostedDomain,
                 mergedScopes.toTypedArray(),
                 getGoogleExpirationTimeMs(credential.idToken),
                 generation,
@@ -2589,7 +2590,7 @@ object AuthAdapter {
                 success = false,
                 code = mappedError.first,
                 detail = mappedError.second,
-                clearRefreshToken = responseCode in 400..499,
+                clearRefreshToken = MicrosoftAuthConfig.shouldClearRefreshToken(responseCode),
             )
         }
 
