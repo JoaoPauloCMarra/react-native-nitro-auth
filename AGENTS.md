@@ -36,6 +36,7 @@ React Native Nitro module for authentication (Google, Apple, Microsoft). C++ cor
 - `HybridAuth::refreshToken` rejects `operation_in_progress` while a login, requestScopes or silentRestore is pending; it never cancels them
 - `./official-buttons` must stay free of `react-native-svg` and SVG artwork; SVG rendering lives in `./official-buttons/svg` (guarded by `social-button-import-graph.test.ts`)
 - Web `index.web.ts` must mirror exports from `index.ts` (e.g., `AuthError`)
+- Example React Compiler is on (`experiments.reactCompiler`). Never write try/finally without catch inside a React component or hook. The compiler cannot lower it ("Handle TryStatement without a catch clause") and skips the whole function. Use promise.finally() for async cleanup, or a real catch that handles or reports the error. try/catch/finally is not this bailout. Example lint fails that form (`TryStatement[handler=null]` via `compiler-bailout/no-try-without-catch`). A compiler bailout fails the check. It is not a type or lint warning to ignore.
 - The example app uses Expo CNG; `apps/example/android` and `apps/example/ios` are generated local artifacts and should not be hand-edited or committed.
 - Keep `expo-build-properties` `ios.usePrecompiledModules` disabled for the example app until Expo/Xcode precompiled module linking is proven stable; with Xcode 26.5 the precompiled Expo module path produced `SwiftUICore`/`ExpoFileSystem` link failures while source-built Expo modules passed.
 
