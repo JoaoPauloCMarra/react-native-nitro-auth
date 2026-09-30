@@ -43,7 +43,6 @@
     "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
-    "babel-plugin-module-resolver": "^5.0.3",
     "babel-preset-expo": "~57.0.7",
     "eslint": "^10.11.0",
     "eslint-config-expo-magic": "^3.0.0"
