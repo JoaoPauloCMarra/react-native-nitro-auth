@@ -18,4 +18,5 @@ internal val OAUTH_ERROR_CODES: Map<String, AuthErrorCode> = mapOf(
     "temporarily_unavailable" to AuthErrorCode.NETWORK_ERROR,
     "unauthorized_client" to AuthErrorCode.CONFIGURATION_ERROR,
     "user_cancelled" to AuthErrorCode.CANCELLED,
+    "user_cancelled_authorize" to AuthErrorCode.CANCELLED,
 )

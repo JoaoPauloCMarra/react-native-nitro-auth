@@ -16,4 +16,5 @@ let oauthErrorCodes: [String: PlatformAuthErrorCode] = [
   "temporarily_unavailable": .networkError,
   "unauthorized_client": .configurationError,
   "user_cancelled": .cancelled,
+  "user_cancelled_authorize": .cancelled,
 ]

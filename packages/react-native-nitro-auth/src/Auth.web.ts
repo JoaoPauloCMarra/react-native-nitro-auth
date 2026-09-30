@@ -13,9 +13,10 @@ import type {
   AuthEvent,
   AuthEventType,
 } from "./Auth.nitro";
-import type { JSStorageAdapter } from "./js-storage-adapter";
+import { isAuthErrorCode } from "./utils/auth-error";
 import { logger } from "./utils/logger";
 import { mapOAuthErrorCode } from "./utils/oauth-error";
+import type { OAuthErrorContext } from "./utils/oauth-error";
 import {
   buildAuthorizationCodeBody,
   buildRefreshTokenBody,
@@ -65,35 +66,11 @@ const MICROSOFT_B2CLOGIN_TENANT_NAME_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 const MICROSOFT_DOMAIN_PATTERN =
   /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
-const WEB_AUTH_ERROR_CODES: ReadonlySet<string> = new Set<AuthErrorCode>([
-  "cancelled",
-  "interaction_required",
-  "timeout",
-  "popup_blocked",
-  "network_error",
-  "configuration_error",
-  "not_signed_in",
-  "operation_in_progress",
-  "unsupported_provider",
-  "invalid_state",
-  "invalid_nonce",
-  "token_error",
-  "no_id_token",
-  "parse_error",
-  "refresh_failed",
-  "unknown",
-]);
 const JWT_BASE64_URL_RE = /^[A-Za-z0-9_-]+$/;
 const inMemoryWebStorage = new Map<string, string>();
 let _appleSdkLoadState: AppleSdkLoadState | undefined;
 let _appleSdkRetryScriptId = 0;
 const _terminalAppleSdkScripts = new WeakSet<HTMLScriptElement>();
-
-type WebStorageDriver = {
-  save(key: string, value: string): void;
-  load(key: string): string | undefined;
-  remove(key: string): void;
-};
 
 type AppleSdkLoadState = {
   promise: Promise<void>;
@@ -279,8 +256,34 @@ const parseScopes = (value: unknown): string[] | undefined => {
   return value.filter((scope): scope is string => typeof scope === "string");
 };
 
-const isAuthErrorCode = (value: string): value is AuthErrorCode =>
-  WEB_AUTH_ERROR_CODES.has(value);
+
+const getProviderErrorField = (error: unknown): string | undefined => {
+  if (error instanceof Error || !isJsonObject(error)) return undefined;
+  return typeof error.error === "string" ? error.error : undefined;
+};
+
+const INTERNAL_ERROR_MESSAGES: readonly [readonly string[], AuthErrorCode][] =
+  [
+    [["cancel", "popup_closed"], "cancelled"],
+    [["timeout"], "timeout"],
+    [["popup blocked"], "popup_blocked"],
+    [["login is already in progress"], "operation_in_progress"],
+    [["state mismatch"], "invalid_state"],
+    [["nonce mismatch"], "invalid_nonce"],
+    [["no id_token", "no_id_token"], "no_id_token"],
+    [["invalid jwt", "json"], "parse_error"],
+    [["no user logged in", "not signed in"], "not_signed_in"],
+    [["network"], "network_error"],
+    [["not configured", "client id"], "configuration_error"],
+  ];
+
+const mapInternalErrorMessage = (message: string): AuthErrorCode => {
+  const normalized = message.toLowerCase();
+  const match = INTERNAL_ERROR_MESSAGES.find(([needles]) =>
+    needles.some((needle) => normalized.includes(needle)),
+  );
+  return match?.[1] ?? "unknown";
+};
 
 const parseAuthWebExtraConfig = (value: unknown): AuthWebExtraConfig => {
   if (!isJsonObject(value)) {
@@ -362,7 +365,6 @@ class AuthWeb implements Auth {
   private _listeners: ((user: AuthUser | undefined) => void)[] = [];
   private _tokenListeners: ((tokens: AuthTokens) => void)[] = [];
   private _eventListeners: ((event: AuthEvent) => void)[] = [];
-  private _storageAdapter: WebStorageDriver | undefined;
   private _browserStorageResolved = false;
   private _browserStorageCache: Storage | undefined;
   private _refreshPromise: Promise<AuthTokens> | undefined;
@@ -407,6 +409,7 @@ class AuthWeb implements Auth {
       throw new AuthWebError("operation_in_progress");
   }
   private _loginInFlight: boolean = false;
+  private readonly _popupCancels = new Set<() => void>();
   private _sessionGeneration = 0;
   private _disposed = false;
 
@@ -415,44 +418,8 @@ class AuthWeb implements Auth {
     this.loadFromCache();
   }
 
-  private isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-    if (!isJsonObject(value)) {
-      return false;
-    }
-    return typeof value.then === "function";
-  }
-
-  private createWebStorageDriver(adapter: JSStorageAdapter): WebStorageDriver {
-    return {
-      save: (key, value) => {
-        const result = adapter.save(key, value);
-        if (this.isPromiseLike(result)) {
-          throw new Error("On web, JSStorageAdapter.save must be synchronous.");
-        }
-      },
-      load: (key) => {
-        const result = adapter.load(key);
-        if (this.isPromiseLike(result)) {
-          throw new Error("On web, JSStorageAdapter.load must be synchronous.");
-        }
-        return result;
-      },
-      remove: (key) => {
-        const result = adapter.remove(key);
-        if (this.isPromiseLike(result)) {
-          throw new Error(
-            "On web, JSStorageAdapter.remove must be synchronous.",
-          );
-        }
-      },
-    };
-  }
-
   private shouldPersistTokensInStorage(): boolean {
-    return (
-      this._config.nitroAuthPersistTokensOnWeb ??
-      this._storageAdapter !== undefined
-    );
+    return this._config.nitroAuthPersistTokensOnWeb === true;
   }
 
   private shouldPersistProfile(): boolean {
@@ -508,11 +475,6 @@ class AuthWeb implements Auth {
   }
 
   private saveValue(key: string, value: string): void {
-    if (this._storageAdapter) {
-      this._storageAdapter.save(key, value);
-      return;
-    }
-
     const storage = this.getBrowserStorage();
     if (storage) {
       storage.setItem(key, value);
@@ -522,10 +484,6 @@ class AuthWeb implements Auth {
   }
 
   private loadValue(key: string): string | undefined {
-    if (this._storageAdapter) {
-      return this._storageAdapter.load(key);
-    }
-
     const storage = this.getBrowserStorage();
     if (storage) {
       return storage.getItem(key) ?? undefined;
@@ -534,11 +492,6 @@ class AuthWeb implements Auth {
   }
 
   private removeValue(key: string): void {
-    if (this._storageAdapter) {
-      this._storageAdapter.remove(key);
-      return;
-    }
-
     const storage = this.getBrowserStorage();
     if (storage) {
       storage.removeItem(key);
@@ -688,7 +641,7 @@ class AuthWeb implements Auth {
   }
 
   private saveRefreshToken(refreshToken: string): void {
-    if (this._storageAdapter || this.shouldPersistTokensInStorage()) {
+    if (this.shouldPersistTokensInStorage()) {
       this.saveValue(MS_REFRESH_TOKEN_KEY, refreshToken);
       return;
     }
@@ -698,7 +651,7 @@ class AuthWeb implements Auth {
   }
 
   private loadRefreshToken(): string | undefined {
-    if (this._storageAdapter || this.shouldPersistTokensInStorage()) {
+    if (this.shouldPersistTokensInStorage()) {
       return this.loadValue(MS_REFRESH_TOKEN_KEY);
     }
     return inMemoryWebStorage.get(MS_REFRESH_TOKEN_KEY);
@@ -758,9 +711,8 @@ class AuthWeb implements Auth {
     }
 
     const configuredStorageMode = this.getWebStorageMode();
-    const selectedBrowserMode = this._storageAdapter
-      ? undefined
-      : configuredStorageMode === STORAGE_MODE_MEMORY
+    const selectedBrowserMode =
+      configuredStorageMode === STORAGE_MODE_MEMORY
         ? undefined
         : configuredStorageMode;
     this.sanitizeOtherBrowserUserCaches(selectedBrowserMode);
@@ -768,16 +720,6 @@ class AuthWeb implements Auth {
     if (!this.shouldPersistTokensInStorage()) {
       this.removePersistedBrowserValue(MS_REFRESH_TOKEN_KEY);
       inMemoryWebStorage.delete(MS_REFRESH_TOKEN_KEY);
-      if (this._storageAdapter) {
-        try {
-          this.removeValue(MS_REFRESH_TOKEN_KEY);
-        } catch (error) {
-          logger.warn(
-            "Failed to clear the Microsoft refresh token from the configured web storage adapter",
-            { error: getSafeErrorCategory(error) },
-          );
-        }
-      }
     }
   }
 
@@ -907,13 +849,16 @@ class AuthWeb implements Auth {
     } finally {
       if (this._captureLoginUser === capture)
         this._captureLoginUser = undefined;
-      this._loginInFlight = false;
-      this._loginReject = undefined;
+      if (this._loginReject === rejectLogin) {
+        this._loginInFlight = false;
+        this._loginReject = undefined;
+      }
     }
   }
 
   /** Cancels the active login so logout/dispose settle pending work. */
   private cancelActiveLogin(): void {
+    for (const cancelPopup of [...this._popupCancels]) cancelPopup();
     this._loginReject?.(
       new AuthWebError("cancelled", "Auth operation was cancelled"),
     );
@@ -1174,7 +1119,7 @@ class AuthWeb implements Auth {
     try {
       return await refreshPromise;
     } catch (e: unknown) {
-      const error = this.mapError(e);
+      const error = this.mapError(e, "refresh");
       this.emitEvent("refresh_failed", this._currentUser?.provider, error.code);
       throw error;
     } finally {
@@ -1310,59 +1255,25 @@ class AuthWeb implements Auth {
     return tokens;
   }
 
-  private mapError(error: unknown): AuthWebError {
+  private mapError(
+    error: unknown,
+    context: OAuthErrorContext = "authorize",
+  ): AuthWebError {
     if (error instanceof AuthWebError) {
       return error;
     }
 
-    const rawMessage = error instanceof Error ? error.message : String(error);
-    const msg = rawMessage.toLowerCase();
-    let mappedMsg: AuthErrorCode = "unknown";
-
+    const providerError = getProviderErrorField(error);
+    const rawMessage =
+      providerError ?? (error instanceof Error ? error.message : String(error));
     if (isAuthErrorCode(rawMessage)) {
-      mappedMsg = rawMessage;
-    } else if (msg.includes("cancel") || msg.includes("popup_closed")) {
-      mappedMsg = "cancelled";
-    } else if (msg.includes("access_denied")) {
-      mappedMsg = "cancelled";
-    } else if (msg.includes("timeout")) {
-      mappedMsg = "timeout";
-    } else if (msg.includes("popup blocked")) {
-      mappedMsg = "popup_blocked";
-    } else if (msg.includes("login is already in progress")) {
-      mappedMsg = "operation_in_progress";
-    } else if (msg.includes("state mismatch")) {
-      mappedMsg = "invalid_state";
-    } else if (msg.includes("nonce mismatch")) {
-      mappedMsg = "invalid_nonce";
-    } else if (msg.includes("no id_token") || msg.includes("no_id_token")) {
-      mappedMsg = "no_id_token";
-    } else if (msg.includes("invalid jwt") || msg.includes("json")) {
-      mappedMsg = "parse_error";
-    } else if (
-      msg.includes("no user logged in") ||
-      msg.includes("not signed in")
-    ) {
-      mappedMsg = "not_signed_in";
-    } else if (
-      msg.includes("network") ||
-      msg.includes("server_error") ||
-      msg.includes("temporarily_unavailable")
-    ) {
-      mappedMsg = "network_error";
-    } else if (msg.includes("invalid_grant") || msg.includes("invalid_token")) {
-      mappedMsg = "refresh_failed";
-    } else if (
-      msg.includes("invalid_scope") ||
-      msg.includes("unauthorized_client") ||
-      msg.includes("invalid_client") ||
-      msg.includes("client id") ||
-      msg.includes("config")
-    ) {
-      mappedMsg = "configuration_error";
+      return new AuthWebError(rawMessage, rawMessage);
     }
-
-    return new AuthWebError(mappedMsg, rawMessage);
+    const providerCode = mapOAuthErrorCode(rawMessage, context);
+    if (providerCode !== "unknown" || providerError !== undefined) {
+      return new AuthWebError(providerCode, rawMessage);
+    }
+    return new AuthWebError(mapInternalErrorMessage(rawMessage), rawMessage);
   }
 
   private async parseResponseObject(response: Response): Promise<JsonObject> {
@@ -1449,13 +1360,26 @@ class AuthWeb implements Auth {
     return new Promise((resolve, reject) => {
       let settled = false;
       let crossOrigin = false;
+      let pollId: number | undefined;
+
+      const schedulePoll = (delay: number) => {
+        pollId = window.setTimeout(poll, delay);
+      };
 
       const cleanup = (timeoutId: number, shouldClosePopup: boolean) => {
         settled = true;
+        this._popupCancels.delete(cancel);
         window.clearTimeout(timeoutId);
+        if (pollId !== undefined) window.clearTimeout(pollId);
         if (shouldClosePopup && !popup.closed) {
           popup.close();
         }
+      };
+
+      const cancel = () => {
+        if (settled) return;
+        cleanup(timeoutId, true);
+        reject(new Error("cancelled"));
       };
 
       const timeoutId = window.setTimeout(() => {
@@ -1464,6 +1388,7 @@ class AuthWeb implements Auth {
       }, POPUP_TIMEOUT_MS);
 
       const poll = () => {
+        pollId = undefined;
         if (settled) {
           return;
         }
@@ -1486,13 +1411,13 @@ class AuthWeb implements Auth {
               error: String(error),
             });
           }
-          window.setTimeout(poll, POPUP_POLL_INTERVAL_CROSS_ORIGIN_MS);
+          schedulePoll(POPUP_POLL_INTERVAL_CROSS_ORIGIN_MS);
           return;
         }
         crossOrigin = false;
 
         if (!this.isExactRedirectTarget(url, redirectUri)) {
-          window.setTimeout(poll, POPUP_POLL_INTERVAL_MS);
+          schedulePoll(POPUP_POLL_INTERVAL_MS);
           return;
         }
 
@@ -1507,7 +1432,8 @@ class AuthWeb implements Auth {
           });
       };
 
-      window.setTimeout(poll, POPUP_POLL_INTERVAL_MS);
+      this._popupCancels.add(cancel);
+      schedulePoll(POPUP_POLL_INTERVAL_MS);
     });
   }
 
@@ -2169,7 +2095,7 @@ class AuthWeb implements Auth {
         }
         logger.log("Silent restore successful");
       } catch (e) {
-        const error = this.mapError(e);
+        const error = this.mapError(e, "refresh");
         logger.warn("Silent restore failed to refresh token:", error);
         throw error;
       }
@@ -2215,15 +2141,6 @@ class AuthWeb implements Auth {
 
   setLoggingEnabled(enabled: boolean): void {
     logger.setEnabled(enabled);
-  }
-
-  /** @internal Reserved for future use — not part of the public API */
-  setWebStorageAdapter(adapter: JSStorageAdapter | undefined): void {
-    this._storageAdapter = adapter
-      ? this.createWebStorageDriver(adapter)
-      : undefined;
-    this.loadFromCache();
-    this.notify();
   }
 
   name = "Auth";

@@ -2,6 +2,7 @@
   "access_denied": "cancelled",
   "user_cancelled": "cancelled",
   "popup_closed_by_user": "cancelled",
+  "user_cancelled_authorize": "cancelled",
   "interaction_required": "interaction_required",
   "login_required": "interaction_required",
   "consent_required": "interaction_required",

@@ -64,17 +64,6 @@ type TestAuthModule = {
   dispose: () => void;
   equals: (other: unknown) => boolean;
   setLoggingEnabled: (enabled: boolean) => void;
-  setWebStorageAdapter: (
-    adapter:
-      | {
-          save: (key: string, value: string) => void | Promise<void>;
-          load: (
-            key: string,
-          ) => string | undefined | Promise<string | undefined>;
-          remove: (key: string) => void | Promise<void>;
-        }
-      | undefined,
-  ) => void;
 };
 
 const createBase64UrlSegmentFromObject = (value: Record<string, unknown>) => {
@@ -1730,36 +1719,6 @@ describe("AuthModule (web)", () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it("keeps tokens memory-only with a custom storage adapter unless opt-in", async () => {
-    const adapterStorage = new Map<string, string>();
-    const adapter = {
-      save: (key: string, value: string) => {
-        adapterStorage.set(key, value);
-      },
-      load: (key: string) => adapterStorage.get(key),
-      remove: (key: string) => {
-        adapterStorage.delete(key);
-      },
-    };
-
-    localStorage.setItem(
-      CACHE_KEY,
-      JSON.stringify({
-        provider: "microsoft",
-        accessToken: "sensitive-token",
-        refreshToken: "sensitive-refresh",
-        idToken: "sensitive-id",
-      }),
-    );
-
-    const auth = await loadAuthModule();
-    auth.setWebStorageAdapter(adapter);
-
-    expect(auth.currentUser?.accessToken).toBeUndefined();
-    expect(auth.currentUser?.refreshToken).toBeUndefined();
-    expect(auth.currentUser?.idToken).toBeUndefined();
-  });
-
   it("strips profile PII from persisted users when disabled", async () => {
     localStorage.setItem(
       CACHE_KEY,
@@ -2125,48 +2084,6 @@ describe("AuthModule (web)", () => {
     }
   });
 
-  it("omits credential-bearing adapter errors from cache warnings", async () => {
-    const sentinel = "sentinel-adapter-credential-7f31";
-    const auth = await loadAuthModule({
-      nitroAuthPersistTokensOnWeb: false,
-    });
-    const warningSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-    const adapter = {
-      save: () => {
-        throw new Error(`save failed with ${sentinel}`);
-      },
-      load: (key: string) => {
-        if (key === CACHE_KEY) {
-          return JSON.stringify({
-            provider: "microsoft",
-            userId: "safe-user",
-            accessToken: sentinel,
-          });
-        }
-        return key === SCOPES_KEY ? "not-json" : undefined;
-      },
-      remove: () => {
-        throw new Error(`remove failed with ${sentinel}`);
-      },
-    };
-
-    try {
-      auth.setLoggingEnabled(true);
-      auth.setWebStorageAdapter(adapter);
-
-      expect(auth.currentUser?.accessToken).toBeUndefined();
-      expect(JSON.stringify(warningSpy.mock.calls)).not.toContain(sentinel);
-      expect(warningSpy).toHaveBeenCalledWith(
-        "[NitroAuth]",
-        "Failed to sanitize cached auth user; keeping the in-memory session safe",
-        expect.objectContaining({ error: expect.any(String) }),
-      );
-    } finally {
-      auth.setLoggingEnabled(false);
-      warningSpy.mockRestore();
-    }
-  });
-
   it("falls back to defaults when expo-constants throws", async () => {
     jest.resetModules();
     jest.doMock(
@@ -2186,59 +2103,6 @@ describe("AuthModule (web)", () => {
     await expect(auth.login("microsoft")).rejects.toThrow(
       "configuration_error",
     );
-  });
-
-  it("rejects synchronous storage adapters that return promises", async () => {
-    const auth = await loadAuthModule();
-    // An async load fails at adapter install time (loadFromCache).
-    expect(() => {
-      auth.setWebStorageAdapter({
-        save: () => {},
-        load: () => Promise.resolve("x"),
-        remove: () => {},
-      });
-    }).toThrow("must be synchronous");
-
-    const auth2 = await loadAuthModule();
-    auth2.setWebStorageAdapter({
-      save: () => Promise.resolve(),
-      load: () => undefined,
-      remove: () => {},
-    });
-    // An async save fails on the first persistence write.
-    await expect(auth2.revokeScopes(["email"])).rejects.toThrow(
-      "must be synchronous",
-    );
-  });
-
-  it("persists tokens through a custom adapter when explicitly enabled", async () => {
-    const adapterStorage = new Map<string, string>();
-    const adapter = {
-      save: (key: string, value: string) => {
-        adapterStorage.set(key, value);
-      },
-      load: (key: string) => adapterStorage.get(key),
-      remove: (key: string) => {
-        adapterStorage.delete(key);
-      },
-    };
-
-    sessionStorage.setItem(
-      CACHE_KEY,
-      JSON.stringify({
-        provider: "google",
-        accessToken: "adapter-token",
-        expirationTime: Date.now() + 3600_000,
-      }),
-    );
-
-    const auth = await loadAuthModule({
-      nitroAuthPersistTokensOnWeb: true,
-    });
-    auth.setWebStorageAdapter(adapter);
-
-    expect(auth.currentUser?.accessToken).toBe("adapter-token");
-    expect(auth.currentUser?.expirationTime).toBeGreaterThan(Date.now());
   });
 
   it("login after dispose rejects with cancelled", async () => {
@@ -2289,6 +2153,80 @@ describe("AuthModule (web)", () => {
     );
   });
 
+  it("keeps the replacement login guard when logout and login run in one tick", async () => {
+    jest.useFakeTimers();
+    const popups: { closed: boolean; close: jest.Mock }[] = [];
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(() => {
+        const popup = {
+          closed: false,
+          close: jest.fn(() => {
+            popup.closed = true;
+          }),
+        };
+        Object.defineProperty(popup, "location", {
+          get() {
+            throw new Error("cross-origin");
+          },
+        });
+        popups.push(popup);
+        return popup;
+      }),
+    });
+    const auth = await loadAuthModule({ microsoftClientId: "ms-client" });
+
+    const first = auth.login("microsoft").then(
+      () => "resolved",
+      (error: Error) => error.message,
+    );
+    await jest.advanceTimersByTimeAsync(0);
+    auth.logout();
+    const second = auth.login("microsoft").then(
+      () => "resolved",
+      (error: Error) => error.message,
+    );
+    expect(await first).toBe("cancelled");
+    await jest.advanceTimersByTimeAsync(0);
+
+    await expect(auth.login("microsoft")).rejects.toThrow(
+      "operation_in_progress",
+    );
+    expect(popups).toHaveLength(2);
+    expect(popups[0]?.closed).toBe(true);
+
+    auth.logout();
+    expect(await second).toBe("cancelled");
+    expect(popups[1]?.closed).toBe(true);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("maps Apple SDK plain-object rejections to cancelled", async () => {
+    for (const error of ["popup_closed_by_user", "user_cancelled_authorize"]) {
+      Object.defineProperty(window, "AppleID", {
+        configurable: true,
+        writable: true,
+        value: {
+          auth: {
+            init: jest.fn(),
+            signIn: jest.fn(async () => {
+              throw { error };
+            }),
+          },
+        },
+      });
+      const auth = await loadAuthModule({
+        appleWebClientId: "apple-client-id",
+      });
+      const rejection = await auth.login("apple").then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(String((rejection as Error)?.message)).toBe("cancelled");
+    }
+  });
+
   it("maps message-based failures through the fallback table", async () => {
     const messages: [string, string][] = [
       ["user cancelled the flow", "cancelled"],
@@ -2296,13 +2234,14 @@ describe("AuthModule (web)", () => {
       ["access_denied", "cancelled"],
       ["google_auth_timeout", "timeout"],
       ["no user logged in", "not_signed_in"],
-      ["invalid_grant", "refresh_failed"],
+      ["invalid_grant", "token_error"],
       ["network is down", "network_error"],
       ["state mismatch", "invalid_state"],
       ["nonce mismatch", "invalid_nonce"],
       ["no id_token returned", "no_id_token"],
       ["invalid JSON payload", "parse_error"],
-      ["invalid_scope requested", "configuration_error"],
+      ["invalid_scope", "configuration_error"],
+      ["invalid_scope requested", "unknown"],
       ["unexpected vendor failure", "unknown"],
     ];
     for (const [message, expectedCode] of messages) {
@@ -2829,8 +2768,9 @@ describe("AuthModule (web)", () => {
       ["login is already in progress", "operation_in_progress"],
       ["the user is not signed in", "not_signed_in"],
       ["popup blocked by the browser", "popup_blocked"],
-      ["invalid_client rejected", "configuration_error"],
-      ["invalid_token rejected", "refresh_failed"],
+      ["invalid_client", "configuration_error"],
+      ["invalid_token", "token_error"],
+      ["invalid_client rejected", "unknown"],
       ["temporarily_unavailable", "network_error"],
       ["server_error", "network_error"],
       ["unauthorized_client", "configuration_error"],
@@ -3019,20 +2959,6 @@ describe("AuthModule (web)", () => {
     const url = new URL(String(firstCall[0]));
     expect(url.searchParams.get("login_hint")).toBe("user@example.com");
     expect(url.searchParams.get("prompt")).toBe("consent");
-  });
-
-  it("removes the storage adapter when cleared", async () => {
-    const adapter = {
-      save: () => {},
-      load: () => undefined,
-      remove: () => {},
-    };
-    const auth = await loadAuthModule();
-    auth.setWebStorageAdapter(adapter);
-    auth.setWebStorageAdapter(undefined);
-
-    expect(auth.currentUser).toBeUndefined();
-    expect(auth.grantedScopes).toEqual([]);
   });
 
   it("rejects Google redirects with malformed JWT payloads", async () => {
