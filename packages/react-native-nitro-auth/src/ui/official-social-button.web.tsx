@@ -22,6 +22,7 @@ export const OfficialSocialButton = React.memo(function OfficialSocialButton(
   return (
     <SocialButtonCore
       {...props}
+      renderMode={props.renderMode ?? "image"}
       officialArtwork={officialArtwork}
       login={login}
       currentUser={currentUser}

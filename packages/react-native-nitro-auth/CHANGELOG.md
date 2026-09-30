@@ -16,7 +16,7 @@ Breaking changes are always listed first in each release section.
 
 ### Added
 
-- `react-native-nitro-auth/official-buttons` subpath with `OfficialSocialButton`, which renders the official Google and Apple artwork with the same login, loading, accessibility, and error behavior as before.
+- `react-native-nitro-auth/official-buttons` subpath with `OfficialSocialButton`, which renders the official Google and Apple artwork with the same login, loading, accessibility, and error behavior as before. Its `renderMode` defaults to `image`.
 
 ## [0.11.3] - 2026-09-27
 

@@ -85,6 +85,7 @@ export type SocialButtonProps =
 
 export type OfficialSocialButtonProps = SocialButtonBehaviorProps & {
   provider: "google" | "apple";
-  renderMode: OfficialSocialButtonRenderMode;
+  /** Official PNG or SVG artwork. Defaults to `image`. */
+  renderMode?: OfficialSocialButtonRenderMode;
   iconOnly?: boolean;
 };

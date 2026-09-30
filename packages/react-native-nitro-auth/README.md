@@ -416,7 +416,9 @@ outside the package.
 
 `SocialButton` renders Google, Apple, and Microsoft controls with
 provider-aware React Native content. `custom` is its only `renderMode`. Its
-import does not bundle the official button artwork or `react-native-svg`.
+import does not bundle the official button artwork or the `react-native-svg`
+JavaScript. `react-native-svg` stays a package dependency, so its native module
+is still linked.
 `appearance` accepts `light` or `dark`; `shape` accepts `pill` or
 `rectangular`. For Google and Apple, the deprecated `variant` values `primary`,
 `outline`, and `white` map to `light`; `black` maps to `dark`.
@@ -447,7 +449,8 @@ busy state and duplicate-press protection. A React element passed as
 
 `OfficialSocialButton` renders the official Google or Apple full-button artwork.
 Import it from the `official-buttons` subpath, so only apps that use it bundle
-the artwork and `react-native-svg`:
+the artwork and the `react-native-svg` JavaScript. `renderMode` defaults to
+`image`:
 
 ```tsx
 import { OfficialSocialButton } from "react-native-nitro-auth/official-buttons";

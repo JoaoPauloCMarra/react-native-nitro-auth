@@ -143,6 +143,22 @@ describe("OfficialSocialButton (web)", () => {
     expect((image as HTMLImageElement).style.width).toBe("48px");
   });
 
+  it("renders official image artwork when renderMode is omitted", () => {
+    render(
+      React.createElement(OfficialSocialButton, {
+        provider: "google",
+        iconOnly: true,
+        appearance: "dark",
+        shape: "rectangular",
+      }),
+    );
+
+    expect(
+      screen.getByTestId("google-icon-android-dark-rectangular.png"),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("google-mark.png")).toBeNull();
+  });
+
   it("renders Apple square SVG art and keeps the full accessible name", () => {
     render(
       React.createElement(OfficialSocialButton, {

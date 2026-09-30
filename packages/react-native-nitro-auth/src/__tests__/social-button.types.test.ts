@@ -79,13 +79,22 @@ const officialMicrosoft: OfficialSocialButtonProps = {
   provider: "microsoft",
   renderMode: "image",
 };
-// @ts-expect-error Official buttons require an explicit render mode.
 const officialWithoutMode: OfficialSocialButtonProps = { provider: "google" };
 const officialTextStyle: OfficialSocialButtonProps = {
   provider: "google",
   renderMode: "image",
   // @ts-expect-error Official artwork does not accept text styling.
   textStyle: { fontSize: 12 },
+};
+const officialCustomComponents: OfficialSocialButtonProps = {
+  provider: "google",
+  // @ts-expect-error Official artwork does not accept custom content.
+  customComponents: {},
+};
+const officialBorderRadius: OfficialSocialButtonProps = {
+  provider: "apple",
+  // @ts-expect-error Official artwork keeps its own corner radius.
+  borderRadius: 4,
 };
 
 test("social button props separate custom and official render modes", () => {
@@ -103,7 +112,9 @@ test("social button props separate custom and official render modes", () => {
     officialMicrosoft,
     officialWithoutMode,
     officialTextStyle,
-  ]).toHaveLength(13);
+    officialCustomComponents,
+    officialBorderRadius,
+  ]).toHaveLength(15);
 });
 
 void (0 as unknown as RootRenderModeIsCustom);
