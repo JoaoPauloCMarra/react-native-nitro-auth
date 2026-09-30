@@ -1356,7 +1356,6 @@ class AuthWeb implements Auth {
     onRedirect: (url: string) => Promise<void> | void,
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      let settled = false;
       let crossOrigin = false;
       let pollId: number | undefined;
 
@@ -1365,7 +1364,6 @@ class AuthWeb implements Auth {
       };
 
       const cleanup = (timeoutId: number, shouldClosePopup: boolean) => {
-        settled = true;
         this._popupCancels.delete(cancel);
         window.clearTimeout(timeoutId);
         if (pollId !== undefined) window.clearTimeout(pollId);
@@ -1375,7 +1373,6 @@ class AuthWeb implements Auth {
       };
 
       const cancel = () => {
-        if (settled) return;
         cleanup(timeoutId, true);
         reject(new Error("cancelled"));
       };
@@ -1387,9 +1384,6 @@ class AuthWeb implements Auth {
 
       const poll = () => {
         pollId = undefined;
-        if (settled) {
-          return;
-        }
         if (popup.closed) {
           cleanup(timeoutId, false);
           reject(new Error("cancelled"));

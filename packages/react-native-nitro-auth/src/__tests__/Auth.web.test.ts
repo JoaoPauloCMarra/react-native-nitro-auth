@@ -2202,6 +2202,45 @@ describe("AuthModule (web)", () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 
+  it.each([
+    [{ error: "invalid_grant" }, "token_error"],
+    [{ error: "vendor_specific" }, "unknown"],
+    [{ error: 42 }, "unknown"],
+    ["invalid_request", "token_error"],
+  ])(
+    "maps Apple SDK rejection %j through the shared OAuth table",
+    async (rejection, expectedCode) => {
+      Object.defineProperty(window, "AppleID", {
+        configurable: true,
+        writable: true,
+        value: {
+          auth: {
+            init: jest.fn(),
+            signIn: jest.fn(async () => {
+              throw rejection;
+            }),
+          },
+        },
+      });
+      const auth = await loadAuthModule({
+        appleWebClientId: "apple-client-id",
+      });
+      const error = await auth.login("apple").then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(String((error as Error)?.message)).toBe(expectedCode);
+    },
+  );
+
+  it("clears cached scopes that are not an array", async () => {
+    sessionStorage.setItem(SCOPES_KEY, JSON.stringify({ scope: "email" }));
+    const auth = await loadAuthModule();
+
+    expect(auth.grantedScopes).toEqual([]);
+    expect(sessionStorage.getItem(SCOPES_KEY)).toBeNull();
+  });
+
   it("maps Apple SDK plain-object rejections to cancelled", async () => {
     for (const error of ["popup_closed_by_user", "user_cancelled_authorize"]) {
       Object.defineProperty(window, "AppleID", {
