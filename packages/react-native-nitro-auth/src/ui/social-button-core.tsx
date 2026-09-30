@@ -1,4 +1,5 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import type { ComponentType, ReactNode } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -8,18 +9,18 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import {
   SocialButtonBusyContent,
   SocialButtonIndicator,
   SocialButtonRenderer,
-  getArtworkAspect,
 } from "./social-button-renderer";
 import type { BrandedProvider } from "./social-button-renderer";
 import type {
+  OfficialSocialButtonRenderMode,
   SocialButtonAppearance,
+  SocialButtonContentComponent,
   SocialButtonContentProps,
-  SocialButtonProps,
-  SocialButtonRenderMode,
   SocialButtonShape,
   SocialButtonVariant,
 } from "./social-button-types";
@@ -40,7 +41,43 @@ const CUSTOM_BUTTON_WIDTH = 264;
 const ICON_BUTTON_SIZE = 48;
 const VIEWPORT_MARGIN = 64;
 
-type Props = SocialButtonProps & {
+type SocialButtonCoreRenderMode = "custom" | OfficialSocialButtonRenderMode;
+
+export type OfficialArtworkProps = {
+  provider: BrandedProvider;
+  renderMode: OfficialSocialButtonRenderMode;
+  appearance: SocialButtonAppearance;
+  shape: SocialButtonShape;
+  iconOnly: boolean;
+  width: number;
+  height: number;
+};
+
+export type OfficialArtwork = {
+  aspect: (provider: BrandedProvider, iconOnly: boolean) => number;
+  Renderer: ComponentType<OfficialArtworkProps>;
+};
+
+type Props = {
+  testID?: string | undefined;
+  provider: AuthProvider;
+  renderMode?: SocialButtonCoreRenderMode | undefined;
+  iconOnly?: boolean | undefined;
+  appearance?: SocialButtonAppearance | undefined;
+  shape?: SocialButtonShape | undefined;
+  variant?: SocialButtonVariant | undefined;
+  customComponents?:
+    Partial<Record<AuthProvider, SocialButtonContentComponent>> | undefined;
+  style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
+  borderRadius?: number | undefined;
+  loading?: boolean | undefined;
+  loadingIndicator?: ReactNode;
+  disabled?: boolean | undefined;
+  onSuccess?: ((user: AuthUser) => void) | undefined;
+  onError?: ((error: AuthError) => void) | undefined;
+  onPress?: (() => void | Promise<void>) | undefined;
+  officialArtwork?: OfficialArtwork | undefined;
   login: (provider: AuthProvider) => Promise<void>;
   currentUser: () => AuthUser | undefined;
 };
@@ -58,8 +95,7 @@ function resolveAppearance(
  * modes take their width from the official artwork ratio for the platform.
  */
 function getButtonDimensions(
-  provider: BrandedProvider,
-  renderMode: SocialButtonRenderMode,
+  artworkAspect: number | undefined,
   iconOnly: boolean,
   fontScale: number,
   viewportWidth: number,
@@ -68,9 +104,9 @@ function getButtonDimensions(
     return { width: ICON_BUTTON_SIZE, height: ICON_BUTTON_SIZE };
   }
   const baseWidth =
-    renderMode === "custom"
+    artworkAspect === undefined
       ? CUSTOM_BUTTON_WIDTH
-      : BUTTON_HEIGHT * getArtworkAspect(provider, false);
+      : BUTTON_HEIGHT * artworkAspect;
   const scale = Math.min(
     Math.max(1, fontScale),
     Math.max(ICON_BUTTON_SIZE, viewportWidth - VIEWPORT_MARGIN) / baseWidth,
@@ -115,6 +151,7 @@ export function SocialButtonCore({
   onSuccess,
   onError,
   onPress,
+  officialArtwork,
   login,
   currentUser,
 }: Props) {
@@ -127,6 +164,22 @@ export function SocialButtonCore({
   const resolvedAppearance = resolveAppearance(requestedAppearance, variant);
   const resolvedShape: SocialButtonShape =
     requestedShape ?? (provider === "microsoft" ? "rectangular" : "pill");
+  const official =
+    renderMode !== "custom" && officialArtwork !== undefined
+      ? { mode: renderMode, artwork: officialArtwork }
+      : undefined;
+  const missingOfficialArtwork =
+    renderMode !== "custom" && officialArtwork === undefined;
+
+  useEffect(() => {
+    // Migration signal for untyped callers; shown without enabling logging.
+    if (missingOfficialArtwork && typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[NitroAuth] SocialButton renderMode "${renderMode}" requires OfficialSocialButton from "react-native-nitro-auth/official-buttons"; rendering custom mode.`,
+      );
+    }
+  }, [missingOfficialArtwork, renderMode]);
 
   const handlePress = useCallback(async () => {
     if (requestInProgress.current || isDisabled) return;
@@ -156,7 +209,7 @@ export function SocialButtonCore({
   if (provider === "microsoft") {
     const legacyVariant = variant ?? "primary";
     const customComponent =
-      renderMode === "custom" ? customComponents?.microsoft : undefined;
+      official === undefined ? customComponents?.microsoft : undefined;
     const contentProps: SocialButtonContentProps = {
       provider,
       label,
@@ -167,10 +220,10 @@ export function SocialButtonCore({
       loading: isLoading,
       width: viewportWidth,
       height: BUTTON_HEIGHT,
-      ...(renderMode === "custom" && textStyle !== undefined
+      ...(official === undefined && textStyle !== undefined
         ? { textStyle }
         : {}),
-      ...(renderMode === "custom" && borderRadius !== undefined
+      ...(official === undefined && borderRadius !== undefined
         ? { borderRadius }
         : {}),
     };
@@ -226,8 +279,7 @@ export function SocialButtonCore({
   }
 
   const { width, height } = getButtonDimensions(
-    provider,
-    renderMode,
+    official?.artwork.aspect(provider, false),
     iconOnly,
     fontScale,
     viewportWidth,
@@ -242,15 +294,13 @@ export function SocialButtonCore({
     loading: isLoading,
     width,
     height,
-    ...(renderMode === "custom" && textStyle !== undefined
-      ? { textStyle }
-      : {}),
-    ...(renderMode === "custom" && borderRadius !== undefined
+    ...(official === undefined && textStyle !== undefined ? { textStyle } : {}),
+    ...(official === undefined && borderRadius !== undefined
       ? { borderRadius }
       : {}),
   };
   const customComponent =
-    renderMode === "custom" ? customComponents?.[provider] : undefined;
+    official === undefined ? customComponents?.[provider] : undefined;
   const showBusyContent = isLoading && loadingIndicator !== null;
 
   return (
@@ -278,7 +328,7 @@ export function SocialButtonCore({
             iconOnly={iconOnly}
             width={width}
             height={height}
-            {...(renderMode === "custom" && borderRadius !== undefined
+            {...(official === undefined && borderRadius !== undefined
               ? { borderRadius }
               : {})}
             indicator={
@@ -292,11 +342,20 @@ export function SocialButtonCore({
               )
             }
           />
+        ) : official ? (
+          <official.artwork.Renderer
+            provider={provider}
+            renderMode={official.mode}
+            appearance={resolvedAppearance}
+            shape={resolvedShape}
+            iconOnly={iconOnly}
+            width={width}
+            height={height}
+          />
         ) : (
           <SocialButtonRenderer
             {...customContentProps}
             provider={provider}
-            renderMode={renderMode}
             {...(customComponent ? { customComponent } : {})}
           />
         )}

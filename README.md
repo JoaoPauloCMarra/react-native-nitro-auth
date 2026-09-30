@@ -48,7 +48,7 @@ bare app.
 | React Native               | `>=0.75.0`; runtime gate `0.86.3`, RN `0.87` Strict TypeScript compatibility check |
 | React                      | Validated with `19.2.3`                                                            |
 | React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                                 |
-| Expo                       | SDK `57.0.25` development builds; RN `0.86.3`                                      |
+| Expo                       | SDK `57.0.26` development builds; RN `0.86.3`                                      |
 | iOS                        | `16.4` or later                                                                    |
 
 iOS static frameworks are supported with source-built React Native. After
@@ -341,7 +341,9 @@ Main exports:
   the same call.
 - `AuthService.getCredential()` when the caller needs a nonce-bound Google or
   Apple ID token without retaining a package session.
-- `SocialButton` for provider-aware UI.
+- `SocialButton` for provider-aware UI in `custom` mode.
+- `OfficialSocialButton` from `react-native-nitro-auth/official-buttons` for
+  official Google and Apple button artwork.
 - `AuthProvider` for `"google"`, `"apple"`, and `"microsoft"`.
 - `AuthError` and `AuthErrorCode` for deterministic failures.
 - Provider-specific option types for strongly typed login calls.
@@ -412,11 +414,10 @@ outside the package.
 
 ### Social buttons
 
-`SocialButton` renders Google and Apple controls in `custom` mode by default.
-Set `renderMode` to `image` or `svg` to use the package's official full-button
-artwork. Those modes preserve the platform artwork's aspect ratio and do not
-apply `textStyle` or `borderRadius`. Microsoft keeps its existing custom
-renderer. `appearance` accepts `light` or `dark`; `shape` accepts `pill` or
+`SocialButton` renders Google, Apple, and Microsoft controls with
+provider-aware React Native content. `custom` is its only `renderMode`. Its
+import does not bundle the official button artwork or `react-native-svg`.
+`appearance` accepts `light` or `dark`; `shape` accepts `pill` or
 `rectangular`. For Google and Apple, the deprecated `variant` values `primary`,
 `outline`, and `white` map to `light`; `black` maps to `dark`.
 
@@ -439,8 +440,28 @@ busy state and duplicate-press protection. A React element passed as
 
 ```tsx
 <SocialButton provider="google" appearance="light" shape="pill" />
-<SocialButton provider="apple" renderMode="svg" iconOnly />
+<SocialButton provider="apple" appearance="dark" iconOnly />
 ```
+
+#### Official button artwork
+
+`OfficialSocialButton` renders the official Google or Apple full-button artwork.
+Import it from the `official-buttons` subpath, so only apps that use it bundle
+the artwork and `react-native-svg`:
+
+```tsx
+import { OfficialSocialButton } from "react-native-nitro-auth/official-buttons";
+
+<OfficialSocialButton provider="google" renderMode="image" />
+<OfficialSocialButton provider="apple" renderMode="svg" iconOnly />
+```
+
+`renderMode` is required: `image` draws the official PNG artwork and `svg`
+draws the vector artwork. Both modes preserve the platform artwork's aspect
+ratio. `OfficialSocialButton` accepts the same login, loading, `iconOnly`,
+`appearance`, `shape`, accessibility, and error props as `SocialButton`. It does
+not accept `customComponents`, `textStyle`, or `borderRadius`, and it supports
+Google and Apple only.
 
 When provided, `onPress` replaces the package-managed login and may return a
 promise. The component disables itself and reports progress while it settles;
@@ -475,7 +496,8 @@ must register `GoogleSans-Medium` themselves. After changing native font
 configuration, regenerate and rebuild the app.
 
 The package ships the official Google and Apple marks as images and draws them
-unaltered in every mode. `svg` mode uses vector button artwork; Google's vector
+unaltered in every mode. `OfficialSocialButton`'s `svg` mode uses vector button
+artwork; Google's vector
 export draws its mark with a Figma conic gradient inside a `foreignObject`,
 which no native SVG renderer supports, so the package draws the mark image into
 that box instead. Run `bun scripts/generate-social-button-assets.ts` after
@@ -655,9 +677,33 @@ The native package gate and Expo example use React Native `0.86.3`. The
 `check:ci` workflow also compiles the public source against React Native
 `0.87.0`'s Strict TypeScript API to catch declaration and callback regressions;
 that compatibility check does not change the runtime baseline. Expo SDK
-`57.0.25` selects React Native `0.86.3`; do not override it in an Expo app.
+`57.0.26` selects React Native `0.86.3`; do not override it in an Expo app.
 
 Package peer range: `>=0.37.0 <0.38.0`.
+
+### Migrating to 0.12
+
+Version 0.12.0 moves the official Google and Apple button artwork out of the
+root entry. The root `SocialButton` supports only `renderMode="custom"`, and
+TypeScript rejects `renderMode="image"` and `renderMode="svg"` on it. At runtime
+the root button renders custom content for those values and logs a warning
+in development builds.
+
+Replace official-artwork buttons with `OfficialSocialButton` from the new
+subpath:
+
+```diff
+- import { SocialButton } from "react-native-nitro-auth";
+- <SocialButton provider="google" renderMode="image" />
++ import { OfficialSocialButton } from "react-native-nitro-auth/official-buttons";
++ <OfficialSocialButton provider="google" renderMode="image" />
+```
+
+Remove `customComponents`, `textStyle`, and `borderRadius` from those buttons;
+official artwork never applied them. `SocialButtonRenderMode` is now `"custom"`;
+use `OfficialSocialButtonRenderMode` from the subpath for `"image" | "svg"`.
+Custom-mode buttons, `SocialProviderIcon`, `GoogleSocialButtonContent`, and
+`AppleSocialButtonContent` need no change.
 
 ### Migration from 0.9.x and earlier
 

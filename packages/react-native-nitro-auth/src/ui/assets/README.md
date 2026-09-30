@@ -12,7 +12,9 @@ which no native renderer supports; that block is removed and the button draws
 the Google mark image into the same box. The vector buttons do not load or
 require a font. Run `bun scripts/generate-social-button-assets.ts` from the
 repository root after changing any file here, so the inlined artwork in
-`src/ui/social-button-assets.ts` stays identical.
+`src/ui/social-button-assets.ts` stays identical. Only the
+`react-native-nitro-auth/official-buttons` entry imports that module and the
+button PNGs.
 
 `provenance.json` records source URLs, configuration, and SHA-256 checksums.
 Run `bun scripts/check-social-button-assets.ts` from the repository root to check
@@ -20,8 +22,8 @@ integrity, platform dimensions, and absence of font dependencies in SVG artwork.
 
 `google-logo.png` and `apple-mark-light.png` / `apple-mark-dark.png` are the
 official provider marks, traced from the same sources with a transparent
-background. They are the marks drawn in custom mode, in busy states, and by
-`SocialProviderIcon`.
+background. `src/ui/social-button-marks.ts` loads them for custom mode, busy
+states, and `SocialProviderIcon`.
 Do not crop, recolor, stretch, or replace the marks with text characters.
 Provider trademarks remain owned by their respective owners; the package MIT
 license does not grant trademark rights. Follow the provider branding terms.

@@ -6,8 +6,32 @@ import {
   type SocialButtonRenderMode,
   type SocialButtonShape,
 } from "react-native-nitro-auth";
+import {
+  OfficialSocialButton,
+  type OfficialSocialButtonRenderMode,
+} from "react-native-nitro-auth/official-buttons";
 
-const modes: SocialButtonRenderMode[] = ["custom", "image", "svg"];
+type GalleryMode = SocialButtonRenderMode | OfficialSocialButtonRenderMode;
+
+const modes: GalleryMode[] = ["custom", "image", "svg"];
+
+type GalleryButtonProps = {
+  testID: string;
+  provider: "google" | "apple";
+  mode: GalleryMode;
+  iconOnly: boolean;
+  appearance: SocialButtonAppearance;
+  shape: SocialButtonShape;
+  loading: boolean;
+  onPress: () => void;
+};
+
+function GalleryButton({ mode, ...props }: GalleryButtonProps) {
+  if (mode === "custom") {
+    return <SocialButton {...props} />;
+  }
+  return <OfficialSocialButton {...props} renderMode={mode} />;
+}
 
 type ToggleProps = {
   label: string;
@@ -39,7 +63,7 @@ function Toggle({
 }
 
 export function SocialButtonGallery() {
-  const [mode, setMode] = useState<SocialButtonRenderMode>("custom");
+  const [mode, setMode] = useState<GalleryMode>("custom");
   const [appearance, setAppearance] = useState<SocialButtonAppearance>("light");
   const [shape, setShape] = useState<SocialButtonShape>("pill");
   const [iconOnly, setIconOnly] = useState(false);
@@ -89,10 +113,10 @@ export function SocialButtonGallery() {
           },
         ]}
       >
-        <SocialButton
+        <GalleryButton
           testID="gallery-google"
           provider="google"
-          renderMode={mode}
+          mode={mode}
           iconOnly={iconOnly}
           appearance={appearance}
           shape={shape}
@@ -101,10 +125,10 @@ export function SocialButtonGallery() {
             setLastProvider("Google");
           }}
         />
-        <SocialButton
+        <GalleryButton
           testID="gallery-apple"
           provider="apple"
-          renderMode={mode}
+          mode={mode}
           iconOnly={iconOnly}
           appearance={appearance}
           shape={shape}

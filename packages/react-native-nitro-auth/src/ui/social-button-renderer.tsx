@@ -8,26 +8,18 @@ import {
   Text,
   View,
 } from "react-native";
-import { SvgXml } from "react-native-svg";
-import {
-  appleMarks,
-  googleMark,
-  iconOnlyArtwork,
-  socialButtonArtwork,
-} from "./social-button-assets";
+import { appleMarks, googleMark } from "./social-button-marks";
 import type {
   SocialButtonAppearance,
   SocialButtonContentProps,
-  SocialButtonRenderMode,
   SocialButtonShape,
 } from "./social-button-types";
 
 export type BrandedProvider = "google" | "apple";
-type ArtworkPlatform = "android" | "ios";
+export type ArtworkPlatform = "android" | "ios";
 
 type Props = SocialButtonContentProps & {
   provider: BrandedProvider;
-  renderMode: SocialButtonRenderMode;
   customComponent?: React.ComponentType<SocialButtonContentProps> | undefined;
 };
 
@@ -63,44 +55,14 @@ const APPLE_MARK_SCALE = 0.43;
 const APPLE_LABEL_SCALE = 0.43;
 const APPLE_GAP_SCALE = 0.177;
 
-/**
- * Google's official SVG export draws its mark with a Figma conic gradient inside
- * a `foreignObject`, which no native SVG renderer supports. The artwork ships
- * without that block and the mark image is drawn into this box instead.
- */
-const GOOGLE_SVG_MARK_SIZE = 20;
-const GOOGLE_SVG_MARK_ORIGIN = {
-  android: { label: { x: 12, y: 10 }, icon: { x: 10, y: 10 } },
-  ios: { label: { x: 16, y: 12 }, icon: { x: 12, y: 12 } },
-} as const;
-
 /** Google draws a 20dp mark and 14sp label on its 40dp Android button. */
 const GOOGLE_SOURCE_HEIGHT = { android: 40, ios: 44 } as const;
 const GOOGLE_MARK_SIZE = 20;
 const GOOGLE_LABEL_SIZE = 14;
 const GOOGLE_GAP = { android: 10, ios: 12 } as const;
 
-function artworkPlatform(): ArtworkPlatform {
+export function artworkPlatform(): ArtworkPlatform {
   return Platform.OS === "ios" ? "ios" : "android";
-}
-
-function selectArtwork(
-  provider: BrandedProvider,
-  appearance: SocialButtonAppearance,
-  shape: SocialButtonShape,
-  iconOnly: boolean,
-) {
-  const artwork = iconOnly ? iconOnlyArtwork : socialButtonArtwork;
-  return artwork[provider][artworkPlatform()][appearance][shape];
-}
-
-/** Width divided by height of the official artwork for the active platform. */
-export function getArtworkAspect(
-  provider: BrandedProvider,
-  iconOnly: boolean,
-): number {
-  const art = selectArtwork(provider, "light", "pill", iconOnly);
-  return art.width / art.height;
 }
 
 export function getButtonRadius(
@@ -359,60 +321,9 @@ export const AppleSocialButtonContent = React.memo(
 
 export function SocialButtonRenderer({
   provider,
-  renderMode,
   customComponent,
   ...contentProps
 }: Props) {
-  if (renderMode === "image" || renderMode === "svg") {
-    const art = selectArtwork(
-      provider,
-      contentProps.appearance,
-      contentProps.shape,
-      contentProps.iconOnly,
-    );
-    const { width, height } = contentProps;
-
-    if (renderMode === "image") {
-      return (
-        <Image
-          accessible={false}
-          fadeDuration={0}
-          source={art.image}
-          resizeMode="contain"
-          style={{ width, height }}
-        />
-      );
-    }
-
-    if (provider !== "google") {
-      return <SvgXml xml={art.svg} width={width} height={height} />;
-    }
-
-    const origin =
-      GOOGLE_SVG_MARK_ORIGIN[artworkPlatform()][
-        contentProps.iconOnly ? "icon" : "label"
-      ];
-    const unit = width / art.width;
-    return (
-      <View style={{ width, height }}>
-        <SvgXml xml={art.svg} width={width} height={height} />
-        <Image
-          accessible={false}
-          fadeDuration={0}
-          source={googleMark}
-          resizeMode="contain"
-          style={{
-            position: "absolute",
-            left: origin.x * unit,
-            top: origin.y * unit,
-            width: GOOGLE_SVG_MARK_SIZE * unit,
-            height: GOOGLE_SVG_MARK_SIZE * unit,
-          }}
-        />
-      </View>
-    );
-  }
-
   if (customComponent) {
     return React.createElement(customComponent, { provider, ...contentProps });
   }

@@ -5,6 +5,9 @@
     "paths": {
       "react-native-nitro-auth": [
         "../../packages/react-native-nitro-auth/src/index.ts"
+      ],
+      "react-native-nitro-auth/official-buttons": [
+        "../../packages/react-native-nitro-auth/src/official-buttons.ts"
       ]
     }
   },

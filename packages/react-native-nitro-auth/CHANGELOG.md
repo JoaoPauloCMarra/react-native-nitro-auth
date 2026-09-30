@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [0.12.0] - 2026-09-30
+
+### Breaking changes
+
+- The official Google and Apple button artwork moved out of the root entry. Importing `SocialButton` or `SocialProviderIcon` from `react-native-nitro-auth` no longer bundles the 187 KB artwork module, the 32 official button PNGs, or `react-native-svg` JavaScript. The root `SocialButton` supports only `renderMode="custom"`, and `SocialButtonRenderMode` is now `"custom"`. TypeScript rejects `renderMode="image"` and `renderMode="svg"` on it; untyped callers get custom content and a development warning.
+
+  Migration: import `OfficialSocialButton` from `react-native-nitro-auth/official-buttons` for official artwork, keep `renderMode="image"` or `renderMode="svg"`, and remove `customComponents`, `textStyle`, and `borderRadius` from those buttons. Use `OfficialSocialButtonRenderMode` for the `"image" | "svg"` type. Custom-mode buttons, `SocialProviderIcon`, `GoogleSocialButtonContent`, and `AppleSocialButtonContent` need no change.
+
+### Added
+
+- `react-native-nitro-auth/official-buttons` subpath with `OfficialSocialButton`, which renders the official Google and Apple artwork with the same login, loading, accessibility, and error behavior as before.
+
 ## [0.11.3] - 2026-09-27
 
 ### Breaking changes

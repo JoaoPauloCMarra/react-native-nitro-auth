@@ -22,7 +22,7 @@ not prove successful provider authentication.
 | `useAuth`                                | Real hook actions, error paths, shared snapshot updates                                   | Signed-in rendering                                 |
 | Capabilities and errors                  | Every provider/platform capability shape; all public error codes                          | Provider-specific capabilities with configured SDKs |
 | Logging                                  | Toggle on/off                                                                             | No extra acceptance required                        |
-| Social buttons                           | Custom/image/SVG gallery, Google/Apple press handlers, icon-only and loading controls     | Authentication handlers are covered separately      |
+| Social buttons                           | Custom/official image/SVG gallery, Google/Apple press handlers, icon-only and loading     | Authentication handlers are covered separately      |
 
 ## Commands
 

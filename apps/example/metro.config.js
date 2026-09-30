@@ -59,6 +59,16 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
         platform,
       );
     }
+    if (moduleName === "react-native-nitro-auth/official-buttons") {
+      return context.resolveRequest(
+        context,
+        path.resolve(
+          monorepoRoot,
+          "packages/react-native-nitro-auth/src/official-buttons.web.ts",
+        ),
+        platform,
+      );
+    }
   }
   return context.resolveRequest(context, moduleName, platform);
 };

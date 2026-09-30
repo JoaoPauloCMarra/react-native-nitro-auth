@@ -66,6 +66,18 @@ const requiredFiles = [
   "assets/fonts/GoogleSans-OFL.txt",
   "src/ui/social-button-core.tsx",
   "src/ui/social-button-renderer.tsx",
+  "src/ui/social-button-marks.ts",
+  "src/ui/social-button-assets.ts",
+  "src/ui/official-social-button-renderer.tsx",
+  "src/ui/official-social-button.tsx",
+  "src/ui/official-social-button.web.tsx",
+  "src/official-buttons.ts",
+  "src/official-buttons.web.ts",
+  "lib/commonjs/official-buttons.js",
+  "lib/module/official-buttons.js",
+  "lib/typescript/commonjs/official-buttons.d.ts",
+  "lib/typescript/module/official-buttons.d.ts",
+  "official-buttons/package.json",
   "src/ui/assets/provenance.json",
 ];
 

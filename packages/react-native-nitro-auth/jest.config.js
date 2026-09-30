@@ -30,6 +30,8 @@ module.exports = {
     "!src/ui/**",
     "!src/index.ts",
     "!src/index.web.ts",
+    "!src/official-buttons.ts",
+    "!src/official-buttons.web.ts",
     "!src/service.web.ts",
     "!src/global.d.ts",
   ],
