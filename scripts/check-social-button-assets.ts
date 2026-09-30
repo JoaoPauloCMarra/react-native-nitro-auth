@@ -64,7 +64,7 @@ for (const entry of manifest.entries) {
         `Vector artwork must not nest <svg> viewports: ${entry.file}`,
       );
     const inlined = readFileSync(
-      resolve(packageRoot, "src/ui/social-button-assets.ts"),
+      resolve(packageRoot, "src/ui/social-button-svg-assets.ts"),
       "utf8",
     );
     if (!inlined.includes(JSON.stringify(xml.trim())))

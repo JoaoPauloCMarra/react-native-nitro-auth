@@ -83,9 +83,20 @@ type CustomSocialButtonProps = SocialButtonCommonProps & {
 export type SocialButtonProps =
   BrandedSocialButtonProps | CustomSocialButtonProps;
 
-export type OfficialSocialButtonProps = SocialButtonBehaviorProps & {
+type OfficialSocialButtonBaseProps = SocialButtonBehaviorProps & {
   provider: "google" | "apple";
-  /** Official PNG or SVG artwork. Defaults to `image`. */
-  renderMode?: OfficialSocialButtonRenderMode;
   iconOnly?: boolean;
+};
+
+export type OfficialSocialButtonProps = OfficialSocialButtonBaseProps & {
+  /**
+   * Official PNG artwork. SVG artwork is exported from
+   * `react-native-nitro-auth/official-buttons/svg`.
+   */
+  renderMode?: "image";
+};
+
+export type OfficialSvgSocialButtonProps = OfficialSocialButtonBaseProps & {
+  /** Official SVG or PNG artwork. Defaults to `svg`. */
+  renderMode?: OfficialSocialButtonRenderMode;
 };

@@ -4,6 +4,8 @@ import type {
   OfficialSocialButtonProps,
   OfficialSocialButtonRenderMode,
 } from "../official-buttons";
+import type { OfficialSocialButtonProps as OfficialSvgSocialButtonProps } from "../official-buttons-svg";
+import type { OfficialSocialButtonProps as WebOfficialSvgSocialButtonProps } from "../official-buttons-svg.web";
 import type {
   OfficialSocialButtonProps as WebOfficialSocialButtonProps,
   OfficialSocialButtonRenderMode as WebOfficialSocialButtonRenderMode,
@@ -26,6 +28,15 @@ type WebOfficialRenderModes = AssertTrue<
 >;
 type WebOfficialPropsMatchNative = AssertTrue<
   IsEqual<WebOfficialSocialButtonProps, OfficialSocialButtonProps>
+>;
+type WebOfficialSvgPropsMatchNative = AssertTrue<
+  IsEqual<WebOfficialSvgSocialButtonProps, OfficialSvgSocialButtonProps>
+>;
+type SvgRenderModes = AssertTrue<
+  IsEqual<
+    NonNullable<OfficialSvgSocialButtonProps["renderMode"]>,
+    "image" | "svg"
+  >
 >;
 
 const rootCustom: SocialButtonProps = {
@@ -65,8 +76,13 @@ const officialImage: OfficialSocialButtonProps = {
   shape: "rectangular",
   loadingIndicator: null,
 };
-const officialSvg: WebOfficialSocialButtonProps = {
+const officialSvg: WebOfficialSvgSocialButtonProps = {
   provider: "apple",
+  renderMode: "svg",
+};
+const officialImageOnlySvg: OfficialSocialButtonProps = {
+  provider: "apple",
+  // @ts-expect-error SVG artwork moved to react-native-nitro-auth/official-buttons/svg.
   renderMode: "svg",
 };
 const officialCustom: OfficialSocialButtonProps = {
@@ -108,16 +124,19 @@ test("social button props separate custom and official render modes", () => {
     webRootSvg,
     officialImage,
     officialSvg,
+    officialImageOnlySvg,
     officialCustom,
     officialMicrosoft,
     officialWithoutMode,
     officialTextStyle,
     officialCustomComponents,
     officialBorderRadius,
-  ]).toHaveLength(15);
+  ]).toHaveLength(16);
 });
 
 void (0 as unknown as RootRenderModeIsCustom);
 void (0 as unknown as OfficialRenderModes);
 void (0 as unknown as WebOfficialRenderModes);
 void (0 as unknown as WebOfficialPropsMatchNative);
+void (0 as unknown as WebOfficialSvgPropsMatchNative);
+void (0 as unknown as SvgRenderModes);

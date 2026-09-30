@@ -1,12 +1,10 @@
-import React from "react";
-import { Image, StyleSheet, View } from "react-native";
-import { SvgXml } from "react-native-svg";
+import React, { useEffect } from "react";
+import { Image } from "react-native";
 import { iconOnlyArtwork, socialButtonArtwork } from "./social-button-assets";
 import type {
   OfficialArtwork,
   OfficialArtworkProps,
 } from "./social-button-core";
-import { googleMark } from "./social-button-marks";
 import { artworkPlatform } from "./social-button-renderer";
 import type { BrandedProvider } from "./social-button-renderer";
 import type {
@@ -14,18 +12,7 @@ import type {
   SocialButtonShape,
 } from "./social-button-types";
 
-/**
- * Google's official SVG export draws its mark with a Figma conic gradient inside
- * a `foreignObject`, which no native SVG renderer supports. The artwork ships
- * without that block and the mark image is drawn into this box instead.
- */
-const GOOGLE_SVG_MARK_SIZE = 20;
-const GOOGLE_SVG_MARK_ORIGIN = {
-  android: { label: { x: 12, y: 10 }, icon: { x: 10, y: 10 } },
-  ios: { label: { x: 16, y: 12 }, icon: { x: 12, y: 12 } },
-} as const;
-
-function selectArtwork(
+export function selectImageArtwork(
   provider: BrandedProvider,
   appearance: SocialButtonAppearance,
   shape: SocialButtonShape,
@@ -40,69 +27,47 @@ export function getArtworkAspect(
   provider: BrandedProvider,
   iconOnly: boolean,
 ): number {
-  const art = selectArtwork(provider, "light", "pill", iconOnly);
+  const art = selectImageArtwork(provider, "light", "pill", iconOnly);
   return art.width / art.height;
 }
 
-function OfficialArtworkRenderer({
+export function OfficialImageArtwork({
   provider,
-  renderMode,
   appearance,
   shape,
   iconOnly,
   width,
   height,
 }: OfficialArtworkProps): React.ReactElement {
-  const art = selectArtwork(provider, appearance, shape, iconOnly);
-
-  if (renderMode === "image") {
-    return (
-      <Image
-        accessible={false}
-        fadeDuration={0}
-        source={art.image}
-        resizeMode="contain"
-        style={{ width, height }}
-      />
-    );
-  }
-
-  if (provider !== "google") {
-    return <SvgXml xml={art.svg} width={width} height={height} />;
-  }
-
-  const origin =
-    GOOGLE_SVG_MARK_ORIGIN[artworkPlatform()][iconOnly ? "icon" : "label"];
-  const unit = width / art.width;
+  const art = selectImageArtwork(provider, appearance, shape, iconOnly);
   return (
-    <View style={{ width, height }}>
-      <SvgXml xml={art.svg} width={width} height={height} />
-      <Image
-        accessible={false}
-        fadeDuration={0}
-        source={googleMark}
-        resizeMode="contain"
-        style={[
-          styles.googleMark,
-          {
-            left: origin.x * unit,
-            top: origin.y * unit,
-            width: GOOGLE_SVG_MARK_SIZE * unit,
-            height: GOOGLE_SVG_MARK_SIZE * unit,
-          },
-        ]}
-      />
-    </View>
+    <Image
+      accessible={false}
+      fadeDuration={0}
+      source={art.image}
+      resizeMode="contain"
+      style={{ width, height }}
+    />
   );
 }
 
-export const officialArtwork: OfficialArtwork = {
-  aspect: getArtworkAspect,
-  Renderer: OfficialArtworkRenderer,
-};
+function OfficialImageOnlyArtwork(
+  props: OfficialArtworkProps,
+): React.ReactElement {
+  const { renderMode } = props;
+  useEffect(() => {
+    // Migration signal for untyped callers; shown without enabling logging.
+    if (renderMode === "svg" && typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[NitroAuth] OfficialSocialButton renderMode "svg" requires "react-native-nitro-auth/official-buttons/svg"; rendering image artwork.',
+      );
+    }
+  }, [renderMode]);
+  return <OfficialImageArtwork {...props} />;
+}
 
-const styles = StyleSheet.create({
-  googleMark: {
-    position: "absolute",
-  },
-});
+export const officialImageArtwork: OfficialArtwork = {
+  aspect: getArtworkAspect,
+  Renderer: OfficialImageOnlyArtwork,
+};

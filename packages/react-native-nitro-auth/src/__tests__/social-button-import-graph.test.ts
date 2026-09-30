@@ -16,12 +16,16 @@ function isFile(path: string): boolean {
   return existsSync(path) && statSync(path).isFile();
 }
 
-function resolveRelative(fromFile: string, specifier: string): string[] {
+function resolveRelative(
+  fromFile: string,
+  specifier: string,
+  suffixes: readonly string[],
+): string[] {
   const base = resolve(dirname(fromFile), specifier);
   if (isFile(base)) return [base];
   const candidates: string[] = [];
   for (const stem of [base, join(base, "index")]) {
-    for (const suffix of platformSuffixes) {
+    for (const suffix of suffixes) {
       for (const extension of sourceExtensions) {
         const candidate = `${stem}${suffix}${extension}`;
         if (isFile(candidate)) candidates.push(candidate);
@@ -34,7 +38,10 @@ function resolveRelative(fromFile: string, specifier: string): string[] {
   );
 }
 
-function collectImportGraph(entry: string): ImportGraph {
+function collectImportGraph(
+  entry: string,
+  suffixes: readonly string[] = platformSuffixes,
+): ImportGraph {
   const files = new Set<string>();
   const packages = new Set<string>();
   const pending = [resolve(srcRoot, entry)];
@@ -52,7 +59,7 @@ function collectImportGraph(entry: string): ImportGraph {
     );
     for (const { fileName } of importedFiles) {
       if (fileName.startsWith(".")) {
-        pending.push(...resolveRelative(file, fileName));
+        pending.push(...resolveRelative(file, fileName, ["", ...suffixes]));
       } else {
         packages.add(fileName);
       }
@@ -66,6 +73,7 @@ function relativeFiles(graph: ImportGraph): string[] {
 }
 
 const artworkModule = "ui/social-button-assets.ts";
+const svgArtworkModule = "ui/social-button-svg-assets.ts";
 const buttonArtworkImage =
   /^ui\/assets\/.+-(?:pill|rectangular)(?:-icon)?\.png$/u;
 
@@ -79,6 +87,7 @@ describe("social button import graph", () => {
       expect(files).toContain("ui/social-button-core.tsx");
       expect(files).toContain("ui/social-button-marks.ts");
       expect(files).not.toContain(artworkModule);
+      expect(files).not.toContain(svgArtworkModule);
       expect(files).not.toContain("ui/official-social-button-renderer.tsx");
       expect(files.filter((file) => buttonArtworkImage.test(file))).toEqual([]);
       expect(files.filter((file) => file.endsWith(".png"))).toEqual([
@@ -91,16 +100,37 @@ describe("social button import graph", () => {
   );
 
   it.each(["official-buttons.ts", "official-buttons.web.ts"])(
-    "reaches official artwork and react-native-svg from %s",
+    "reaches PNG artwork without SVG artwork or react-native-svg from %s",
     (entry) => {
       const graph = collectImportGraph(entry);
       const files = relativeFiles(graph);
 
       expect(files).toContain(artworkModule);
+      expect(files).not.toContain(svgArtworkModule);
+      expect(files).not.toContain("ui/official-social-button-svg-renderer.tsx");
       expect(
         files.filter((file) => buttonArtworkImage.test(file)),
       ).toHaveLength(32);
+      expect([...graph.packages]).not.toContain("react-native-svg");
+    },
+  );
+
+  it.each(["official-buttons-svg.ts", "official-buttons-svg.web.ts"])(
+    "reaches SVG artwork and react-native-svg from %s",
+    (entry) => {
+      const graph = collectImportGraph(entry);
+      const files = relativeFiles(graph);
+
+      expect(files).toContain(artworkModule);
+      expect(files).toContain(svgArtworkModule);
       expect([...graph.packages]).toContain("react-native-svg");
     },
   );
+
+  it("binds the web entry to the web service only", () => {
+    const files = relativeFiles(collectImportGraph("index.web.ts", [".web"]));
+
+    expect(files).toContain("service.web.ts");
+    expect(files).not.toContain("service.ts");
+  });
 });

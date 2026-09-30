@@ -87,30 +87,36 @@
     "registry": "https://registry.npmjs.org/",
     "access": "public"
   },
-  "dependencies": {
-    "expo-build-properties": "~57.0.22",
-    "react-native-svg": "15.15.5"
-  },
   "devDependencies": {
-    "@expo/config-plugins": "^57.0.6",
     "@react-native/babel-preset": "^0.86.3",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^22.20.4",
+    "expo": "~57.0.26",
+    "expo-build-properties": "~57.0.22",
     "jest-environment-jsdom": "^29.7.0",
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-nitro-modules": "0.37.1",
+    "react-native-svg": "15.15.4",
     "react-native-web": "^0.21.2",
     "typescript": "^6.0.3"
   },
   "peerDependencies": {
     "react": "*",
-    "react-native": ">=0.75.0",
+    "react-native": ">=0.76.0",
     "react-native-nitro-modules": ">=0.37.0 <0.38.0",
-    "expo-constants": "*"
+    "expo": ">=52.0.0",
+    "expo-constants": "*",
+    "react-native-svg": ">=15.8.0"
   },
   "peerDependenciesMeta": {
+    "expo": {
+      "optional": true
+    },
     "expo-constants": {
+      "optional": true
+    },
+    "react-native-svg": {
       "optional": true
     }
   },
@@ -161,6 +167,18 @@
       "require": {
         "types": "./lib/typescript/commonjs/official-buttons.d.ts",
         "default": "./lib/commonjs/official-buttons.js"
+      }
+    },
+    "./official-buttons/svg": {
+      "react-native": "./src/official-buttons-svg.ts",
+      "browser": "./src/official-buttons-svg.web.ts",
+      "import": {
+        "types": "./lib/typescript/module/official-buttons-svg.d.ts",
+        "default": "./lib/module/official-buttons-svg.js"
+      },
+      "require": {
+        "types": "./lib/typescript/commonjs/official-buttons-svg.d.ts",
+        "default": "./lib/commonjs/official-buttons-svg.js"
       }
     },
     "./app.plugin": "./app.plugin.js",

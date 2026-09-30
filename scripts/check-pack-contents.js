@@ -78,6 +78,17 @@ const requiredFiles = [
   "lib/typescript/commonjs/official-buttons.d.ts",
   "lib/typescript/module/official-buttons.d.ts",
   "official-buttons/package.json",
+  "src/ui/social-button-svg-assets.ts",
+  "src/ui/official-social-button-svg-renderer.tsx",
+  "src/ui/official-social-button-svg.tsx",
+  "src/ui/official-social-button-svg.web.tsx",
+  "src/official-buttons-svg.ts",
+  "src/official-buttons-svg.web.ts",
+  "lib/commonjs/official-buttons-svg.js",
+  "lib/module/official-buttons-svg.js",
+  "lib/typescript/commonjs/official-buttons-svg.d.ts",
+  "lib/typescript/module/official-buttons-svg.d.ts",
+  "official-buttons/svg/package.json",
   "src/ui/assets/provenance.json",
 ];
 
@@ -105,6 +116,12 @@ for (const filename of [
   for (const base of ["src", "lib/module", "lib/commonjs"]) {
     requiredFiles.push(`${base}/ui/assets/${filename}`);
   }
+}
+
+function collectExportTargets(target) {
+  if (typeof target === "string") return [target];
+  if (!target || typeof target !== "object") return [];
+  return Object.values(target).flatMap(collectExportTargets);
 }
 
 function parsePackedFiles(stdout) {
@@ -192,29 +209,13 @@ function main() {
   );
   for (const subpath of declaredSubpaths) {
     const target = exportsMap[subpath];
-    const candidates = [];
-    if (typeof target === "string") {
-      candidates.push(target);
-    } else if (target && typeof target === "object") {
-      for (const condition of [
-        "import",
-        "require",
-        "react-native",
-        "browser",
-        "default",
-      ]) {
-        const value = target[condition];
-        if (typeof value === "string") {
-          candidates.push(value);
-        }
-      }
-    }
-    if (
-      candidates.length === 0 ||
-      !candidates.some((file) => files.has(file.replace(/^\.\//, "")))
-    ) {
+    const candidates = collectExportTargets(target);
+    const unpacked = candidates.filter(
+      (file) => !files.has(file.replace(/^\.\//, "")),
+    );
+    if (candidates.length === 0 || unpacked.length > 0) {
       console.error(
-        `Package content audit failed. Subpath export ${subpath} resolves to "${JSON.stringify(target)}" but none of its targets are packed.`,
+        `Package content audit failed. Subpath export ${subpath} has unpacked targets: ${JSON.stringify(unpacked.length > 0 ? unpacked : target)}`,
       );
       process.exit(1);
     }
