@@ -86,7 +86,11 @@ export function AuthE2eLab() {
           testID="e2e-events-run"
           label="Events"
           onPress={() => {
-            setEvents(`ok:count=${eventCount}`);
+            setEvents(
+              eventCount > 0
+                ? `ok:count=${eventCount}`
+                : `fail:count=${eventCount}`,
+            );
           }}
         />
         <LabButton

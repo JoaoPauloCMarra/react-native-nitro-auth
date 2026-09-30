@@ -13,6 +13,7 @@ const expectedVersions = {
   "react-native": "0.86.3",
   "react-native-example": "0.86.3",
   "react-native-nitro-modules": "0.37.1",
+  "react-native-svg": "15.15.4",
 } as const;
 const expectedNitroPeerRange = ">=0.37.0 <0.38.0";
 
@@ -51,15 +52,18 @@ const checks: Array<{
       ["dependencies", "expo-linking"],
       ["dependencies", "expo-router"],
       ["dependencies", "react-native-nitro-modules"],
+      ["dependencies", "react-native-svg"],
     ],
   },
   {
     file: "packages/react-native-nitro-auth/package.json",
     fields: [
-      ["dependencies", "expo-build-properties"],
+      ["devDependencies", "expo"],
+      ["devDependencies", "expo-build-properties"],
       ["devDependencies", "react"],
       ["devDependencies", "react-native"],
       ["devDependencies", "react-native-nitro-modules"],
+      ["devDependencies", "react-native-svg"],
     ],
   },
 ];
@@ -98,6 +102,11 @@ for (const check of checks) {
 const packageJson = await readJson(
   "packages/react-native-nitro-auth/package.json",
 );
+if (getPathValue(packageJson, ["dependencies"]) !== undefined) {
+  failures.push(
+    "packages/react-native-nitro-auth/package.json -> dependencies must stay empty; native and Expo packages are peers",
+  );
+}
 const actualNitroPeerRange = getPathValue(packageJson, [
   "peerDependencies",
   "react-native-nitro-modules",

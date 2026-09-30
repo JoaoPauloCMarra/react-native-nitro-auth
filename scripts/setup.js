@@ -72,18 +72,23 @@ async function main() {
 
   log("⚡ Generating Nitro bindings...");
   const packageDir = path.join(projectRoot, "packages/react-native-nitro-auth");
-  execCommand("bun run codegen", { cwd: packageDir });
+  if (!execCommand("bun run codegen", { cwd: packageDir })) {
+    log("Failed to generate Nitro bindings", "red");
+    process.exit(1);
+  }
 
   log("🔨 Building library...");
-  execCommand("bun run build", { cwd: packageDir });
+  if (!execCommand("bun run build", { cwd: packageDir })) {
+    log("Failed to build the library", "red");
+    process.exit(1);
+  }
 
   console.log("");
   log("✅ Setup complete!");
   console.log("");
   console.log("Next steps:");
-  console.log("  1. cd apps/example");
-  console.log("  2. bun run prebuild");
-  console.log("  3. bun run ios  # or bun run android");
+  console.log("  1. bun run example:prebuild");
+  console.log("  2. bun run example:ios  # or bun run example:android");
   console.log("");
 }
 
