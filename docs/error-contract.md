@@ -96,6 +96,7 @@ service boundary, and the C++ coordinator:
 | SC-07    | Silent restore without a session resolves without a user.               |
 | SC-08    | Refresh failure settles with a typed code and the `refreshToken` phase. |
 | SC-09    | Concurrent login settles every promise with a typed result.             |
+| SC-10    | Refresh during a pending login, scope request or restore never cancels it. |
 
 SC-09 divergence (documented, not a parity defect): native cancels the first
 login (generation advance); the replacement settles with the platform result,
@@ -103,6 +104,11 @@ which may include `operation_in_progress` while provider UI is still active.
 Web keeps the first request active and rejects the second with
 `operation_in_progress`. C++ mock tests prove coordinator settlement, not actual
 provider UI teardown timing.
+
+SC-10: native `refreshToken()` (and `getAccessToken()` when it must refresh)
+rejects with `operation_in_progress` while a login, `requestScopes()` or
+`silentRestore()` is pending. Web runs the refresh and discards its result if
+the pending operation replaces the session.
 
 - `dispose()` rejects pending session and refresh work, clears listeners and
   tokens, and performs platform logout.

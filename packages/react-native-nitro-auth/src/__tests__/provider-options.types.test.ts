@@ -230,3 +230,17 @@ function checkEventNarrowing(event: AuthLifecycleEvent) {
   }
 }
 void checkEventNarrowing;
+
+type ProviderAppleLoginHint = AssertNever<
+  NonNullable<ProviderLoginOptions<"apple">["loginHint"]>
+>;
+type ProviderGooglePrompt = AssertNever<
+  NonNullable<ProviderLoginOptions<"google">["prompt"]>
+>;
+const appleWebOptions = {
+  scopes: ["email", "name"],
+  nonce: "nonce",
+} satisfies ProviderLoginOptions<"apple">;
+void login("apple", appleWebOptions);
+void (0 as unknown as ProviderAppleLoginHint);
+void (0 as unknown as ProviderGooglePrompt);

@@ -3,12 +3,12 @@
  *
  * Every scenario runs against both backends:
  * - the real web `AuthModule` (jsdom), and
- * - a controllable model of the native C++ coordinator wrapped by the
- *   service boundary (`createAuthService`).
+ * - a small JS fake of the native coordinator wrapped by the service boundary
+ *   (`createAuthService`).
  *
- * The native model mirrors `cpp/HybridAuth.cpp` semantics: generation-based
- * cancellation, tracked session promises, in-flight refresh dedupe, and
- * logout/dispose settling pending work. The same scenario IDs run in
+ * The fake only exercises service-boundary behaviour (error wrapping,
+ * listener delivery, settlement). It is not proof of native coordinator
+ * semantics; those are asserted against the real `cpp/HybridAuth.cpp` in
  * `cpp/__tests__/HybridAuthTests.cpp`.
  *
  * Documented platform divergence (SC-09): starting a second login while one
