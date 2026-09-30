@@ -1663,10 +1663,6 @@ object AuthAdapter {
         pendingMicrosoftSilentStateEpoch = null
     }
 
-    private fun isCurrentMicrosoftGeneration(generation: Long): Boolean = synchronized(this) {
-        isCurrentMicrosoftGenerationLocked(generation)
-    }
-
     private fun clearPkceStateIfCurrent(generation: Long): Boolean = synchronized(this) {
         if (!acceptsAuthCallback(pendingMicrosoftGeneration, generation)) return@synchronized false
         clearPkceStateLocked()
@@ -1810,7 +1806,7 @@ object AuthAdapter {
 
         val credentialManager = CredentialManager.create(activity)
         val requestBuilder = GetCredentialRequest.Builder()
-        if (nonce != null && forceAccountPicker) {
+        if ((nonce != null && forceAccountPicker) || hostedDomain != null) {
             val signInOption = GetSignInWithGoogleOption.Builder(clientId)
                 .apply {
                     setNonce(nonce)
@@ -1826,7 +1822,6 @@ object AuthAdapter {
                 .setRequestVerifiedPhoneNumber(requestVerifiedPhoneNumber)
                 .apply {
                     if (nonce != null) setNonce(nonce)
-                    if (hostedDomain != null) setHostedDomainFilter(hostedDomain)
                 }
                 .build()
             requestBuilder.addCredentialOption(googleIdOption)

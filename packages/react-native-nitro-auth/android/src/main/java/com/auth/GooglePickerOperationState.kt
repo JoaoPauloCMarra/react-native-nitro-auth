@@ -179,14 +179,6 @@ internal class GooglePickerOperationState(
     }
 
     @Synchronized
-    fun markSdkStateClean() {
-        sdkStateClean = true
-    }
-
-    @Synchronized
-    fun hasPendingSignOut(): Boolean = signOutCleanup != null
-
-    @Synchronized
     fun invalidate(): Any? {
         val identity = activeOperation?.identity
         activeOperation = null

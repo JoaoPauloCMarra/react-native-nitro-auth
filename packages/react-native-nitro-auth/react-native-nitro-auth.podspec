@@ -1,5 +1,11 @@
 require "json"
 
+unless defined?(min_ios_version_supported)
+  def min_ios_version_supported
+    "15.1"
+  end
+end
+
 package = JSON.parse(File.read(File.join(__dir__, "package.json")))
 
 Pod::Spec.new do |s|
@@ -11,8 +17,8 @@ Pod::Spec.new do |s|
   s.license      = package["license"]
   s.authors      = package["author"]
 
-  s.platforms    = { :ios => "16.4" }
-  s.source       = { :git => "https://github.com/JoaoPauloCMarra/react-native-nitro-auth.git", :tag => "#{s.version}" }
+  s.platforms    = { :ios => min_ios_version_supported }
+  s.source       = { :git => "https://github.com/JoaoPauloCMarra/react-native-nitro-auth.git", :tag => "v#{s.version}" }
   
   s.swift_version = "5.9"
 
