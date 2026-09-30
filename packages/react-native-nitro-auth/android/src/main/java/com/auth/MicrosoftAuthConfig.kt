@@ -9,6 +9,10 @@ import java.nio.charset.CodingErrorAction
 internal object MicrosoftAuthConfig {
     private const val TAG = "AuthAdapter"
 
+    /** A 4xx refresh response ends the grant, except request timeout and rate limiting. */
+    fun shouldClearRefreshToken(responseCode: Int): Boolean =
+        responseCode in 400..499 && responseCode != 408 && responseCode != 429
+
     /**
      * Canonical OAuth 2.0 / OIDC error-to-AuthErrorCode mapping, backed by the
      * generated table from `scripts/oauth-errors.json`. `docs/error-contract.md`

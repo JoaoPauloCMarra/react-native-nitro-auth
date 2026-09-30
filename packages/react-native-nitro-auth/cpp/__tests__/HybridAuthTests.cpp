@@ -277,7 +277,7 @@ void testRefreshCancelledWhenSessionChanges() {
   auto replacementLoginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
   assert(refreshPromise->isRejected());
   assert(stalePlatformRefresh->isRejected());
-  assert(platformCancellationCount == 3);
+  assert(platformCancellationCount == 2);
   assert(platformInvalidationCount == 2);
 
   lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "new"));
@@ -677,7 +677,7 @@ void testRefreshFailedEventCarriesTypedErrorCode() {
   assert(failedCode == AuthErrorCode::NETWORK_ERROR);
 }
 
-void testDisposeRejectsPendingWorkAndClearsListeners() {
+void testDisposeRejectsPendingLoginAndClearsListeners() {
   resetPlatformMocks();
   auto auth = std::make_shared<HybridAuth>();
   int listenerCalls = 0;
@@ -694,21 +694,106 @@ void testDisposeRejectsPendingWorkAndClearsListeners() {
     }
   });
 
+  keepCancelledLoginPending = true;
   auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
-  auto restorePromise = auth->silentRestore();
-  auto refreshPromise = auth->refreshToken();
+  assert(loginPromise->isPending());
 
   auth->dispose();
 
   assert(loginPromise->isRejected());
-  assert(restorePromise->isRejected());
-  assert(refreshPromise->isRejected());
   assert(didDisposeEvent);
   assert(didLogout);
 
   int callsBefore = listenerCalls + eventCalls;
   assert(!auth->getCurrentUser().has_value());
   assert(listenerCalls + eventCalls == callsBefore);
+}
+
+void testDisposeRejectsPendingSilentRestore() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  auto restorePromise = auth->silentRestore();
+  assert(restorePromise->isPending());
+
+  auth->dispose();
+
+  assert(restorePromise->isRejected());
+}
+
+void testDisposeRejectsPendingRequestScopes() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "token"));
+  assert(loginPromise->isResolved());
+
+  auto scopesPromise = auth->requestScopes({"email"});
+  assert(scopesPromise->isPending());
+
+  auth->dispose();
+
+  assert(scopesPromise->isRejected());
+}
+
+void testDisposeRejectsPendingRefresh() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "token"));
+  assert(loginPromise->isResolved());
+
+  auto refreshPromise = auth->refreshToken();
+  assert(refreshPromise->isPending());
+
+  auth->dispose();
+
+  assert(refreshPromise->isRejected());
+}
+
+void testRefreshDoesNotCancelPendingSessionOperations() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  auto firstLogin = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "token", expiredTimestampMs()));
+  assert(firstLogin->isResolved());
+
+  auto scopesPromise = auth->requestScopes({"email"});
+  auto platformScopes = lastRequestScopesPromise;
+  const auto cancellations = platformCancellationCount;
+  auto refreshDuringScopes = auth->refreshToken();
+  assert(refreshDuringScopes->isRejected());
+  bool refreshReportedInProgress = false;
+  try { std::rethrow_exception(refreshDuringScopes->getError()); }
+  catch (const AuthException& error) { refreshReportedInProgress = error.code() == AuthErrorCode::OPERATION_IN_PROGRESS; }
+  assert(refreshReportedInProgress);
+  auto accessDuringScopes = auth->getAccessToken();
+  assert(accessDuringScopes->isRejected());
+  assert(scopesPromise->isPending());
+  assert(platformScopes->isPending());
+  assert(lastRefreshPromise == nullptr);
+  assert(platformCancellationCount == cancellations);
+  platformScopes->resolve(makeUser(std::vector<std::string>{"profile", "email"}, "token"));
+  assert(scopesPromise->isResolved());
+
+  auto switchLogin = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  auto platformLogin = lastLoginPromise;
+  auto refreshDuringLogin = auth->refreshToken();
+  assert(refreshDuringLogin->isRejected());
+  assert(switchLogin->isPending());
+  assert(platformLogin->isPending());
+  platformLogin->resolve(makeUser(std::vector<std::string>{"profile"}, "switched"));
+  assert(switchLogin->isResolved());
+  assert(auth->getCurrentUser()->accessToken == "switched");
+
+  auto restorePromise = auth->silentRestore();
+  auto platformRestore = lastSilentRestorePromise;
+  auto refreshDuringRestore = auth->refreshToken();
+  assert(refreshDuringRestore->isRejected());
+  assert(restorePromise->isPending());
+  assert(platformRestore->isPending());
+  platformRestore->resolve(makeUser(std::vector<std::string>{"profile"}, "restored"));
+  assert(restorePromise->isResolved());
+  assert(auth->getCurrentUser()->accessToken == "restored");
 }
 
 void testRevokeScopesPreservesVoidContract() {
@@ -836,6 +921,21 @@ void testAtomicResultsAndSnapshots() {
   assert(!snapshots.back().user);
   remove();
   remove();
+
+  LoginOptions emptyScopes;
+  emptyScopes.scopes = std::vector<std::string>{};
+  auto emptyLogin = auth->loginAndGetUser(AuthProvider::GOOGLE, emptyScopes);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{}, "empty"));
+  assert(emptyLogin->isResolved());
+  assert(emptyLogin->getResult().scopes == auth->getCurrentUser()->scopes);
+  assert(!emptyLogin->getResult().scopes.has_value());
+
+  LoginOptions requestedScopes;
+  requestedScopes.scopes = std::vector<std::string>{"email"};
+  auto requestedLogin = auth->loginAndGetUser(AuthProvider::GOOGLE, requestedScopes);
+  lastLoginPromise->resolve(makeUser(std::nullopt, "requested"));
+  assert(requestedLogin->getResult().scopes == auth->getCurrentUser()->scopes);
+  assert(requestedLogin->getResult().scopes == std::vector<std::string>{"email"});
 }
 
 
@@ -924,7 +1024,11 @@ int main() {
   testLoginFailedEventCarriesTypedErrorCode();
   testRefreshFailedEventCarriesTypedErrorCode();
   testAuthErrorEnvelopeIsByteIdentical();
-  testDisposeRejectsPendingWorkAndClearsListeners();
+  testDisposeRejectsPendingLoginAndClearsListeners();
+  testDisposeRejectsPendingSilentRestore();
+  testDisposeRejectsPendingRequestScopes();
+  testDisposeRejectsPendingRefresh();
+  testRefreshDoesNotCancelPendingSessionOperations();
   testRevokeScopesPreservesVoidContract();
   testSessionScenariosInterleaveWithoutUnresolvedPromises();
 

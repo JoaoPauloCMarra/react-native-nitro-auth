@@ -8,6 +8,9 @@
       ],
       "react-native-nitro-auth/official-buttons": [
         "../../packages/react-native-nitro-auth/src/official-buttons.ts"
+      ],
+      "react-native-nitro-auth/official-buttons/svg": [
+        "../../packages/react-native-nitro-auth/src/official-buttons-svg.ts"
       ]
     }
   },

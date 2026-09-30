@@ -1,6 +1,7 @@
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { socialButtonEnv } from "./support/social-button-env";
+import { OfficialSocialButton as OfficialSvgSocialButton } from "../official-buttons-svg.web";
 import { OfficialSocialButton } from "../official-buttons.web";
 import { AuthError } from "../utils/auth-error";
 import type { AuthUser } from "../Auth.nitro";
@@ -47,7 +48,6 @@ jest.mock("react-native-svg", () => {
 jest.mock("../ui/social-button-assets", () => {
   const makeArtwork = (id: string, width: number, height: number) => ({
     image: { uri: `${id}.png` },
-    svg: `<svg data-id="${id}.svg" />`,
     width,
     height,
   });
@@ -109,6 +109,37 @@ jest.mock("../ui/social-button-assets", () => {
   };
 });
 
+jest.mock("../ui/social-button-svg-assets", () => {
+  const makeProvider = (provider: string) =>
+    Object.fromEntries(
+      ["android", "ios"].map((platform) => [
+        platform,
+        Object.fromEntries(
+          ["light", "dark"].map((appearance) => [
+            appearance,
+            Object.fromEntries(
+              ["pill", "rectangular"].map((shape) => [
+                shape,
+                `<svg data-id="${provider}-${platform}-${appearance}-${shape}.svg" />`,
+              ]),
+            ),
+          ]),
+        ),
+      ]),
+    );
+
+  return {
+    iconOnlySvgArtwork: {
+      apple: makeProvider("apple-icon"),
+      google: makeProvider("google-icon"),
+    },
+    socialButtonSvgArtwork: {
+      apple: makeProvider("apple"),
+      google: makeProvider("google"),
+    },
+  };
+});
+
 jest.mock("../Auth.web", () =>
   jest
     .requireActual<typeof import("./support/social-button-env")>(
@@ -161,7 +192,7 @@ describe("OfficialSocialButton (web)", () => {
 
   it("renders Apple square SVG art and keeps the full accessible name", () => {
     render(
-      React.createElement(OfficialSocialButton, {
+      React.createElement(OfficialSvgSocialButton, {
         provider: "apple",
         renderMode: "svg",
         iconOnly: true,
@@ -176,6 +207,37 @@ describe("OfficialSocialButton (web)", () => {
       screen.getByTestId("apple-icon-android-light-pill.svg"),
     ).toBeTruthy();
     expect(screen.queryByText("Sign in with Apple")).toBeNull();
+  });
+
+  it("renders SVG artwork by default from the svg subpath", () => {
+    render(
+      React.createElement(OfficialSvgSocialButton, {
+        provider: "apple",
+      }),
+    );
+
+    expect(screen.getByTestId("apple-android-light-pill.svg")).toBeTruthy();
+  });
+
+  it("renders image artwork when an untyped caller asks the image subpath for svg", () => {
+    const globals = globalThis as { __DEV__?: boolean | undefined };
+    const previousDev = globals.__DEV__;
+    globals.__DEV__ = true;
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    render(
+      React.createElement(OfficialSocialButton, {
+        provider: "apple",
+        renderMode: "svg" as "image",
+      }),
+    );
+
+    expect(screen.getByTestId("apple-android-light-pill.png")).toBeTruthy();
+    expect(screen.queryByTestId("apple-android-light-pill.svg")).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("official-buttons/svg"),
+    );
+    warn.mockRestore();
+    globals.__DEV__ = previousDev;
   });
 
   it("uses Android artwork on web and preserves the source ratio", () => {
@@ -210,7 +272,7 @@ describe("OfficialSocialButton (web)", () => {
 
   it("overlays the Google mark on Google SVG artwork", () => {
     render(
-      React.createElement(OfficialSocialButton, {
+      React.createElement(OfficialSvgSocialButton, {
         provider: "google",
         renderMode: "svg",
       }),
@@ -226,7 +288,7 @@ describe("OfficialSocialButton (web)", () => {
     "keeps the provider mark and the indicator inside %s buttons",
     (renderMode) => {
       const { unmount } = render(
-        React.createElement(OfficialSocialButton, {
+        React.createElement(OfficialSvgSocialButton, {
           provider: "google",
           renderMode,
         }),
@@ -236,7 +298,7 @@ describe("OfficialSocialButton (web)", () => {
       unmount();
 
       render(
-        React.createElement(OfficialSocialButton, {
+        React.createElement(OfficialSvgSocialButton, {
           provider: "google",
           renderMode,
           loading: true,
@@ -289,7 +351,7 @@ describe("OfficialSocialButton (web)", () => {
     const onError = jest.fn();
 
     render(
-      React.createElement(OfficialSocialButton, {
+      React.createElement(OfficialSvgSocialButton, {
         provider: "apple",
         renderMode: "svg",
         onError,

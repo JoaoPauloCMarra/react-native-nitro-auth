@@ -48,6 +48,12 @@ export type AppleAndroidLoginOptions = StrictLoginOptions<
   "scopes" | "nonce"
 > & {
   scopes?: AppleAndroidScope[];
+  /**
+   * Must be a 64-character lowercase SHA-256 hex value on Android. The Apple
+   * broker receives it unchanged; other values reject with `invalid_nonce`.
+   * Pass the same hashed value on iOS and web to get the same `nonce` claim.
+   */
+  nonce?: string;
 };
 export type AppleWebLoginOptions = AppleIOSLoginOptions;
 export type AppleLoginOptions =

@@ -103,14 +103,14 @@ extension AuthAdapter {
           params[item.name] = item.value
         }
 
-        if let errorCode = params["error"] {
-          let mapped = mapOAuthError(errorCode, context: "authorize")
-          completeAndClearSession(nil, NSNumber(value: mapped.rawValue), params["error_description"])
+        guard let returnedState = params["state"], returnedState == state else {
+          completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.invalidState.rawValue), nil)
           return
         }
 
-        guard let returnedState = params["state"], returnedState == state else {
-          completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.invalidState.rawValue), nil)
+        if let errorCode = params["error"] {
+          let mapped = mapOAuthError(errorCode, context: "authorize")
+          completeAndClearSession(nil, NSNumber(value: mapped.rawValue), params["error_description"])
           return
         }
 
@@ -378,6 +378,13 @@ extension AuthAdapter {
     }.resume()
   }
 
+  static func clearMicrosoftRefreshTokenOnClientError(_ statusCode: Int, operation: AuthAdapter.AuthOperationToken) {
+    guard (400...499).contains(statusCode), statusCode != 408, statusCode != 429 else { return }
+    _ = commitCurrentOperation(operation) {
+      inMemoryMicrosoftRefreshToken = nil
+    }
+  }
+
   static func tryMicrosoftSilentRefresh(
     completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void,
     operation: AuthAdapter.AuthOperationToken
@@ -401,6 +408,7 @@ extension AuthAdapter {
         return
       }
       if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+        clearMicrosoftRefreshTokenOnClientError(httpResponse.statusCode, operation: operation)
         if let data = data,
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let errorCode = json["error"] as? String {
@@ -467,6 +475,9 @@ extension AuthAdapter {
       if let error = error {
         completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), error.localizedDescription)
         return
+      }
+      if let httpResponse = response as? HTTPURLResponse {
+        clearMicrosoftRefreshTokenOnClientError(httpResponse.statusCode, operation: operation)
       }
       guard let data = data,
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

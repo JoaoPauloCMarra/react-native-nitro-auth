@@ -41,15 +41,33 @@ cd ios && pod install
 Expo Go cannot load Nitro native modules. Use an Expo development build or a
 bare app.
 
+Optional peers:
+
+- `react-native-svg` (`>=15.8.0`) is needed only when you import
+  `react-native-nitro-auth/official-buttons/svg`. Install it with
+  `bunx expo install react-native-svg` or `bun add react-native-svg`.
+- `expo` is needed only for the Expo config plugin. Expo apps already have it.
+- `expo-constants` is needed only to read web client IDs from `expo.extra`.
+
 ## Requirements
 
-| Dependency                 | Supported range or validated baseline                                              |
-| -------------------------- | ---------------------------------------------------------------------------------- |
-| React Native               | `>=0.75.0`; runtime gate `0.86.3`, RN `0.87` Strict TypeScript compatibility check |
-| React                      | Validated with `19.2.3`                                                            |
-| React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                                 |
-| Expo                       | SDK `57.0.26` development builds; RN `0.86.3`                                      |
-| iOS                        | `16.4` or later                                                                    |
+| Dependency                 | Requirement                                                             |
+| -------------------------- | ----------------------------------------------------------------------- |
+| React Native               | `>=0.77.0` (the `react-native-nitro-modules` `0.37` minimum)            |
+| React                      | Any version your React Native release supports                          |
+| React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                      |
+| Expo                       | SDK `>=53` development builds                                           |
+| iOS                        | React Native's `min_ios_version_supported` (`15.1` on RN `0.77`–`0.86`) |
+| Android                    | compileSdk `35`, Android Gradle Plugin `8.6`, and Kotlin `2.0` or later |
+
+### Compatibility
+
+The package supports React Native `0.77` or later and Expo SDK `53` or later,
+the minimum that `react-native-nitro-modules` `0.37` builds on. It is tested on
+React Native `0.86.3` with Expo SDK `57`: the example app and the release gate
+use that version. Older supported versions are not built by the release gate;
+the example app's compileSdk `36` and iOS `16.4` settings are its own choices,
+not package requirements.
 
 iOS static frameworks are supported with source-built React Native. After
 upgrading, regenerate the Expo native project or run `pod install`, then rebuild
@@ -122,6 +140,9 @@ Plugin options:
 | `android.microsoftTenant`            | Android  | Microsoft tenant override.                                                       |
 | `android.microsoftB2cDomain`         | Android  | Microsoft B2C hostname.                                                          |
 
+`ios.microsoftClientId` also needs `ios.bundleIdentifier`: the plugin registers
+the `msauth.<bundleIdentifier>` URL scheme from it and warns when it is missing.
+
 When `ios.googleUrlScheme` is omitted, the plugin derives
 `com.googleusercontent.apps.<id>` from an iOS client ID that ends in
 `.apps.googleusercontent.com`. Set `ios.googleUrlScheme` only to override that
@@ -132,16 +153,16 @@ written by the plugin during prebuild.
 
 Web options in `expo.extra`:
 
-| Option                         | Default           | Purpose                                                                         |
-| ------------------------------ | ----------------- | ------------------------------------------------------------------------------- |
-| `googleWebClientId`            | —                 | Google OAuth client ID.                                                         |
-| `appleWebClientId`             | —                 | Apple Services ID.                                                              |
-| `microsoftClientId`            | —                 | Microsoft Entra ID application ID.                                              |
-| `microsoftTenant`              | `common`          | Microsoft tenant, domain, or B2C policy.                                        |
-| `microsoftB2cDomain`           | —                 | Microsoft B2C hostname.                                                         |
-| `nitroAuthWebStorage`          | `session`         | `session`, `local`, or `memory`.                                                |
-| `nitroAuthPersistTokensOnWeb`  | adapter-dependent | Persist token fields in configured storage. Set explicitly in new integrations. |
-| `nitroAuthPersistProfileOnWeb` | `true`            | Persist email/name/photo in configured storage.                                 |
+| Option                         | Default   | Purpose                                         |
+| ------------------------------ | --------- | ----------------------------------------------- |
+| `googleWebClientId`            | —         | Google OAuth client ID.                         |
+| `appleWebClientId`             | —         | Apple Services ID.                              |
+| `microsoftClientId`            | —         | Microsoft Entra ID application ID.              |
+| `microsoftTenant`              | `common`  | Microsoft tenant, domain, or B2C policy.        |
+| `microsoftB2cDomain`           | —         | Microsoft B2C hostname.                         |
+| `nitroAuthWebStorage`          | `session` | `session`, `local`, or `memory`.                |
+| `nitroAuthPersistTokensOnWeb`  | `false`   | Persist token fields in configured storage.     |
+| `nitroAuthPersistProfileOnWeb` | `true`    | Persist email/name/photo in configured storage. |
 
 Web reads `expo-constants` for these options. `expo-constants` is an optional
 peer dependency: without it, web falls back to defaults and provider client
@@ -199,6 +220,46 @@ callback. The package manages nonce/proof generation, browser cancellation,
 request deadlines, and transient cleanup. It returns the original nonce with
 `getCredential()` for your application's final server session exchange.
 
+### Microsoft redirect URIs
+
+Register these redirect URIs in the Microsoft Entra app registration:
+
+| Platform | Redirect URI                                                                                         |
+| -------- | ---------------------------------------------------------------------------------------------------- |
+| Android  | `msauth://<applicationId>/<microsoftClientId>`, for example `msauth://com.company.myapp/<client-id>` |
+| iOS      | `msauth.<bundleIdentifier>://auth`, for example `msauth.com.company.myapp://auth`                    |
+| Web      | The page origin, as described in [Web OAuth redirects](#web-oauth-redirects)                         |
+
+The Android value is not the Azure portal's default Android redirect
+(`msauth://<package>/<signature-hash>`). Add it as a custom redirect URI of a
+"Mobile and desktop applications" platform.
+
+The Expo plugin registers both schemes. The Android filter uses the
+`${applicationId}` manifest placeholder, so `applicationIdSuffix` and product
+flavors get a matching host; register one redirect URI per final application
+ID. For a bare Android app, add string
+resources `nitro_auth_microsoft_client_id` (and optionally
+`nitro_auth_microsoft_tenant` and `nitro_auth_microsoft_b2c_domain`), then add
+this intent filter to `com.auth.MicrosoftAuthActivity` in the app manifest:
+
+```xml
+<activity android:name="com.auth.MicrosoftAuthActivity" android:exported="true">
+  <intent-filter>
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data
+      android:scheme="msauth"
+      android:host="${applicationId}"
+      android:path="/YOUR_MICROSOFT_CLIENT_ID" />
+  </intent-filter>
+</activity>
+```
+
+For a bare iOS app, set `MSALClientID` (and optionally `MSALTenant` and
+`MSALB2cDomain`) in `Info.plist` and add `msauth.<bundleIdentifier>` to
+`CFBundleURLTypes`.
+
 ### Web OAuth redirects
 
 Web Google, Microsoft, and Apple flows use `window.location.origin` as the OAuth
@@ -211,8 +272,13 @@ same origin through the Apple JS popup flow.
 
 On iOS, the plugin also applies the CocoaPods modular-header settings required
 by the Google Sign-In dependency chain (`AppCheckCore`, `GoogleUtilities`, and
-`RecaptchaInterop`). Expo apps should not add those pods manually through
-`expo-build-properties`.
+`RecaptchaInterop`). It appends only the missing pods to `apple.extraPods` in
+`Podfile.properties.json` and leaves every other property unchanged, so the
+package does not depend on `expo-build-properties`. If you also set
+`ios.extraPods` in `expo-build-properties`, list `react-native-nitro-auth`
+before `expo-build-properties` in `plugins`. In the other order,
+`expo-build-properties` replaces the whole list; add the three pods to your
+`extraPods` in that case.
 
 Microsoft tenant values are validated before opening the authorization URL. Use
 `common`, `organizations`, `consumers`, a tenant ID, or a tenant domain for
@@ -379,6 +445,15 @@ Supported login options:
 
 `prompt` is typed as `"login"`, `"consent"`, `"select_account"`, or `"none"`.
 
+- Apple `nonce` on Android must be a 64-character lowercase SHA-256 hex value,
+  because the Apple broker contract accepts only that format; other values
+  reject with `invalid_nonce`. iOS and web pass the value to Apple unchanged,
+  so pass the same hashed value on every platform to get the same `nonce`
+  claim.
+- Google `useSheet` and `forceAccountPicker` on iOS sign out of the local
+  Google SDK session before sign-in so the account picker shows. They do not
+  revoke the app's grant; only `revokeAccess()` does.
+
 ### Session operations
 
 - `logout()` is synchronous and returns `void`. It clears package session state
@@ -395,6 +470,10 @@ Supported login options:
   at the provider.
 - `getAccessToken()` returns the current access token and refreshes near-expiry
   Google or Microsoft credentials when supported.
+- On iOS and Android, `refreshToken()` (and `getAccessToken()` when it has to
+  refresh) rejects with `operation_in_progress` while a `login()`,
+  `requestScopes()`, `silentRestore()`, or `revokeAccess()` is pending. It
+  never cancels that operation. Retry after it settles.
 - `refreshToken()` supports Google and Microsoft. Apple token exchange and
   refresh belong on your backend. Native Apple sessions reject `refreshToken()`
   and `requestScopes()` with `unsupported_provider` while preserving the session.
@@ -416,9 +495,7 @@ outside the package.
 
 `SocialButton` renders Google, Apple, and Microsoft controls with
 provider-aware React Native content. `custom` is its only `renderMode`. Its
-import does not bundle the official button artwork or the `react-native-svg`
-JavaScript. `react-native-svg` stays a package dependency, so its native module
-is still linked.
+import does not bundle the official button artwork or `react-native-svg`.
 `appearance` accepts `light` or `dark`; `shape` accepts `pill` or
 `rectangular`. For Google and Apple, the deprecated `variant` values `primary`,
 `outline`, and `white` map to `light`; `black` maps to `dark`.
@@ -432,6 +509,10 @@ While a login runs, every render mode keeps the provider mark, the button
 chrome, and the button size. Labeled buttons show the mark with the indicator
 beside it; icon-only buttons dim the mark and center the indicator over it.
 Turning `loading` on or off never moves or resizes the control.
+
+Custom content receives a `width` prop. For Google and Apple it is the button
+width. For Microsoft it is the window width, because the Microsoft button fills
+its parent; size Microsoft custom content from its own layout instead.
 
 Custom content can use the exported `SocialProviderIcon` for Google or Apple
 artwork without copying assets or loading a font. Set `loadingIndicator={null}`
@@ -448,19 +529,24 @@ busy state and duplicate-press protection. A React element passed as
 #### Official button artwork
 
 `OfficialSocialButton` renders the official Google or Apple full-button artwork.
-Import it from the `official-buttons` subpath, so only apps that use it bundle
-the artwork and the `react-native-svg` JavaScript. `renderMode` defaults to
-`image`:
+Two subpaths export it:
+
+| Import                                         | Artwork                                 | Needs `react-native-svg` |
+| ---------------------------------------------- | --------------------------------------- | ------------------------ |
+| `react-native-nitro-auth/official-buttons`     | PNG (`renderMode="image"`, the default) | No                       |
+| `react-native-nitro-auth/official-buttons/svg` | SVG by default, or PNG with `"image"`   | Yes (optional peer)      |
 
 ```tsx
 import { OfficialSocialButton } from "react-native-nitro-auth/official-buttons";
+import { OfficialSocialButton as OfficialSvgButton } from "react-native-nitro-auth/official-buttons/svg";
 
-<OfficialSocialButton provider="google" renderMode="image" />
-<OfficialSocialButton provider="apple" renderMode="svg" iconOnly />
+<OfficialSocialButton provider="google" />
+<OfficialSvgButton provider="apple" iconOnly />
 ```
 
-`renderMode` is required: `image` draws the official PNG artwork and `svg`
-draws the vector artwork. Both modes preserve the platform artwork's aspect
+The image subpath does not load `react-native-svg` or the inlined SVG artwork.
+Metro bundles every static import, so apps that never import the `svg` subpath
+do not ship that code. Both modes preserve the platform artwork's aspect
 ratio. `OfficialSocialButton` accepts the same login, loading, `iconOnly`,
 `appearance`, `shape`, accessibility, and error props as `SocialButton`. It does
 not accept `customComponents`, `textStyle`, or `borderRadius`, and it supports
@@ -499,8 +585,8 @@ must register `GoogleSans-Medium` themselves. After changing native font
 configuration, regenerate and rebuild the app.
 
 The package ships the official Google and Apple marks as images and draws them
-unaltered in every mode. `OfficialSocialButton`'s `svg` mode uses vector button
-artwork; Google's vector
+unaltered in every mode. The `svg` subpath uses vector button artwork; Google's
+vector
 export draws its mark with a Figma conic gradient inside a `foreignObject`,
 which no native SVG renderer supports, so the package draws the mark image into
 that box instead. Run `bun scripts/generate-social-button-assets.ts` after
@@ -517,8 +603,9 @@ platform. Android Google never returns an OAuth access token, so its
 `expirationTime` uses the ID-token `exp` claim as a documented fallback and
 `getAccessToken()` stays `undefined`.
 
-Google `hostedDomain` is returned from the requested configuration. Android
-keeps that non-secret value across module/process recreation only when the
+Google `hostedDomain` on Android Credential Manager sessions is the ID token's
+`hd` claim, or the requested value when the token has none; other paths return
+the requested configuration. Android keeps that non-secret value across module/process recreation only when the
 restored Google account identity matches; logout or account replacement clears
 it. iOS uses the restored Google account configuration, and web reports the
 provider token claim when present.
@@ -595,20 +682,15 @@ you need, preferably in platform secure storage or on your backend.
 
 On web, user metadata and scopes use `sessionStorage` by default. Choose
 `local`, `session`, or `memory` with `nitroAuthWebStorage`. Token fields and the
-Microsoft refresh token remain in memory unless token persistence is enabled.
-Set `nitroAuthPersistTokensOnWeb` explicitly in new integrations. For backward
-compatibility, a custom storage adapter still enables token persistence when
-the option is omitted; set it to `false` to keep tokens in memory. Enabling
-persistence places credentials in the configured storage and changes your XSS
-risk profile.
+Microsoft refresh token remain in memory unless `nitroAuthPersistTokensOnWeb`
+is `true` (default `false`). Enabling persistence places credentials in the
+configured storage and changes your XSS risk profile.
 Profile metadata (email, name, photo) is persisted by default; set
 `nitroAuthPersistProfileOnWeb: false` to keep profile PII out of storage.
-Supplying a custom storage adapter without an explicit token-persistence option
-keeps the pre-0.7 behavior and persists tokens.
 
 Restoring a cached session rewrites the owned cache record to remove token or
-profile fields disallowed by the current policy. If the browser or adapter
-denies writes/removals, the in-memory session stays sanitized, but physical
+profile fields disallowed by the current policy. If the browser denies
+writes/removals, the in-memory session stays sanitized, but physical
 erasure cannot be guaranteed. Restricted browser storage falls back to memory.
 
 Apple web SDK loading has a 15-second timeout. A later sign-in attempt retries
@@ -617,7 +699,7 @@ by the app remain owned by the app. Cancelled or disposed attempts cannot start
 sign-in after a late SDK load.
 
 JWT decoding in this package is for display and routing only. Native iOS and
-Android share a C++ payload split (`docs/native-libraries.md`). Validate token
+Android share a C++ payload split ([native libraries](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/docs/native-libraries.md)). Validate token
 signatures, issuer, audience, nonce, and expiry on your server before creating
 an application session.
 
@@ -682,7 +764,43 @@ The native package gate and Expo example use React Native `0.86.3`. The
 that compatibility check does not change the runtime baseline. Expo SDK
 `57.0.26` selects React Native `0.86.3`; do not override it in an Expo app.
 
-Package peer range: `>=0.37.0 <0.38.0`.
+Package peer ranges: `react-native >=0.77.0`,
+`react-native-nitro-modules >=0.37.0 <0.38.0`, and optional `expo >=53.0.0`,
+`expo-constants`, and `react-native-svg >=15.8.0`.
+
+### Migrating to 0.13
+
+- `react-native-svg` is now an optional peer dependency. Apps that render SVG
+  button artwork must install it and import from
+  `react-native-nitro-auth/official-buttons/svg`:
+
+  ```diff
+  - import { OfficialSocialButton } from "react-native-nitro-auth/official-buttons";
+  - <OfficialSocialButton provider="apple" renderMode="svg" />
+  + import { OfficialSocialButton } from "react-native-nitro-auth/official-buttons/svg";
+  + <OfficialSocialButton provider="apple" renderMode="svg" />
+  ```
+
+  `react-native-nitro-auth/official-buttons` now accepts only
+  `renderMode="image"`.
+
+- `expo-build-properties` is no longer installed with this package. Apps that
+  configure it in `plugins` must list it in their own `dependencies`
+  (`bunx expo install expo-build-properties`).
+- The peer range is now `react-native >=0.77.0` (Expo SDK `53` or later), the
+  minimum that `react-native-nitro-modules` `0.37` builds on. React Native
+  `0.75` and `0.76` apps must upgrade first.
+- Native `refreshToken()` and near-expiry `getAccessToken()` reject with
+  `operation_in_progress` while a login, scope request, restore, or
+  `revokeAccess()` is pending.
+  Catch that code and retry after the pending operation settles.
+- Bare Android apps that use Microsoft login must add the
+  `com.auth.MicrosoftAuthActivity` intent filter shown in
+  [Microsoft redirect URIs](#microsoft-redirect-uris). The library manifest no
+  longer declares a scheme-only `msauth` filter.
+- On web, a provider error such as `invalid_grant` during login now maps to
+  `token_error` (native already did); during refresh it maps to
+  `refresh_failed`.
 
 ### Migrating to 0.12
 
@@ -724,7 +842,7 @@ keep `unsupported_provider` for active One-Tap sessions and reserve
   prebuilt after changing config.
 - **Apple profile missing name/email:** Apple only sends those fields on the
   first authorization.
-- **Microsoft redirect mismatch:** confirm bundle ID, Android package,
+- **Microsoft redirect mismatch:** register the URIs in [Microsoft redirect URIs](#microsoft-redirect-uris), and confirm bundle ID, Android package,
   `microsoftClientId`, and tenant/B2C settings match the provider console.
 
 ## Development
@@ -733,6 +851,7 @@ keep `unsupported_provider` for active One-Tap sessions and reserve
 bun install
 bun run check
 bun run release:preflight
+bun run example:prebuild
 bun run example:android
 bun run example:ios
 ```
@@ -741,7 +860,7 @@ Run native example builds locally before release when changing plugin, native,
 Nitro, or packaging files. GitHub CI does not build the Android or iOS example;
 use the commands above for local validation.
 
-The [native performance investigation](docs/native-performance-plan.md) maps
+The [native performance investigation](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/docs/native-performance-plan.md) maps
 current C++ ownership and implemented credential, event, error, and snapshot
 improvements. It describes future work, not new APIs or measured speedups.
 
@@ -750,8 +869,8 @@ improvements. It describes future work, not new APIs or measured speedups.
 - [npm package](https://www.npmjs.com/package/react-native-nitro-auth)
 - [GitHub repository](https://github.com/JoaoPauloCMarra/react-native-nitro-auth)
 - [Issue tracker](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/issues)
-- [Native libraries](docs/native-libraries.md)
-- [Benchmark policy](docs/benchmarks.md)
+- [Native libraries](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/docs/native-libraries.md)
+- [Benchmark policy](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/docs/benchmarks.md)
 - [Changelog](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/CHANGELOG.md)
 
 ## License

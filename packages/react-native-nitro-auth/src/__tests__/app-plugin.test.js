@@ -1,7 +1,8 @@
 const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
-const { IOSConfig } = require("@expo/config-plugins");
+const { withBuildProperties } = require("expo-build-properties");
+const { IOSConfig, compileModsAsync } = require("expo/config-plugins");
 const { _internal, withNitroAuth } = require("../../app.plugin.js");
 const PACKAGE_ROOT = path.dirname(require.resolve("../../package.json"));
 
@@ -230,7 +231,9 @@ describe("Android Apple Expo configuration", () => {
       { resources: {} },
       enabled,
     );
-    strings = await applyMod("android", "strings", strings, {});
+    strings = await applyMod("android", "strings", strings, {
+      googleClientId: "google-client",
+    });
     expect(strings.resources.string).toEqual([
       { $: { name: "nitro_auth_google_client_id" }, _: "google-client" },
     ]);
@@ -535,6 +538,277 @@ describe("optional Google button font", () => {
   it("requires a boolean when explicitly configured", () => {
     expect(() => makeFontPluginConfig("true")).toThrow(
       "googleButtonFont must be a boolean.",
+    );
+  });
+});
+
+const cloneConfig = (config) => JSON.parse(JSON.stringify(config));
+
+const googlePods = [
+  { name: "AppCheckCore", modular_headers: true },
+  { name: "GoogleUtilities", modular_headers: true },
+  { name: "RecaptchaInterop", modular_headers: true },
+];
+
+describe("Google Sign-In Podfile properties", () => {
+  async function applyPodfileProperties(modResults) {
+    const config = withNitroAuth({ name: "Example", slug: "example" }, {});
+    return applyExpoMod(config, "ios", "podfileProperties", modResults, {
+      projectRoot: "/tmp/example",
+      platformProjectRoot: "/tmp/example/ios",
+    });
+  }
+
+  it("appends only missing Google pods and keeps every other key", async () => {
+    const result = await applyPodfileProperties({
+      "expo.jsEngine": "hermes",
+      EXPO_USE_PRECOMPILED_MODULES: "false",
+      "apple.extraPods": JSON.stringify([
+        { name: "UserPod" },
+        { name: "GoogleUtilities", modular_headers: true },
+      ]),
+    });
+
+    expect(result["expo.jsEngine"]).toBe("hermes");
+    expect(result.EXPO_USE_PRECOMPILED_MODULES).toBe("false");
+    expect(JSON.parse(result["apple.extraPods"])).toEqual([
+      { name: "UserPod" },
+      { name: "GoogleUtilities", modular_headers: true },
+      { name: "AppCheckCore", modular_headers: true },
+      { name: "RecaptchaInterop", modular_headers: true },
+    ]);
+  });
+
+  it("writes the Google pods when no extra pods exist", async () => {
+    const result = await applyPodfileProperties({});
+    expect(JSON.parse(result["apple.extraPods"])).toEqual(googlePods);
+  });
+
+  it("rejects a malformed extraPods property", async () => {
+    await expect(
+      applyPodfileProperties({ "apple.extraPods": "{" }),
+    ).rejects.toThrow("apple.extraPods");
+  });
+
+  async function compilePodfileProperties(order, buildProperties) {
+    const { projectRoot } = await makeNativeProjectFixture();
+    let config = {
+      name: "Example",
+      slug: "example",
+      ios: { bundleIdentifier: "com.example" },
+      _internal: { projectRoot },
+    };
+    for (const plugin of order) {
+      config =
+        plugin === "build-properties"
+          ? withBuildProperties(config, buildProperties)
+          : withNitroAuth(config, {});
+    }
+    const result = await compileModsAsync(config, {
+      projectRoot,
+      introspect: true,
+      platforms: ["ios"],
+      assertMissingModProviders: false,
+    });
+    return result._internal.modResults.ios.podfileProperties;
+  }
+
+  it.each([
+    ["build-properties", "nitro-auth"],
+    ["nitro-auth", "build-properties"],
+  ])(
+    "keeps expo-build-properties settings with plugin order %s, %s",
+    async (...order) => {
+      const properties = await compilePodfileProperties(order, {
+        ios: {
+          usePrecompiledModules: false,
+          privacyManifestAggregationEnabled: false,
+        },
+      });
+
+      expect(properties.EXPO_USE_PRECOMPILED_MODULES).toBe("false");
+      expect(properties["apple.privacyManifestAggregationEnabled"]).toBe(
+        "false",
+      );
+      expect(JSON.parse(properties["apple.extraPods"])).toEqual(googlePods);
+    },
+  );
+
+  it("merges expo-build-properties extraPods when nitro-auth is listed first", async () => {
+    const properties = await compilePodfileProperties(
+      ["nitro-auth", "build-properties"],
+      { ios: { extraPods: [{ name: "UserPod" }] } },
+    );
+
+    expect(JSON.parse(properties["apple.extraPods"])).toEqual([
+      { name: "UserPod" },
+      ...googlePods,
+    ]);
+  });
+
+  it("lets expo-build-properties extraPods replace the Google pods when it is listed first", async () => {
+    const properties = await compilePodfileProperties(
+      ["build-properties", "nitro-auth"],
+      { ios: { extraPods: [{ name: "UserPod" }] } },
+    );
+
+    expect(JSON.parse(properties["apple.extraPods"])).toEqual([
+      { name: "UserPod" },
+    ]);
+  });
+});
+
+describe("Microsoft Expo configuration", () => {
+  const microsoftFilter = (clientId) => [
+    {
+      action: [{ $: { "android:name": "android.intent.action.VIEW" } }],
+      category: [
+        { $: { "android:name": "android.intent.category.DEFAULT" } },
+        { $: { "android:name": "android.intent.category.BROWSABLE" } },
+      ],
+      data: [
+        {
+          $: {
+            "android:scheme": "msauth",
+            "android:host": "${applicationId}",
+            "android:path": `/${clientId}`,
+          },
+        },
+      ],
+    },
+  ];
+
+  async function applyManifest(config, props, manifest) {
+    const pluginConfig = withNitroAuth(cloneConfig(config), props);
+    return applyExpoMod(pluginConfig, "android", "manifest", manifest, {
+      projectRoot: "/tmp/example",
+      platformProjectRoot: "/tmp/example/android",
+    });
+  }
+
+  it("rewrites an existing Microsoft activity when the client id changes", async () => {
+    const mainActivity = { $: { "android:name": ".MainActivity" } };
+    const config = {
+      name: "Example",
+      slug: "example",
+      android: { package: "com.example" },
+    };
+    let manifest = {
+      manifest: { application: [{ activity: [mainActivity] }] },
+    };
+    manifest = await applyManifest(
+      config,
+      { android: { microsoftClientId: "OLD-CLIENT" } },
+      manifest,
+    );
+    manifest = await applyManifest(
+      config,
+      { android: { microsoftClientId: "NEW-CLIENT" } },
+      manifest,
+    );
+
+    const activities = manifest.manifest.application[0].activity;
+    const microsoft = activities.filter(
+      (a) => a.$["android:name"] === "com.auth.MicrosoftAuthActivity",
+    );
+    expect(microsoft).toHaveLength(1);
+    expect(microsoft[0].$["android:exported"]).toBe("true");
+    expect(microsoft[0]["intent-filter"]).toEqual(
+      microsoftFilter("NEW-CLIENT"),
+    );
+    expect(activities).toContainEqual(mainActivity);
+
+    manifest = await applyManifest(config, {}, manifest);
+    expect(manifest.manifest.application[0].activity).toEqual([mainActivity]);
+  });
+
+  it("uses the applicationId placeholder so suffixes and flavors match", async () => {
+    const manifest = await applyManifest(
+      { name: "Example", slug: "example" },
+      { android: { microsoftClientId: "CLIENT" } },
+      { manifest: { application: [{ activity: [] }] } },
+    );
+    const [activity] = manifest.manifest.application[0].activity;
+    expect(activity["intent-filter"]).toEqual(microsoftFilter("CLIENT"));
+  });
+
+  it("removes stale Microsoft and Google strings when their options are removed", async () => {
+    const config = {
+      name: "Example",
+      slug: "example",
+      android: { package: "com.example" },
+    };
+    const enabled = {
+      android: {
+        googleClientId: "google-client",
+        microsoftClientId: "microsoft-client",
+        microsoftTenant: "tenant",
+        microsoftB2cDomain: "example.b2clogin.com",
+      },
+    };
+    let strings = await applyExpoMod(
+      withNitroAuth(cloneConfig(config), enabled),
+      "android",
+      "strings",
+      { resources: { string: [{ $: { name: "app_name" }, _: "Example" }] } },
+      { projectRoot: "/tmp/example", platformProjectRoot: "/tmp/example" },
+    );
+    expect(strings.resources.string).toHaveLength(5);
+    strings = await applyExpoMod(
+      withNitroAuth(cloneConfig(config), {}),
+      "android",
+      "strings",
+      strings,
+      { projectRoot: "/tmp/example", platformProjectRoot: "/tmp/example" },
+    );
+    expect(strings.resources.string).toEqual([
+      { $: { name: "app_name" }, _: "Example" },
+    ]);
+  });
+
+  it("writes the iOS MSAL URL scheme from the bundle identifier", async () => {
+    const plist = await applyExpoMod(
+      withNitroAuth(
+        {
+          name: "Example",
+          slug: "example",
+          ios: { bundleIdentifier: "com.example" },
+        },
+        {
+          ios: {
+            microsoftClientId: "CLIENT",
+            googleClientId: "123-abc.apps.googleusercontent.com",
+          },
+        },
+      ),
+      "ios",
+      "infoPlist",
+      {},
+      { projectRoot: "/tmp/example", platformProjectRoot: "/tmp/example/ios" },
+    );
+    expect(plist.MSALClientID).toBe("CLIENT");
+    expect(plist.GIDClientID).toBe("123-abc.apps.googleusercontent.com");
+    expect(plist.CFBundleURLTypes).toEqual([
+      { CFBundleURLSchemes: ["com.googleusercontent.apps.123-abc"] },
+      { CFBundleURLSchemes: ["msauth.com.example"] },
+    ]);
+  });
+
+  it("does not write msauth.undefined when ios.bundleIdentifier is missing", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const plist = await applyExpoMod(
+      withNitroAuth(
+        { name: "Example", slug: "example" },
+        { ios: { microsoftClientId: "CLIENT" } },
+      ),
+      "ios",
+      "infoPlist",
+      {},
+      { projectRoot: "/tmp/example", platformProjectRoot: "/tmp/example/ios" },
+    );
+    expect(JSON.stringify(plist)).not.toContain("undefined");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("ios.bundleIdentifier"),
     );
   });
 });

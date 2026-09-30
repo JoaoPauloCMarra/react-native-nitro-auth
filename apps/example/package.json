@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "install-check": "env -u NO_COLOR expo install --check",
-    "doctor": "bunx expo-doctor@latest",
+    "doctor": "bunx expo-doctor@1.20.4",
     "config:introspect": "env -u NO_COLOR expo config --type introspect --json > /tmp/nitro-auth-expo-config.json",
     "android:assemble": "cd android && NODE_ENV=development ./gradlew --no-daemon --no-configuration-cache -PreactNativeArchitectures=arm64-v8a :app:assembleDebug",
     "ios:build": "cd ios && pod install && xcodebuild -workspace NitroAuth.xcworkspace -scheme NitroAuth -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build"
@@ -38,11 +38,11 @@
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.26.2",
+    "react-native-svg": "15.15.4",
     "react-native-web": "^0.21.2",
     "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
-    "babel-plugin-module-resolver": "^5.0.3",
     "babel-preset-expo": "~57.0.7",
     "eslint": "^10.11.0",
     "eslint-config-expo-magic": "^3.0.0"

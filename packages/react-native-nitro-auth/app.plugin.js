@@ -1,6 +1,5 @@
 const fs = require("fs/promises");
 const path = require("path");
-const { withBuildProperties } = require("expo-build-properties");
 const {
   withInfoPlist,
   withEntitlementsPlist,
@@ -8,10 +7,11 @@ const {
   withAndroidManifest,
   withDangerousMod,
   withXcodeProject,
+  withPodfileProperties,
   IOSConfig,
   AndroidConfig,
   createRunOncePlugin,
-} = require("@expo/config-plugins");
+} = require("expo/config-plugins");
 const pkg = require("./package.json");
 const PACKAGE_ROOT = path.dirname(require.resolve("./package.json"));
 
@@ -46,6 +46,39 @@ const googleSignInIosPods = [
   { name: "RecaptchaInterop", modular_headers: true },
 ];
 
+const EXTRA_PODS_PROPERTY = "apple.extraPods";
+
+function parseExtraPods(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return [];
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(
+      `${EXTRA_PODS_PROPERTY} in Podfile.properties.json must be a JSON array.`,
+    );
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      `${EXTRA_PODS_PROPERTY} in Podfile.properties.json must be a JSON array.`,
+    );
+  }
+  return parsed;
+}
+
+function withGoogleSignInIosPods(config) {
+  return withPodfileProperties(config, (config) => {
+    const existing = parseExtraPods(config.modResults[EXTRA_PODS_PROPERTY]);
+    const merged = getNitroAuthIosExtraPods(existing);
+    if (merged.length !== existing.length) {
+      config.modResults[EXTRA_PODS_PROPERTY] = JSON.stringify(merged);
+    }
+    return config;
+  });
+}
+
 function getNitroAuthIosExtraPods(extraPods = []) {
   const pods = Array.isArray(extraPods) ? [...extraPods] : [];
   const existingPodNames = new Set(pods.map((pod) => pod?.name));
@@ -58,6 +91,19 @@ function getNitroAuthIosExtraPods(extraPods = []) {
 
   return pods;
 }
+
+const MANAGED_ANDROID_STRINGS = [
+  "nitro_auth_apple_android_broker_url",
+  "nitro_auth_apple_android_callback_scheme",
+  "nitro_auth_google_client_id",
+  "nitro_auth_microsoft_client_id",
+  "nitro_auth_microsoft_tenant",
+  "nitro_auth_microsoft_b2c_domain",
+];
+const MICROSOFT_AUTH_ACTIVITY = "com.auth.MicrosoftAuthActivity";
+// Manifest merge replaces the placeholder with the final applicationId, so
+// applicationIdSuffix and product flavors keep a matching redirect host.
+const ANDROID_APPLICATION_ID_PLACEHOLDER = "${applicationId}";
 
 const GOOGLE_IOS_CLIENT_ID_SUFFIX = ".apps.googleusercontent.com";
 
@@ -280,11 +326,7 @@ const withNitroAuth = (config, props = {}) => {
 
   config = withGoogleButtonFont(config, googleButtonFont);
 
-  config = withBuildProperties(config, {
-    ios: {
-      extraPods: getNitroAuthIosExtraPods(config.ios?.extraPods),
-    },
-  });
+  config = withGoogleSignInIosPods(config);
 
   config = withInfoPlist(config, (config) => {
     if (ios.googleClientId) {
@@ -309,9 +351,18 @@ const withNitroAuth = (config, props = {}) => {
         ];
       }
     }
+    const bundleIdentifier = config.ios?.bundleIdentifier;
+    if (ios.microsoftClientId && !bundleIdentifier) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[react-native-nitro-auth] Set ios.bundleIdentifier to register the Microsoft msauth.<bundleIdentifier> URL scheme.",
+      );
+    }
     if (ios.microsoftClientId) {
       config.modResults.MSALClientID = ios.microsoftClientId;
-      const msalScheme = `msauth.${config.ios?.bundleIdentifier}`;
+    }
+    if (ios.microsoftClientId && bundleIdentifier) {
+      const msalScheme = `msauth.${bundleIdentifier}`;
       const existingSchemes = config.modResults.CFBundleURLTypes || [];
       if (
         !existingSchemes.some((scheme) =>
@@ -346,11 +397,7 @@ const withNitroAuth = (config, props = {}) => {
     if (config.modResults.resources.string) {
       config.modResults.resources.string =
         config.modResults.resources.string.filter(
-          (entry) =>
-            ![
-              "nitro_auth_apple_android_broker_url",
-              "nitro_auth_apple_android_callback_scheme",
-            ].includes(entry.$?.name),
+          (entry) => !MANAGED_ANDROID_STRINGS.includes(entry.$?.name),
         );
     }
     if (appleAndroid) {
@@ -472,51 +519,43 @@ const withNitroAuth = (config, props = {}) => {
     return config;
   });
 
-  if (android.microsoftClientId) {
-    config = withAndroidManifest(config, (config) => {
-      const manifest = config.modResults.manifest;
-      const application = manifest.application?.[0];
-      const packageName =
-        config.android?.package || AndroidConfig.Package.getPackageName(config);
-      if (!packageName) {
-        return config;
-      }
-      if (application) {
-        application.activity = application.activity || [];
-        const msalActivity = {
-          $: {
-            "android:name": "com.auth.MicrosoftAuthActivity",
-            "android:exported": "true",
-          },
-          "intent-filter": [
+  config = withAndroidManifest(config, (config) => {
+    const application = config.modResults.manifest.application?.[0];
+    if (!application) {
+      return config;
+    }
+    application.activity = (application.activity || []).filter(
+      (entry) => entry.$?.["android:name"] !== MICROSOFT_AUTH_ACTIVITY,
+    );
+    if (!android.microsoftClientId) {
+      return config;
+    }
+    application.activity.push({
+      $: {
+        "android:name": MICROSOFT_AUTH_ACTIVITY,
+        "android:exported": "true",
+      },
+      "intent-filter": [
+        {
+          action: [{ $: { "android:name": "android.intent.action.VIEW" } }],
+          category: [
+            { $: { "android:name": "android.intent.category.DEFAULT" } },
+            { $: { "android:name": "android.intent.category.BROWSABLE" } },
+          ],
+          data: [
             {
-              action: [{ $: { "android:name": "android.intent.action.VIEW" } }],
-              category: [
-                { $: { "android:name": "android.intent.category.DEFAULT" } },
-                { $: { "android:name": "android.intent.category.BROWSABLE" } },
-              ],
-              data: [
-                {
-                  $: {
-                    "android:scheme": "msauth",
-                    "android:host": packageName,
-                    "android:path": `/${android.microsoftClientId}`,
-                  },
-                },
-              ],
+              $: {
+                "android:scheme": "msauth",
+                "android:host": ANDROID_APPLICATION_ID_PLACEHOLDER,
+                "android:path": `/${android.microsoftClientId}`,
+              },
             },
           ],
-        };
-        const existingMsalActivity = application.activity.find(
-          (a) => a.$?.["android:name"] === "com.auth.MicrosoftAuthActivity",
-        );
-        if (!existingMsalActivity) {
-          application.activity.push(msalActivity);
-        }
-      }
-      return config;
+        },
+      ],
     });
-  }
+    return config;
+  });
 
   return config;
 };

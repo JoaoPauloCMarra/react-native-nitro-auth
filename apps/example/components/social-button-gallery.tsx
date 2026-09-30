@@ -10,6 +10,7 @@ import {
   OfficialSocialButton,
   type OfficialSocialButtonRenderMode,
 } from "react-native-nitro-auth/official-buttons";
+import { OfficialSocialButton as OfficialSvgSocialButton } from "react-native-nitro-auth/official-buttons/svg";
 
 type GalleryMode = SocialButtonRenderMode | OfficialSocialButtonRenderMode;
 
@@ -30,7 +31,10 @@ function GalleryButton({ mode, ...props }: GalleryButtonProps) {
   if (mode === "custom") {
     return <SocialButton {...props} />;
   }
-  return <OfficialSocialButton {...props} renderMode={mode} />;
+  if (mode === "svg") {
+    return <OfficialSvgSocialButton {...props} renderMode="svg" />;
+  }
+  return <OfficialSocialButton {...props} renderMode="image" />;
 }
 
 type ToggleProps = {

@@ -22,14 +22,3 @@ internal fun shouldConsumeAppleResumeSuppression(
     !resumingActivityIsCallbackHandler &&
         resumeSuppressionGeneration != null &&
         resumeSuppressionGeneration == currentGeneration
-
-internal enum class AppleSessionOperation {
-    REQUEST_SCOPES,
-    REFRESH_TOKEN,
-    RESTORE_SESSION,
-}
-
-internal fun shouldRejectAppleSessionOperation(operation: AppleSessionOperation): Boolean =
-    operation == AppleSessionOperation.REQUEST_SCOPES ||
-        operation == AppleSessionOperation.REFRESH_TOKEN ||
-        operation == AppleSessionOperation.RESTORE_SESSION

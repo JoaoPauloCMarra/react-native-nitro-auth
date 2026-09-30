@@ -300,7 +300,10 @@ export function FeatureDemo() {
   );
 
   const runAuthAction = useCallback(
-    async (label: string, action: () => Promise<void> | void) => {
+    async (
+      label: string,
+      action: () => Promise<string | void> | string | void,
+    ) => {
       if (actionInFlightRef.current || auth.loading) {
         return;
       }
@@ -308,8 +311,8 @@ export function FeatureDemo() {
       actionInFlightRef.current = true;
       try {
         setNotice(label, "working");
-        await action();
-        setNotice("Done", "success");
+        const message = await action();
+        setNotice(message ?? "Done", "success");
       } catch (e) {
         const error = AuthError.from(e);
         if (error.code === "cancelled") {
@@ -501,12 +504,9 @@ export function FeatureDemo() {
       if (accessToken) {
         updateAuthSnapshot({ accessToken });
       }
-      setNotice(
-        accessToken ? "Access token loaded" : "No access token",
-        "success",
-      );
+      return accessToken ? "Access token loaded" : "No access token";
     });
-  }, [auth, runAuthAction, setNotice, updateAuthSnapshot]);
+  }, [auth, runAuthAction, updateAuthSnapshot]);
 
   const getCredential = useCallback(async () => {
     await runAuthAction("Getting Google credential", async () => {
@@ -531,11 +531,9 @@ export function FeatureDemo() {
     await runAuthAction("Restoring session", async () => {
       await auth.silentRestore();
       updateAuthSnapshot();
-      setNotice(
-        AuthService.currentUser ? "Session restored" : "No session found",
-      );
+      return AuthService.currentUser ? "Session restored" : "No session found";
     });
-  }, [auth, runAuthAction, setNotice, updateAuthSnapshot]);
+  }, [auth, runAuthAction, updateAuthSnapshot]);
 
   const requestOrRevokeCalendarScope = useCallback(async () => {
     if (hasCalendarScope) {

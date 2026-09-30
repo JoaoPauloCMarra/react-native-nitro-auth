@@ -111,6 +111,12 @@ public class AuthAdapter: NSObject {
     advanceOperation()
   }
 
+  static func observeCurrentOperation() -> AuthOperationToken {
+    tokenStoreLock.lock()
+    defer { tokenStoreLock.unlock() }
+    return AuthOperationToken(epoch: authEpoch)
+  }
+
   static func isCurrentOperation(_ operation: AuthOperationToken) -> Bool {
     tokenStoreLock.lock()
     let isCurrent = authEpoch == operation.epoch
@@ -121,7 +127,7 @@ public class AuthAdapter: NSObject {
   static func commitCurrentOperation(_ operation: AuthOperationToken, _ mutation: () -> Void) -> Bool {
     tokenStoreLock.lock()
     defer { tokenStoreLock.unlock() }
-    guard authEpoch == operation.epoch, activeOperation === operation else { return false }
+    guard authEpoch == operation.epoch else { return false }
     mutation()
     return true
   }
@@ -212,12 +218,9 @@ public class AuthAdapter: NSObject {
         }
 
         if shouldForceAccountPicker {
-          GIDSignIn.sharedInstance.disconnect { _ in
-            performSignIn()
-          }
-        } else {
-          performSignIn()
+          GIDSignIn.sharedInstance.signOut()
         }
+        performSignIn()
       }
     } else if provider == "apple" {
       guard beginInteractiveAuth() else {
@@ -314,7 +317,7 @@ public class AuthAdapter: NSObject {
 
   @objc
   public static func refreshToken(completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
-    let operation = beginOperation()
+    let operation = observeCurrentOperation()
     if let currentUser = GIDSignIn.sharedInstance.currentUser {
       currentUser.refreshTokensIfNeeded { user, error in
         guard self.isCurrentOperation(operation) else {

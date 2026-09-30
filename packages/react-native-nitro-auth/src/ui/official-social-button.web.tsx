@@ -1,5 +1,5 @@
 import React from "react";
-import { officialArtwork } from "./official-social-button-renderer";
+import { officialImageArtwork } from "./official-social-button-renderer";
 import { SocialButtonCore } from "./social-button-core";
 import type { OfficialSocialButtonProps } from "./social-button-types";
 import { AuthService } from "../service.web";
@@ -23,7 +23,7 @@ export const OfficialSocialButton = React.memo(function OfficialSocialButton(
     <SocialButtonCore
       {...props}
       renderMode={props.renderMode ?? "image"}
-      officialArtwork={officialArtwork}
+      officialArtwork={officialImageArtwork}
       login={login}
       currentUser={currentUser}
     />

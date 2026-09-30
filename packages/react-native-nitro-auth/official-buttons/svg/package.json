@@ -1,0 +1,8 @@
+{
+  "main": "../../lib/commonjs/official-buttons-svg.js",
+  "module": "../../lib/module/official-buttons-svg.js",
+  "types": "../../lib/typescript/commonjs/official-buttons-svg.d.ts",
+  "react-native": "../../src/official-buttons-svg.ts",
+  "browser": "../../src/official-buttons-svg.web.ts",
+  "source": "../../src/official-buttons-svg.ts"
+}

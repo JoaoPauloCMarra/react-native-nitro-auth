@@ -28,7 +28,7 @@ export interface LoginOptions {
   loginHint?: string;
   nonce?: string;
   useOneTap?: boolean;
-  /** (iOS only) Use native sign-in sheet */
+  /** (iOS Google only) Sign out locally before sign-in so the account picker shows. Does not revoke access. */
   useSheet?: boolean;
   /**
    * Force account selection and ignore cached sign-in. Android Google uses the

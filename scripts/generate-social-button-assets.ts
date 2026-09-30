@@ -1,7 +1,8 @@
 /**
- * Regenerates `src/ui/social-button-assets.ts` from the artwork in
+ * Regenerates `src/ui/social-button-assets.ts` (PNG artwork and dimensions) and
+ * `src/ui/social-button-svg-assets.ts` (inlined SVG artwork) from the files in
  * `src/ui/assets`. Metro cannot import an SVG file as text, so the vector
- * artwork is inlined; generating it keeps the module and the files identical.
+ * artwork is inlined into its own module that only the SVG subpath imports.
  * Run after changing any button artwork, then refresh `provenance.json`.
  */
 import { readFileSync, writeFileSync } from "node:fs";
@@ -13,6 +14,10 @@ const packageRoot = resolve(
 );
 const assetRoot = resolve(packageRoot, "src/ui/assets");
 const modulePath = resolve(packageRoot, "src/ui/social-button-assets.ts");
+const svgModulePath = resolve(
+  packageRoot,
+  "src/ui/social-button-svg-assets.ts",
+);
 
 const providers = ["google", "apple"] as const;
 const platforms = ["android", "ios"] as const;
@@ -29,20 +34,27 @@ function readSvg(file: string): { svg: string; width: number; height: number } {
   return { svg, width, height };
 }
 
-function entry(base: string, indent: string): string {
-  const { svg, width, height } = readSvg(`${base}.svg`);
+function imageEntry(base: string, indent: string): string {
+  const { width, height } = readSvg(`${base}.svg`);
   const pad = `${indent}  `;
   return [
     `${indent}{`,
     `${pad}image: require("./assets/${base}.png") as ImageSourcePropType,`,
-    `${pad}svg: ${JSON.stringify(svg)},`,
     `${pad}width: ${width},`,
     `${pad}height: ${height},`,
     `${indent}}`,
   ].join("\n");
 }
 
-function artwork(name: string, suffix: string): string {
+function svgEntry(base: string): string {
+  return JSON.stringify(readSvg(`${base}.svg`).svg);
+}
+
+function artwork(
+  name: string,
+  suffix: string,
+  entry: (base: string, indent: string) => string,
+): string {
   const lines = [`export const ${name} = {`];
   for (const provider of providers) {
     lines.push(`  ${provider}: {`);
@@ -66,10 +78,16 @@ function artwork(name: string, suffix: string): string {
 
 const source = `import type { ImageSourcePropType } from "react-native";
 
-${artwork("socialButtonArtwork", "")}
+${artwork("socialButtonArtwork", "", imageEntry)}
 
-${artwork("iconOnlyArtwork", "-icon")}
+${artwork("iconOnlyArtwork", "-icon", imageEntry)}
+`;
+
+const svgSource = `${artwork("socialButtonSvgArtwork", "", svgEntry)}
+
+${artwork("iconOnlySvgArtwork", "-icon", svgEntry)}
 `;
 
 writeFileSync(modulePath, source);
-console.log(`Generated ${modulePath}`);
+writeFileSync(svgModulePath, svgSource);
+console.log(`Generated ${modulePath} and ${svgModulePath}`);

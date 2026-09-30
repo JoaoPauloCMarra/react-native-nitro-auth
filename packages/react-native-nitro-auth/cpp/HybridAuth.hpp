@@ -56,6 +56,7 @@ private:
   std::shared_ptr<Promise<AuthTokens>> advanceSessionGenerationLocked();
   void trackSessionPromiseLocked(const std::shared_ptr<Promise<void>>& promise);
   std::vector<std::shared_ptr<Promise<void>>> takePendingSessionPromisesLocked();
+  bool hasPendingSessionOperationLocked() const;
   void log(const std::string& message);
 
 private:

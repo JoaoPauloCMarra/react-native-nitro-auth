@@ -1,12 +1,12 @@
 import React from "react";
-import { officialImageArtwork } from "./official-social-button-renderer";
+import { officialSvgArtwork } from "./official-social-button-svg-renderer";
 import { SocialButtonCore } from "./social-button-core";
-import type { OfficialSocialButtonProps } from "./social-button-types";
+import type { OfficialSvgSocialButtonProps } from "./social-button-types";
 import { AuthService } from "../service";
 import type { AuthProvider } from "../Auth.nitro";
 
 export type {
-  OfficialSocialButtonProps,
+  OfficialSvgSocialButtonProps as OfficialSocialButtonProps,
   OfficialSocialButtonRenderMode,
   SocialButtonAppearance,
   SocialButtonShape,
@@ -17,13 +17,13 @@ const login = (provider: AuthProvider) => AuthService.login(provider);
 const currentUser = () => AuthService.currentUser;
 
 export const OfficialSocialButton = React.memo(function OfficialSocialButton(
-  props: OfficialSocialButtonProps,
+  props: OfficialSvgSocialButtonProps,
 ) {
   return (
     <SocialButtonCore
       {...props}
-      renderMode={props.renderMode ?? "image"}
-      officialArtwork={officialImageArtwork}
+      renderMode={props.renderMode ?? "svg"}
+      officialArtwork={officialSvgArtwork}
       login={login}
       currentUser={currentUser}
     />

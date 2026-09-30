@@ -70,7 +70,7 @@
     "example:android:assemble": "bun run --cwd apps/example android:assemble",
     "android:test": "cd apps/example/android && ./gradlew --no-daemon --no-configuration-cache :react-native-nitro-auth:testDebugUnitTest",
     "example:ios:build": "bun run --cwd apps/example ios:build",
-    "example:smoke": "bunx maestro test maestro/smoke-tests.yaml",
+    "example:smoke": "command -v maestro >/dev/null || { echo \"Install the Maestro CLI: https://maestro.dev\"; exit 1; }; maestro test maestro/smoke-tests.yaml",
     "example:e2e": "agent-device test e2e/qa-full-features.ad --retries 1 --artifacts-dir \"$(mktemp -d \"${TMPDIR:-/tmp}/agent-device.XXXXXXXX\")\"",
     "example:e2e:android": "agent-device test e2e/qa-full-features.ad --device \"RN Expo MidRange\" --retries 1 --artifacts-dir \"$(mktemp -d \"${TMPDIR:-/tmp}/agent-device.XXXXXXXX\")\"",
     "example:e2e:ios": "agent-device test e2e/qa-full-features.ad --device \"iPhone 17 Pro Max (iOS 26.5)\" --retries 1 --artifacts-dir \"$(mktemp -d \"${TMPDIR:-/tmp}/agent-device.XXXXXXXX\")\"",
@@ -80,8 +80,7 @@
     "example:install-check": "bun run --cwd apps/example install-check",
     "example:doctor": "bun run --cwd apps/example doctor",
     "example:config": "bun run --cwd apps/example config:introspect",
-    "release:preflight": "bun run check:ci && bun run format:check && bun run example:check && bun run audit:package && bun run publish-package:dry-run",
-    "example:smoke:ci": "node scripts/assert-example-smoke.js"
+    "release:preflight": "bun run check:ci && bun run format:check && bun run example:check && bun run audit:package && bun run publish-package:dry-run"
   },
   "workspaces": [
     "apps/*",

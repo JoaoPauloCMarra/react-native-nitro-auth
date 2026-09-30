@@ -15,6 +15,16 @@ import org.robolectric.annotation.Config
 class MicrosoftRefreshStateTest {
 
     @Test
+    fun refreshTokenClearsOnlyOnTerminalClientErrors() {
+        assertTrue(MicrosoftAuthConfig.shouldClearRefreshToken(400))
+        assertTrue(MicrosoftAuthConfig.shouldClearRefreshToken(401))
+        assertFalse(MicrosoftAuthConfig.shouldClearRefreshToken(408))
+        assertFalse(MicrosoftAuthConfig.shouldClearRefreshToken(429))
+        assertFalse(MicrosoftAuthConfig.shouldClearRefreshToken(500))
+        assertFalse(MicrosoftAuthConfig.shouldClearRefreshToken(200))
+    }
+
+    @Test
     fun staleRefreshCompletionCannotConsumeOrMutateReplacementOperation() {
         val authClass = AuthAdapter::class.java
         val operationClass = Class.forName("com.auth.MicrosoftRefreshOperation")

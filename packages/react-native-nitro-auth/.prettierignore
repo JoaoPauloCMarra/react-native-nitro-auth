@@ -6,3 +6,4 @@ nitrogen/generated
 coverage
 cpp/build
 src/ui/social-button-assets.ts
+src/ui/social-button-svg-assets.ts

@@ -18,4 +18,5 @@ export const OAUTH_ERROR_CODES: Readonly<Record<string, AuthErrorCode>> = {
   temporarily_unavailable: "network_error",
   unauthorized_client: "configuration_error",
   user_cancelled: "cancelled",
+  user_cancelled_authorize: "cancelled",
 };

@@ -1663,10 +1663,6 @@ object AuthAdapter {
         pendingMicrosoftSilentStateEpoch = null
     }
 
-    private fun isCurrentMicrosoftGeneration(generation: Long): Boolean = synchronized(this) {
-        isCurrentMicrosoftGenerationLocked(generation)
-    }
-
     private fun clearPkceStateIfCurrent(generation: Long): Boolean = synchronized(this) {
         if (!acceptsAuthCallback(pendingMicrosoftGeneration, generation)) return@synchronized false
         clearPkceStateLocked()
@@ -1948,7 +1944,7 @@ object AuthAdapter {
                 null, null,
                 googleIdTokenCredential.id,
                 googleIdTokenCredential.phoneNumber,
-                hostedDomain,
+                claims["hd"] ?: hostedDomain,
                 scopes.toTypedArray(),
                 expirationTime,
                 generation,
@@ -2065,7 +2061,7 @@ object AuthAdapter {
                 null, null,
                 credential.id,
                 credential.phoneNumber,
-                oneTapSession.hostedDomain,
+                claims["hd"] ?: oneTapSession.hostedDomain,
                 mergedScopes.toTypedArray(),
                 getGoogleExpirationTimeMs(credential.idToken),
                 generation,
@@ -2594,7 +2590,7 @@ object AuthAdapter {
                 success = false,
                 code = mappedError.first,
                 detail = mappedError.second,
-                clearRefreshToken = responseCode in 400..499,
+                clearRefreshToken = MicrosoftAuthConfig.shouldClearRefreshToken(responseCode),
             )
         }
 

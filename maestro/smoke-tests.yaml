@@ -12,10 +12,7 @@ name: "Smoke Tests - Terminal State"
 - tapOn: "Run smoke tests"
 
 - extendedWaitUntil:
-    visible: "Run smoke tests again"
-    timeout: 30000
-
-- extendedWaitUntil:
-    visible: ".*passed,.*skipped"
-    timeout: 30000
-- assertNotVisible: "FAIL"
+    visible: "Complete: (PASS|FAIL).*"
+    timeout: 60000
+- assertVisible: "Complete: PASS.*"
+- assertNotVisible: "Complete: FAIL.*"

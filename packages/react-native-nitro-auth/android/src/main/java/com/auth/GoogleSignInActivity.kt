@@ -105,11 +105,6 @@ class GoogleSignInActivity : ComponentActivity() {
                 return
             }
             GoogleSignInActivityDecision.START -> Unit
-            GoogleSignInActivityDecision.CANCEL_AND_FINISH -> {
-                settleCancellationIfNeeded()
-                finish()
-                return
-            }
         }
         val clientId = intent.getStringExtra(EXTRA_CLIENT_ID)
         val scopes = intent.getStringArrayExtra(EXTRA_SCOPES) ?: arrayOf("email", "profile")

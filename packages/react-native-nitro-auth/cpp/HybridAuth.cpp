@@ -264,6 +264,13 @@ void HybridAuth::trackSessionPromiseLocked(const std::shared_ptr<Promise<void>>&
   _sessionPromises.push_back(promise);
 }
 
+bool HybridAuth::hasPendingSessionOperationLocked() const {
+  return std::any_of(_sessionPromises.begin(), _sessionPromises.end(), [](const auto& weak) {
+    auto operation = weak.lock();
+    return operation && operation->isPending();
+  });
+}
+
 std::vector<std::shared_ptr<Promise<void>>> HybridAuth::takePendingSessionPromisesLocked() {
   std::vector<std::shared_ptr<Promise<void>>> pending;
   for (const auto& weak : _sessionPromises) {
@@ -445,6 +452,7 @@ std::shared_ptr<Promise<void>> HybridAuth::loginImpl(AuthProvider provider, cons
       return;
     }
     std::shared_ptr<Promise<AuthTokens>> refreshInFlight;
+    AuthUser completedUser = user;
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
       if (auth->_sessionGeneration != generation) {
@@ -465,13 +473,12 @@ std::shared_ptr<Promise<void>> HybridAuth::loginImpl(AuthProvider provider, cons
         auth->_currentUser->scopes = auth->_grantedScopes.empty()
           ? std::nullopt
           : std::make_optional(auth->_grantedScopes);
+        completedUser = *auth->_currentUser;
       }
     }
     rejectIfPending(refreshInFlight, AuthErrorCode::CANCELLED);
     // Resolve from this operation's value before callbacks can replace the session.
     if (result && result->isPending()) {
-      AuthUser completedUser = user;
-      if ((!user.scopes || user.scopes->empty()) && options && options->scopes) completedUser.scopes = options->scopes;
       result->resolve(completedUser);
     }
     auth->notifyAuthStateChanged();
@@ -710,12 +717,14 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
     if (_refreshInFlight) {
       return _refreshInFlight;
     }
+    if (hasPendingSessionOperationLocked()) {
+      return rejected<AuthTokens>(AuthErrorCode::OPERATION_IN_PROGRESS);
+    }
     generation = _sessionGeneration;
     promise = Promise<AuthTokens>::create();
     _refreshInFlight = promise;
   }
 
-  PlatformAuth::cancelPendingOperations(AuthErrorCode::CANCELLED);
   auto self = shared_from_this();
   auto refreshPromise = PlatformAuth::refreshToken();
   refreshPromise->addOnResolvedListener([self, promise, generation](const AuthTokens& tokens) {
@@ -829,11 +838,7 @@ std::shared_ptr<Promise<AuthCredential>> HybridAuth::getCredential(CredentialPro
   auto promise = Promise<AuthCredential>::create();
   {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
-    bool pendingSession = std::any_of(_sessionPromises.begin(), _sessionPromises.end(), [](const auto& weak) {
-      auto operation = weak.lock();
-      return operation && operation->isPending();
-    });
-    if (_credentialPromise || pendingSession || _refreshInFlight) return rejected<AuthCredential>(AuthErrorCode::OPERATION_IN_PROGRESS);
+    if (_credentialPromise || hasPendingSessionOperationLocked() || _refreshInFlight) return rejected<AuthCredential>(AuthErrorCode::OPERATION_IN_PROGRESS);
     if (_currentUser) return rejected<AuthCredential>(AuthErrorCode::INVALID_STATE);
     _credentialPromise = promise;
   }

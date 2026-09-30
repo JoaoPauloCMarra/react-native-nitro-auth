@@ -21,7 +21,7 @@ export type {
 export type { AuthLifecycleEvent, AuthOperationEvent } from "./auth-events";
 export * from "./capabilities";
 export * from "./ui/social-button.web";
-export { useAuth, type UseAuthReturn } from "./use-auth";
+export { useAuth, type UseAuthReturn } from "./use-auth.web";
 export { AuthService } from "./service.web";
 export {
   AuthError,

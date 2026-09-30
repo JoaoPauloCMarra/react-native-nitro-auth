@@ -1,5 +1,4 @@
 import { renderHook, act } from "@testing-library/react";
-import { AuthService } from "../service";
 import { useAuth } from "../use-auth";
 import { AuthError } from "../utils/auth-error";
 import type {
@@ -303,6 +302,39 @@ describe("useAuth", () => {
     });
   });
 
+  describe("loading", () => {
+    it("stays true while another operation is still in flight", async () => {
+      let resolveFirst: () => void = () => undefined;
+      mockLogin
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveFirst = resolve;
+            }),
+        )
+        .mockRejectedValueOnce(new AuthError("operation_in_progress", "login"));
+      const { result } = renderHook(() => useAuth());
+
+      let first: Promise<void> = Promise.resolve();
+      act(() => {
+        first = result.current.login("google");
+      });
+      expect(result.current.loading).toBe(true);
+
+      await act(async () => {
+        await result.current.login("google").catch(() => undefined);
+      });
+      expect(result.current.loading).toBe(true);
+      expect(result.current.error?.code).toBe("operation_in_progress");
+
+      await act(async () => {
+        resolveFirst();
+        await first;
+      });
+      expect(result.current.loading).toBe(false);
+    });
+  });
+
   describe("logout", () => {
     it("should logout successfully", () => {
       mockCurrentUser = { provider: "google", email: "test@example.com" };
@@ -498,23 +530,8 @@ describe("useAuth", () => {
     });
   });
 
-  describe("onTokensRefreshed", () => {
-    it("should subscribe to token refreshes", () => {
-      const callback = jest.fn();
-      const unsubscribeMock = jest.fn();
-      mockOnTokensRefreshed.mockReturnValue(unsubscribeMock);
-
-      renderHook(() => useAuth());
-
-      const unsubscribe = AuthService.onTokensRefreshed(callback);
-
-      expect(mockOnTokensRefreshed).toHaveBeenCalledWith(callback);
-
-      unsubscribe();
-      expect(unsubscribeMock).toHaveBeenCalled();
-    });
-
-    it("callback fires and syncs state from service", () => {
+  describe("session change callback", () => {
+    it("syncs user and scopes from the session snapshot", () => {
       let tokensCallback: ((user: AuthUser | undefined) => void) | null = null;
       mockOnAuthStateChanged.mockImplementation((cb) => {
         tokensCallback = cb;
@@ -580,7 +597,7 @@ describe("useAuth", () => {
   });
 
   describe("getAccessToken error", () => {
-    it("sets error as AuthError when it rejects", async () => {
+    it("rethrows the service error without changing hook state", async () => {
       mockGetAccessToken.mockRejectedValueOnce(new Error("token_expired"));
 
       const { result } = renderHook(() => useAuth());
@@ -596,6 +613,8 @@ describe("useAuth", () => {
 
       expect(caughtError).toBeDefined();
       expect((caughtError as Error).message).toBe("token_expired");
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeUndefined();
     });
   });
 

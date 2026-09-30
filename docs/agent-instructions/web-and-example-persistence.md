@@ -7,9 +7,6 @@
   consumers (`nitroAuthPersistTokensOnWeb`).
 - Profile metadata (email, name, photo) is persisted by default; disable with
   `nitroAuthPersistProfileOnWeb: false`.
-- A custom storage adapter retains legacy token persistence when
-  `nitroAuthPersistTokensOnWeb` is omitted. New integrations must set the
-  option explicitly.
 - `expo-constants` is an optional peer dependency used for web provider
   config; without it web falls back to defaults.
 

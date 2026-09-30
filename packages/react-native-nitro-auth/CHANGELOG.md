@@ -6,6 +6,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [0.13.0] - 2026-09-30
+
+### Breaking changes
+
+- `react-native-svg` is now an optional peer dependency (`>=15.8.0`) instead of a pinned `15.15.5` dependency, and SVG button artwork moved to a new subpath. `react-native-nitro-auth/official-buttons` renders PNG artwork only and accepts only `renderMode="image"`; it no longer loads `react-native-svg` or the inlined SVG artwork.
+
+  Migration: if you render `renderMode="svg"`, install `react-native-svg` (`bunx expo install react-native-svg`) and import `OfficialSocialButton` from `react-native-nitro-auth/official-buttons/svg`. That export defaults to `renderMode="svg"` and also accepts `"image"`. Image-mode buttons need no change.
+
+- `expo-build-properties` is no longer a dependency. The config plugin now writes the Google Sign-In modular-header pods into `apple.extraPods` through `withPodfileProperties` and leaves every other Podfile property unchanged.
+
+  Migration: if your `app.config` lists `expo-build-properties` in `plugins`, add it to your own dependencies with `bunx expo install expo-build-properties`. If you also set `ios.extraPods` there, list `react-native-nitro-auth` before `expo-build-properties` in `plugins`, or add `AppCheckCore`, `GoogleUtilities`, and `RecaptchaInterop` with `modular_headers: true` to that list.
+
+- The `react-native` peer range is now `>=0.77.0`, the minimum that `react-native-nitro-modules` `0.37` builds on (its Android module does not compile against React Native `0.76`). `expo >=53.0.0` is an optional peer used only by the config plugin.
+
+  Migration: upgrade React Native `0.75`/`0.76` apps to `0.77` or later (Expo SDK `53` or later) before installing this release.
+
+- On iOS and Android, `refreshToken()` and a near-expiry `getAccessToken()` reject with `operation_in_progress` while a `login()`, `requestScopes()`, `silentRestore()`, or `revokeAccess()` is pending. Before this release, the refresh cancelled that operation.
+
+  Migration: if you call `refreshToken()` or `getAccessToken()` during sign-in, account switching, scope consent, startup restore, or access revocation, catch `operation_in_progress` and retry after the pending operation settles.
+
+- The Android library manifest no longer gives `MicrosoftAuthActivity` a scheme-only `msauth` intent filter, so apps no longer claim every `msauth://` URL on the device.
+
+  Migration: Expo apps need no change; the plugin registers `msauth://${applicationId}/<microsoftClientId>` with the manifest placeholder, so `applicationIdSuffix` and product flavors get a matching host. Bare Android apps that use Microsoft login must add that intent filter to `com.auth.MicrosoftAuthActivity` in their manifest, as shown in the README's "Microsoft redirect URIs" section.
+
+- On web, provider errors now map through the shared OAuth table used by iOS and Android. `invalid_grant` or `invalid_token` during login maps to `token_error` (it was `refresh_failed`), and provider messages that only contain an error code as a substring map to `unknown`.
+
+  Migration: callers that branch on `refresh_failed` after a web login failure should branch on `token_error`.
+
+### Added
+
+- `react-native-nitro-auth/official-buttons/svg` subpath with the SVG `OfficialSocialButton`.
+- README sections for Microsoft redirect URIs (Android `msauth://<applicationId>/<microsoftClientId>`, iOS `msauth.<bundleIdentifier>://auth`) and React Native / Expo compatibility.
+
+### Changed
+
+- The iOS podspec uses React Native's `min_ios_version_supported` instead of iOS `16.4`, so default React Native `0.77`–`0.86` and Expo SDK `53`–`55` apps (iOS `15.1`) can install the pod. Its git source uses the `v`-prefixed release tag.
+- Android dependencies no longer require compileSdk `36` and Android Gradle Plugin `8.9.1`: `androidx.activity:activity-ktx` is `1.10.1` and `androidx.browser:browser` is `1.8.0`. `androidx.credentials` `1.6.0` and `googleid` `1.2.0` are unchanged. The Android requirements are compileSdk `35`, Android Gradle Plugin `8.6`, and Kotlin `2.0` or later. The package no longer pins `kotlin-stdlib`; the host Kotlin version applies.
+- Android Credential Manager Google sessions report the ID token's `hd` claim as `hostedDomain`, falling back to the requested value.
+- The config plugin loads `expo/config-plugins` instead of `@expo/config-plugins`.
+
+### Fixed
+
+- A native token refresh no longer cancels an in-flight login, scope request, or session restore.
+- iOS `forceAccountPicker` and `useSheet` sign out of the local Google session instead of revoking the app's Google grant.
+- iOS returns `undefined` instead of `""` for absent user fields and tokens, matching Android. An iOS refresh no longer overwrites stored tokens with empty strings.
+- iOS clears the in-memory Microsoft refresh token after a 4xx refresh response, like Android, so later `silentRestore()` calls resolve without a session instead of failing with `refresh_failed`. On both platforms, `408` and `429` responses keep the refresh token.
+- The iOS Microsoft callback checks `state` before it reads provider errors.
+- `loginAndGetUser()` returns the same `scopes` value as `currentUser` when no scopes were granted.
+- Web: a login cancelled by `logout()` no longer clears the guard of a login started in the same tick, and `logout()` and `dispose()` close the provider popup and stop its timers.
+- Web: Apple JS SDK rejections such as `{ error: "popup_closed_by_user" }` and `{ error: "user_cancelled_authorize" }` map to `cancelled` instead of `unknown`.
+- `useAuth().loading` stays `true` until every hook operation settles; a rejected duplicate call no longer clears it while the first call runs.
+- The web entry binds `useAuth` to the web service, so bundlers that ignore `.web` file resolution no longer load the Nitro service on web.
+- The config plugin rewrites the Microsoft Android activity filter on every prebuild, removes it and the Microsoft and Google string resources when their options are removed, no longer calls the missing `AndroidConfig.Package.getPackageName`, and does not write an `msauth.undefined` URL scheme when `ios.bundleIdentifier` is missing.
+- The Android Apple `nonce` format (64-character lowercase SHA-256 hex) is documented in the README and the `AppleAndroidLoginOptions` type.
+- The shipped Google Sans OFL notice names the font's own copyright holder.
+- SECURITY.md directs reports to GitHub private vulnerability reporting instead of public issues.
+- Documentation no longer describes a custom web storage adapter. It was never reachable from the public API; `nitroAuthPersistTokensOnWeb` defaults to `false`.
+
 ## [0.12.0] - 2026-09-30
 
 ### Breaking changes
