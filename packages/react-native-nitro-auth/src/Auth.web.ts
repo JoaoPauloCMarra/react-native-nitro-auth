@@ -256,26 +256,24 @@ const parseScopes = (value: unknown): string[] | undefined => {
   return value.filter((scope): scope is string => typeof scope === "string");
 };
 
-
 const getProviderErrorField = (error: unknown): string | undefined => {
   if (error instanceof Error || !isJsonObject(error)) return undefined;
   return typeof error.error === "string" ? error.error : undefined;
 };
 
-const INTERNAL_ERROR_MESSAGES: readonly [readonly string[], AuthErrorCode][] =
-  [
-    [["cancel", "popup_closed"], "cancelled"],
-    [["timeout"], "timeout"],
-    [["popup blocked"], "popup_blocked"],
-    [["login is already in progress"], "operation_in_progress"],
-    [["state mismatch"], "invalid_state"],
-    [["nonce mismatch"], "invalid_nonce"],
-    [["no id_token", "no_id_token"], "no_id_token"],
-    [["invalid jwt", "json"], "parse_error"],
-    [["no user logged in", "not signed in"], "not_signed_in"],
-    [["network"], "network_error"],
-    [["not configured", "client id"], "configuration_error"],
-  ];
+const INTERNAL_ERROR_MESSAGES: readonly [readonly string[], AuthErrorCode][] = [
+  [["cancel", "popup_closed"], "cancelled"],
+  [["timeout"], "timeout"],
+  [["popup blocked"], "popup_blocked"],
+  [["login is already in progress"], "operation_in_progress"],
+  [["state mismatch"], "invalid_state"],
+  [["nonce mismatch"], "invalid_nonce"],
+  [["no id_token", "no_id_token"], "no_id_token"],
+  [["invalid jwt", "json"], "parse_error"],
+  [["no user logged in", "not signed in"], "not_signed_in"],
+  [["network"], "network_error"],
+  [["not configured", "client id"], "configuration_error"],
+];
 
 const mapInternalErrorMessage = (message: string): AuthErrorCode => {
   const normalized = message.toLowerCase();

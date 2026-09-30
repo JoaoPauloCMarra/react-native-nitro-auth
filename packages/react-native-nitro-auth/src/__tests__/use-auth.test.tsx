@@ -303,6 +303,39 @@ describe("useAuth", () => {
     });
   });
 
+  describe("loading", () => {
+    it("stays true while another operation is still in flight", async () => {
+      let resolveFirst: () => void = () => undefined;
+      mockLogin
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveFirst = resolve;
+            }),
+        )
+        .mockRejectedValueOnce(new AuthError("operation_in_progress", "login"));
+      const { result } = renderHook(() => useAuth());
+
+      let first: Promise<void> = Promise.resolve();
+      act(() => {
+        first = result.current.login("google");
+      });
+      expect(result.current.loading).toBe(true);
+
+      await act(async () => {
+        await result.current.login("google").catch(() => undefined);
+      });
+      expect(result.current.loading).toBe(true);
+      expect(result.current.error?.code).toBe("operation_in_progress");
+
+      await act(async () => {
+        resolveFirst();
+        await first;
+      });
+      expect(result.current.loading).toBe(false);
+    });
+  });
+
   describe("logout", () => {
     it("should logout successfully", () => {
       mockCurrentUser = { provider: "google", email: "test@example.com" };
