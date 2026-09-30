@@ -130,3 +130,11 @@ Dependency freshness (npm registry, 2026-09-30): `react-native-nitro-modules`/`n
 - 31 (part): cap for the Android Google picker sign-out retry and the retained Activity — needs a device-verified failure path; not a small change.
 - 34 (part): AuthCrypto negative base64 cases and the `len%4==1` guard.
 - 35 (part): removing the clang/llvm apt step and `bun run build` from the publish job — `npm publish` runs `prepublishOnly`, which runs `test:cpp` (`clang++`), so the step is still needed.
+
+### Review follow-up (2026-09-30, v0.13.0)
+
+- Item 10 corrected: googleid 1.1.1 lacks `GoogleIdTokenCredential.email` (lead's kotlinc log), so Android uses googleid 1.2.0 with credentials/credentials-play-services-auth 1.6.0 (all minCompileSdk 35, AGP 8.6.0; Kotlin 2.1 metadata, readable by Kotlin 2.0). The `hostedDomain` → Sign in with Google change is reverted; `GetGoogleIdOption.setHostedDomainFilter` is used again. Android Credential Manager sessions report the token `hd` claim, falling back to the requested value.
+- Floor corrected to React Native >= 0.77 / Expo SDK >= 53: `react-native-nitro-modules` 0.37.1 does not compile against RN 0.76.9 (lead-verified). The NDK note is removed; RN 0.77+ ships NDK 27.
+- Item 18 follow-up: the Microsoft intent filter host is `${applicationId}`, so `applicationIdSuffix` and flavors match.
+- Item 16 follow-up: 408 and 429 refresh responses keep the Microsoft refresh token on iOS and Android.
+- SC-10 lists `revokeAccess()` as a pending operation that makes refresh reject with `operation_in_progress`.

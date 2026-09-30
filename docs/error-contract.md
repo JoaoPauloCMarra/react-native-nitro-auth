@@ -85,18 +85,18 @@ failures as `token_error`; `refresh` surfaces them as `refresh_failed`.
 The scenario corpus `SC-01…SC-09` runs against the web module, the native
 service boundary, and the C++ coordinator:
 
-| Scenario | Contract                                                                   |
-| -------- | -------------------------------------------------------------------------- |
-| SC-01    | Login success exposes the user and notifies state listeners.               |
-| SC-02    | Login failure leaves no user and a typed code.                             |
-| SC-03    | Logout cancels an in-flight refresh; it settles with `not_signed_in`.      |
-| SC-04    | Logout clears user and scopes and notifies listeners.                      |
-| SC-05    | Dispose rejects a pending login with `cancelled`.                          |
-| SC-06    | Concurrent refresh calls share one in-flight operation.                    |
-| SC-07    | Silent restore without a session resolves without a user.                  |
-| SC-08    | Refresh failure settles with a typed code and the `refreshToken` phase.    |
-| SC-09    | Concurrent login settles every promise with a typed result.                |
-| SC-10    | Refresh during a pending login, scope request or restore never cancels it. |
+| Scenario | Contract                                                                           |
+| -------- | ---------------------------------------------------------------------------------- |
+| SC-01    | Login success exposes the user and notifies state listeners.                       |
+| SC-02    | Login failure leaves no user and a typed code.                                     |
+| SC-03    | Logout cancels an in-flight refresh; it settles with `not_signed_in`.              |
+| SC-04    | Logout clears user and scopes and notifies listeners.                              |
+| SC-05    | Dispose rejects a pending login with `cancelled`.                                  |
+| SC-06    | Concurrent refresh calls share one in-flight operation.                            |
+| SC-07    | Silent restore without a session resolves without a user.                          |
+| SC-08    | Refresh failure settles with a typed code and the `refreshToken` phase.            |
+| SC-09    | Concurrent login settles every promise with a typed result.                        |
+| SC-10    | Refresh during a pending login, scope request, restore or revoke never cancels it. |
 
 SC-09 divergence (documented, not a parity defect): native cancels the first
 login (generation advance); the replacement settles with the platform result,
@@ -106,8 +106,8 @@ Web keeps the first request active and rejects the second with
 provider UI teardown timing.
 
 SC-10: native `refreshToken()` (and `getAccessToken()` when it must refresh)
-rejects with `operation_in_progress` while a login, `requestScopes()` or
-`silentRestore()` is pending. Web runs the refresh and discards its result if
+rejects with `operation_in_progress` while a login, `requestScopes()`,
+`silentRestore()` or `revokeAccess()` is pending. Web runs the refresh and discards its result if
 the pending operation replaces the session.
 
 - `dispose()` rejects pending session and refresh work, clears listeners and

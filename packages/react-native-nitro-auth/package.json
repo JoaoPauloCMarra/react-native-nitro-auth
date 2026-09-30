@@ -103,9 +103,9 @@
   },
   "peerDependencies": {
     "react": "*",
-    "react-native": ">=0.76.0",
+    "react-native": ">=0.77.0",
     "react-native-nitro-modules": ">=0.37.0 <0.38.0",
-    "expo": ">=52.0.0",
+    "expo": ">=53.0.0",
     "expo-constants": "*",
     "react-native-svg": ">=15.8.0"
   },

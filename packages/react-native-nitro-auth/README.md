@@ -51,31 +51,23 @@ Optional peers:
 
 ## Requirements
 
-| Dependency                 | Supported range or validated baseline                                            |
-| -------------------------- | -------------------------------------------------------------------------------- |
-| React Native               | `>=0.76.0`; tested on `0.86.3`, RN `0.87` Strict TypeScript compatibility check  |
-| React                      | Validated with `19.2.3`                                                          |
-| React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                               |
-| Expo                       | SDK `>=52` development builds; tested on SDK `57.0.26` with RN `0.86.3`          |
-| iOS                        | React Native's `min_ios_version_supported` (`15.1` on RN `0.76`–`0.86`)          |
-| Android                    | compileSdk `35`, Android Gradle Plugin `8.6`, Kotlin `1.9.25`, NDK `27` or later |
+| Dependency                 | Requirement                                                             |
+| -------------------------- | ----------------------------------------------------------------------- |
+| React Native               | `>=0.77.0` (the `react-native-nitro-modules` `0.37` minimum)            |
+| React                      | Any version your React Native release supports                          |
+| React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                      |
+| Expo                       | SDK `>=53` development builds                                           |
+| iOS                        | React Native's `min_ios_version_supported` (`15.1` on RN `0.77`–`0.86`) |
+| Android                    | compileSdk `35`, Android Gradle Plugin `8.6`, and Kotlin `2.0` or later |
 
 ### Compatibility
 
-The package is tested on React Native `0.86.3` with Expo SDK `57`. It supports
-React Native `0.76` or later and Expo SDK `52` or later.
-
-React Native `0.76` and Expo SDK `52` apps must set the Android `ndkVersion` to
-`27` or later, because `react-native-nitro-modules` `0.37` requires NDK r27.
-Their templates default to NDK `26.1`. In Expo SDK `52`, set it through
-`expo-build-properties`:
-
-```js
-["expo-build-properties", { android: { ndkVersion: "27.1.12297006" } }];
-```
-
-In a bare React Native `0.76` app, set `ndkVersion = "27.1.12297006"` in the
-`ext` block of `android/build.gradle`.
+The package supports React Native `0.77` or later and Expo SDK `53` or later,
+the minimum that `react-native-nitro-modules` `0.37` builds on. It is tested on
+React Native `0.86.3` with Expo SDK `57`: the example app and the release gate
+use that version. Older supported versions are not built by the release gate;
+the example app's compileSdk `36` and iOS `16.4` settings are its own choices,
+not package requirements.
 
 iOS static frameworks are supported with source-built React Native. After
 upgrading, regenerate the Expo native project or run `pod install`, then rebuild
@@ -242,7 +234,10 @@ The Android value is not the Azure portal's default Android redirect
 (`msauth://<package>/<signature-hash>`). Add it as a custom redirect URI of a
 "Mobile and desktop applications" platform.
 
-The Expo plugin registers both schemes. For a bare Android app, add string
+The Expo plugin registers both schemes. The Android filter uses the
+`${applicationId}` manifest placeholder, so `applicationIdSuffix` and product
+flavors get a matching host; register one redirect URI per final application
+ID. For a bare Android app, add string
 resources `nitro_auth_microsoft_client_id` (and optionally
 `nitro_auth_microsoft_tenant` and `nitro_auth_microsoft_b2c_domain`), then add
 this intent filter to `com.auth.MicrosoftAuthActivity` in the app manifest:
@@ -255,7 +250,7 @@ this intent filter to `com.auth.MicrosoftAuthActivity` in the app manifest:
     <category android:name="android.intent.category.BROWSABLE" />
     <data
       android:scheme="msauth"
-      android:host="com.company.myapp"
+      android:host="${applicationId}"
       android:path="/YOUR_MICROSOFT_CLIENT_ID" />
   </intent-filter>
 </activity>
@@ -458,8 +453,6 @@ Supported login options:
 - Google `useSheet` and `forceAccountPicker` on iOS sign out of the local
   Google SDK session before sign-in so the account picker shows. They do not
   revoke the app's grant; only `revokeAccess()` does.
-- Google `hostedDomain` on Android uses the Credential Manager "Sign in with
-  Google" option, which always shows the account picker.
 
 ### Session operations
 
@@ -479,8 +472,8 @@ Supported login options:
   Google or Microsoft credentials when supported.
 - On iOS and Android, `refreshToken()` (and `getAccessToken()` when it has to
   refresh) rejects with `operation_in_progress` while a `login()`,
-  `requestScopes()`, or `silentRestore()` is pending. It never cancels that
-  operation. Retry after it settles.
+  `requestScopes()`, `silentRestore()`, or `revokeAccess()` is pending. It
+  never cancels that operation. Retry after it settles.
 - `refreshToken()` supports Google and Microsoft. Apple token exchange and
   refresh belong on your backend. Native Apple sessions reject `refreshToken()`
   and `requestScopes()` with `unsupported_provider` while preserving the session.
@@ -610,8 +603,9 @@ platform. Android Google never returns an OAuth access token, so its
 `expirationTime` uses the ID-token `exp` claim as a documented fallback and
 `getAccessToken()` stays `undefined`.
 
-Google `hostedDomain` is returned from the requested configuration. Android
-keeps that non-secret value across module/process recreation only when the
+Google `hostedDomain` on Android Credential Manager sessions is the ID token's
+`hd` claim, or the requested value when the token has none; other paths return
+the requested configuration. Android keeps that non-secret value across module/process recreation only when the
 restored Google account identity matches; logout or account replacement clears
 it. iOS uses the restored Google account configuration, and web reports the
 provider token claim when present.
@@ -770,10 +764,9 @@ The native package gate and Expo example use React Native `0.86.3`. The
 that compatibility check does not change the runtime baseline. Expo SDK
 `57.0.26` selects React Native `0.86.3`; do not override it in an Expo app.
 
-Package peer ranges: `react-native >=0.76.0`, `react-native-nitro-modules
-
-> =0.37.0 <0.38.0`, and optional `expo >=52.0.0`, `expo-constants`, and
-`react-native-svg >=15.8.0`.
+Package peer ranges: `react-native >=0.77.0`,
+`react-native-nitro-modules >=0.37.0 <0.38.0`, and optional `expo >=53.0.0`,
+`expo-constants`, and `react-native-svg >=15.8.0`.
 
 ### Migrating to 0.13
 
@@ -794,10 +787,12 @@ Package peer ranges: `react-native >=0.76.0`, `react-native-nitro-modules
 - `expo-build-properties` is no longer installed with this package. Apps that
   configure it in `plugins` must list it in their own `dependencies`
   (`bunx expo install expo-build-properties`).
-- The peer range is now `react-native >=0.76.0`. React Native `0.76` and Expo
-  SDK `52` apps must set NDK `27` or later (see [Compatibility](#compatibility)).
+- The peer range is now `react-native >=0.77.0` (Expo SDK `53` or later), the
+  minimum that `react-native-nitro-modules` `0.37` builds on. React Native
+  `0.75` and `0.76` apps must upgrade first.
 - Native `refreshToken()` and near-expiry `getAccessToken()` reject with
-  `operation_in_progress` while a login, scope request, or restore is pending.
+  `operation_in_progress` while a login, scope request, restore, or
+  `revokeAccess()` is pending.
   Catch that code and retry after the pending operation settles.
 - Bare Android apps that use Microsoft login must add the
   `com.auth.MicrosoftAuthActivity` intent filter shown in
