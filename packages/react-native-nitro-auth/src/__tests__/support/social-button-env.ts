@@ -17,6 +17,8 @@ type MockHostProps = {
   importantForAccessibility?: string;
   children?: ReactNode;
   disabled?: boolean;
+  hitSlop?: unknown;
+  numberOfLines?: number;
   onPress?: () => void;
   pointerEvents?: string;
   resizeMode?: string;
@@ -65,6 +67,8 @@ export function createReactNativeMock() {
       disabled,
       allowFontScaling: _allowFontScaling,
       importantForAccessibility: _importantForAccessibility,
+      hitSlop: _hitSlop,
+      numberOfLines: _numberOfLines,
       onPress,
       pointerEvents: _pointerEvents,
       style,

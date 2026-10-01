@@ -667,6 +667,7 @@ describe("AuthModule (web)", () => {
     });
     const { logger } = await import("../utils/logger");
     const warningSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const debugSpy = jest.spyOn(console, "debug").mockImplementation(() => {});
     logger.setEnabled(true);
 
     try {
@@ -690,9 +691,20 @@ describe("AuthModule (web)", () => {
         "Failed to inspect cached auth user in browser storage",
         expect.objectContaining({ mode: "local", error: "SecurityError" }),
       );
+      expect(debugSpy).toHaveBeenCalledTimes(1);
+      expect(debugSpy).toHaveBeenCalledWith(
+        "[NitroAuth]",
+        "Failed to clear persisted browser value",
+        expect.objectContaining({
+          key: "nitro_auth_microsoft_refresh_token",
+          mode: "local",
+          error: "SecurityError",
+        }),
+      );
     } finally {
       logger.setEnabled(false);
       warningSpy.mockRestore();
+      debugSpy.mockRestore();
       if (storageDescriptor) {
         Object.defineProperty(window, "localStorage", storageDescriptor);
       } else {
