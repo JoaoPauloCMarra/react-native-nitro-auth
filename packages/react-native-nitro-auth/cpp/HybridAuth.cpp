@@ -678,7 +678,7 @@ std::shared_ptr<Promise<std::optional<std::string>>> HybridAuth::getAccessToken(
       cachedAccessToken = _currentUser->accessToken;
       if (_currentUser->expirationTime) {
         auto now = std::chrono::system_clock::now().time_since_epoch() / std::chrono::milliseconds(1);
-        if (now + 300000 > *_currentUser->expirationTime) needsRefresh = true;
+        if (static_cast<double>(now + 300000) > *_currentUser->expirationTime) needsRefresh = true;
       }
       if (!needsRefresh) {
         promise->resolve(*_currentUser->accessToken);

@@ -49,7 +49,7 @@ public class AuthAdapter: NSObject {
     }
   }
 
-  static let defaultMicrosoftScopes = ["openid", "email", "profile", "offline_access", "User.Read"]
+  static let defaultMicrosoftScopes = AuthCore.defaultMicrosoftScopes
   static var inMemoryMicrosoftRefreshToken: String?
   static var inMemoryMicrosoftScopes: [String] = defaultMicrosoftScopes
   static var inMemoryGoogleServerAuthCode: String?
@@ -62,28 +62,17 @@ public class AuthAdapter: NSObject {
   static var authEpoch: UInt64 = 0
   static var activeOperation: AuthOperationToken?
 
-  static let formUrlEncodedAllowedCharacters = CharacterSet(
-    charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
-  )
+  static let formUrlEncodedAllowedCharacters = AuthCore.formUrlEncodedAllowedCharacters
 
   @objc
   public static func createNonce() -> NSDictionary? {
-    var randomBytes = [UInt8](repeating: 0, count: 32)
-    guard SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes) == errSecSuccess else {
+    guard let nonce = AuthCore.createNonce(
+      random: { bytes in SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess },
+      sha256Hex: { NitroAuthSha256Hex($0, $1, $2, $3) }
+    ) else {
       return nil
     }
-
-    let raw = Data(randomBytes).base64EncodedString()
-      .replacingOccurrences(of: "+", with: "-")
-      .replacingOccurrences(of: "/", with: "_")
-      .replacingOccurrences(of: "=", with: "")
-    var hashedChars = [CChar](repeating: 0, count: 65)
-    let hashStatus = raw.withCString { pointer in
-      NitroAuthSha256Hex(pointer, raw.utf8.count, &hashedChars, hashedChars.count)
-    }
-    guard hashStatus == 0 else { return nil }
-    let hashed = String(cString: hashedChars)
-    return ["raw": raw, "hashed": hashed] as NSDictionary
+    return ["raw": nonce.raw, "hashed": nonce.hashed] as NSDictionary
   }
 
   static func advanceOperation() -> AuthOperationToken {
@@ -309,9 +298,7 @@ public class AuthAdapter: NSObject {
       completion(nil, NSNumber(value: PlatformAuthErrorCode.notSignedIn.rawValue), nil)
       return
     }
-    let mergedScopes = (currentScopes + scopes).reduce(into: [String]()) { acc, s in
-      if !acc.contains(s) { acc.append(s) }
-    }
+    let mergedScopes = AuthCore.mergedScopes(currentScopes, adding: scopes)
     loginMicrosoft(scopes: mergedScopes, loginHint: nil, tenant: nil, prompt: nil, operation: operation, completion: completion)
   }
 
@@ -335,7 +322,7 @@ public class AuthAdapter: NSObject {
         let data: [String: Any] = [
           "accessToken": user.accessToken.tokenString,
           "idToken": user.idToken?.tokenString ?? "",
-          "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000,
+          "expirationTime": AuthCore.googleExpirationTime(user.accessToken.expirationDate),
         ]
         completion(data as NSDictionary, nil, nil)
       }
@@ -374,7 +361,7 @@ public class AuthAdapter: NSObject {
           "serverAuthCode": cachedServerAuthCode ?? "",
           "userId": user.userID ?? "",
           "hostedDomain": user.configuration.hostedDomain ?? "",
-          "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000
+          "expirationTime": AuthCore.googleExpirationTime(user.accessToken.expirationDate)
           ]
           completion(data as NSDictionary, nil, nil)
           return

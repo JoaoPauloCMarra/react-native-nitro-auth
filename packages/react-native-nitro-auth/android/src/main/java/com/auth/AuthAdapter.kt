@@ -2,7 +2,7 @@
 
 package com.auth
 
-import com.margelo.nitro.com.auth.HybridNativeAuthAdapter
+import com.margelo.nitro.com.auth.ProviderRequestRegistry
 
 import android.app.Activity
 import android.app.Application
@@ -152,6 +152,8 @@ object AuthAdapter {
     private val googleRevokeState = GoogleRevokeState()
     @JvmField
     internal var nativeRevokeResultSink: ((Int?, String?, Long) -> Unit)? = null
+    @JvmField
+    internal var appleBrokerFactory: (AppleAndroidBrokerConfig) -> AppleAndroidBroker = { AppleAndroidBroker(it) }
     private var googleCredentialCleanup: GoogleCredentialCleanup? = null
     @Volatile
     private var inMemoryOneTapSession: OneTapSession? = null
@@ -189,10 +191,10 @@ object AuthAdapter {
         scopes: Array<String>?,
         expirationTime: Long?,
         generation: Long,
-    ): Boolean = HybridNativeAuthAdapter.loginSuccess(origin, provider, email, name, firstName, lastName, photo, idToken, accessToken, serverAuthCode, userId, phoneNumber, hostedDomain, scopes, expirationTime, generation)
+    ): Boolean = ProviderRequestRegistry.loginSuccess(origin, provider, email, name, firstName, lastName, photo, idToken, accessToken, serverAuthCode, userId, phoneNumber, hostedDomain, scopes, expirationTime, generation)
 
     @JvmStatic
-    private fun nativeOnLoginError(origin: String, code: Int, underlyingError: String?, generation: Long): Boolean = HybridNativeAuthAdapter.loginError(origin, code, underlyingError, generation)
+    private fun nativeOnLoginError(origin: String, code: Int, underlyingError: String?, generation: Long): Boolean = ProviderRequestRegistry.loginError(origin, code, underlyingError, generation)
 
     @JvmStatic
     fun createNonce(): Array<String> {
@@ -215,12 +217,12 @@ object AuthAdapter {
     }
 
     @JvmStatic
-    private fun nativeOnRefreshSuccess(idToken: String?, accessToken: String?, expirationTime: Long?, generation: Long): Boolean = HybridNativeAuthAdapter.refreshSuccess(idToken, accessToken, expirationTime, generation)
+    private fun nativeOnRefreshSuccess(idToken: String?, accessToken: String?, expirationTime: Long?, generation: Long): Boolean = ProviderRequestRegistry.refreshSuccess(idToken, accessToken, expirationTime, generation)
 
     @JvmStatic
-    private fun nativeOnRefreshError(code: Int, underlyingError: String?, generation: Long): Boolean = HybridNativeAuthAdapter.refreshError(code, underlyingError, generation)
+    private fun nativeOnRefreshError(code: Int, underlyingError: String?, generation: Long): Boolean = ProviderRequestRegistry.refreshError(code, underlyingError, generation)
     @JvmStatic
-    private fun nativeOnRevokeAccessResult(code: Int?, underlyingError: String?, generation: Long): Boolean = HybridNativeAuthAdapter.revokeResult(code, underlyingError, generation)
+    private fun nativeOnRevokeAccessResult(code: Int?, underlyingError: String?, generation: Long): Boolean = ProviderRequestRegistry.revokeResult(code, underlyingError, generation)
 
     @Synchronized
     fun initialize(context: Context) {
@@ -349,7 +351,7 @@ object AuthAdapter {
         }
         moduleScope.cancel()
         moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        HybridNativeAuthAdapter.cancelAll()
+        ProviderRequestRegistry.cancelAll()
 
         val app = appContext as? Application
         lifecycleCallbacks?.let { app?.unregisterActivityLifecycleCallbacks(it) }
@@ -690,7 +692,7 @@ object AuthAdapter {
                 cleanupBarrier?.await()
                 if (!isCurrentAppleAuth(pending)) return@launch
 
-                val broker = AppleAndroidBroker(config)
+                val broker = appleBrokerFactory(config)
                 val attempt = broker.start(hashedNonce, code.challenge, pending.scopes)
                 val launched = withContext(Dispatchers.Main) {
                     val activity = currentActivity
@@ -790,7 +792,7 @@ object AuthAdapter {
         val (pending, attemptId) = current
         val job = moduleScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
             try {
-                val credential = AppleAndroidBroker(pending.config)
+                val credential = appleBrokerFactory(pending.config)
                     .complete(attemptId, pending.codeVerifier)
                 withContext(Dispatchers.Main) {
                     val active = synchronized(this@AuthAdapter) {
