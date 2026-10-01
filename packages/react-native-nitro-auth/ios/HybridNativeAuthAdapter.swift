@@ -45,8 +45,7 @@ final class HybridNativeAuthAdapter: HybridNativeAuthAdapterSpec {
   }
 
   private static func text(_ value: Any?) -> String? {
-    guard let value = value as? String, !value.isEmpty else { return nil }
-    return value
+    AuthCore.text(value)
   }
 
   private static func userResult(_ data: NSDictionary?, _ code: NSNumber?, _ detail: String?) -> ProviderUserResult {
@@ -55,11 +54,7 @@ final class HybridNativeAuthAdapter: HybridNativeAuthAdapterSpec {
           let provider = AuthProvider(fromString: providerName) else {
       return ProviderUserResult(user: nil, failure: ProviderFailure(code: .parseError, detail: nil))
     }
-    let stringFields = ["email", "name", "firstName", "lastName", "photo", "idToken", "accessToken",
-                        "refreshToken", "serverAuthCode", "authorizationCode", "userId", "phoneNumber", "hostedDomain"]
-    guard stringFields.allSatisfy({ data[$0] == nil || data[$0] is NSNull || data[$0] is String }),
-          data["scopes"] == nil || data["scopes"] is NSNull || data["scopes"] is [String],
-          data["expirationTime"] == nil || data["expirationTime"] is NSNull || data["expirationTime"] is NSNumber else {
+    guard AuthCore.hasValidUserFieldTypes(data) else {
       return ProviderUserResult(user: nil, failure: ProviderFailure(code: .parseError, detail: nil))
     }
     let user = AuthUser(provider: provider, email: text(data["email"]), name: text(data["name"]),
@@ -68,7 +63,7 @@ final class HybridNativeAuthAdapter: HybridNativeAuthAdapterSpec {
       refreshToken: text(data["refreshToken"]), serverAuthCode: text(data["serverAuthCode"]),
       authorizationCode: text(data["authorizationCode"]), userId: text(data["userId"]),
       phoneNumber: text(data["phoneNumber"]), hostedDomain: text(data["hostedDomain"]),
-      scopes: data["scopes"] as? [String], expirationTime: (data["expirationTime"] as? NSNumber)?.doubleValue,
+      scopes: data["scopes"] as? [String], expirationTime: AuthCore.expirationTime(data["expirationTime"]),
       underlyingError: nil)
     return ProviderUserResult(user: user, failure: nil)
   }
@@ -108,7 +103,7 @@ final class HybridNativeAuthAdapter: HybridNativeAuthAdapterSpec {
         guard let data else { finish(ProviderTokenResult(tokens: nil, failure: ProviderFailure(code: .parseError, detail: nil))); return }
         finish(ProviderTokenResult(tokens: AuthTokens(accessToken: Self.text(data["accessToken"]),
           idToken: Self.text(data["idToken"]), refreshToken: Self.text(data["refreshToken"]),
-          expirationTime: (data["expirationTime"] as? NSNumber)?.doubleValue), failure: nil))
+          expirationTime: AuthCore.expirationTime(data["expirationTime"])), failure: nil))
       }
     }
   }

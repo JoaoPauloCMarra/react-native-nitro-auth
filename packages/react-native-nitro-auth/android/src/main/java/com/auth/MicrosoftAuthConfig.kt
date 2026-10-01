@@ -2,6 +2,7 @@ package com.auth
 
 import android.util.Base64
 import android.util.Log
+import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
@@ -45,6 +46,8 @@ internal object MicrosoftAuthConfig {
             val json = JSONObject(payload)
             val result = mutableMapOf<String, String>()
             json.keys().forEach { key ->
+                val raw = json.opt(key)
+                if (raw == null || raw == JSONObject.NULL || raw is JSONObject || raw is JSONArray) return@forEach
                 val value = json.optString(key)
                 if (value.isNotEmpty()) result[key] = value
             }

@@ -1,6 +1,6 @@
 import Foundation
 import AuthenticationServices
-import CommonCrypto
+import Security
 
 extension AuthAdapter {
   static func loginMicrosoft(scopes: [String], loginHint: String?, tenant: String?, prompt: String?, operation: AuthAdapter.AuthOperationToken, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
@@ -10,8 +10,8 @@ extension AuthAdapter {
     }
     let effectiveTenant = tenant ?? Bundle.main.object(forInfoDictionaryKey: "MSALTenant") as? String ?? "common"
     let bundleId = Bundle.main.bundleIdentifier ?? ""
-    let redirectUri = "msauth.\(bundleId)://auth"
-    let effectiveScopes = scopes.isEmpty ? ["openid", "email", "profile", "offline_access", "User.Read"] : scopes
+    let redirectUri = AuthCore.microsoftRedirectUri(bundleId: bundleId)
+    let effectiveScopes = scopes.isEmpty ? AuthCore.defaultMicrosoftScopes : scopes
     let effectivePrompt = prompt ?? "select_account"
 
     guard let codeVerifier = generateCodeVerifier() else {
@@ -31,33 +31,22 @@ extension AuthAdapter {
       return
     }
 
-    guard var urlComponents = URLComponents(string: "\(authBaseUrl)oauth2/v2.0/authorize") else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
-      return
-    }
-    urlComponents.queryItems = [
-      URLQueryItem(name: "client_id", value: clientId),
-      URLQueryItem(name: "redirect_uri", value: redirectUri),
-      URLQueryItem(name: "response_type", value: "code"),
-      URLQueryItem(name: "response_mode", value: "query"),
-      URLQueryItem(name: "scope", value: effectiveScopes.joined(separator: " ")),
-      URLQueryItem(name: "state", value: state),
-      URLQueryItem(name: "nonce", value: nonce),
-      URLQueryItem(name: "code_challenge", value: codeChallenge),
-      URLQueryItem(name: "code_challenge_method", value: "S256"),
-      URLQueryItem(name: "prompt", value: effectivePrompt)
-    ]
-
-    if let hint = loginHint {
-      urlComponents.queryItems?.append(URLQueryItem(name: "login_hint", value: hint))
-    }
-
-    guard let authUrl = urlComponents.url else {
+    guard let authUrl = AuthCore.microsoftAuthorizeUrl(
+      authBaseUrl: authBaseUrl,
+      clientId: clientId,
+      redirectUri: redirectUri,
+      scopes: effectiveScopes,
+      state: state,
+      nonce: nonce,
+      codeChallenge: codeChallenge,
+      prompt: effectivePrompt,
+      loginHint: loginHint
+    ) else {
       completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       return
     }
 
-    let callbackScheme = "msauth.\(bundleId)"
+    let callbackScheme = AuthCore.microsoftCallbackScheme(bundleId: bundleId)
 
     DispatchQueue.main.async {
       guard self.isCurrentOperation(operation) else {
@@ -82,41 +71,22 @@ extension AuthAdapter {
       let session = ASWebAuthenticationSession(url: authUrl, callbackURLScheme: callbackScheme) { callbackURL, error in
         if let error = error {
           let nsError = error as NSError
-          if nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
-            completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nsError.localizedDescription)
-          } else if nsError.domain.lowercased().contains("network") || nsError.code == NSURLErrorNotConnectedToInternet {
-            completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nsError.localizedDescription)
-          } else {
-            completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.unknown.rawValue), nsError.localizedDescription)
-          }
+          let mapped = AuthCore.mapWebAuthSessionError(
+            nsError,
+            webAuthSessionErrorDomain: ASWebAuthenticationSessionErrorDomain,
+            canceledLoginCode: ASWebAuthenticationSessionError.canceledLogin.rawValue
+          )
+          completeAndClearSession(nil, NSNumber(value: mapped.rawValue), nsError.localizedDescription)
           return
         }
 
-        guard let callbackURL = callbackURL,
-              let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
-          completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.unknown.rawValue), nil)
+        let code: String
+        switch AuthCore.classifyMicrosoftCallback(callbackURL, expectedState: state) {
+        case .failure(let failureCode, let detail):
+          completeAndClearSession(nil, NSNumber(value: failureCode.rawValue), detail)
           return
-        }
-
-        var params: [String: String] = [:]
-        for item in components.queryItems ?? [] {
-          params[item.name] = item.value
-        }
-
-        guard let returnedState = params["state"], returnedState == state else {
-          completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.invalidState.rawValue), nil)
-          return
-        }
-
-        if let errorCode = params["error"] {
-          let mapped = mapOAuthError(errorCode, context: "authorize")
-          completeAndClearSession(nil, NSNumber(value: mapped.rawValue), params["error_description"])
-          return
-        }
-
-        guard let code = params["code"] else {
-          completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.tokenError.rawValue), nil)
-          return
+        case .code(let authorizationCode):
+          code = authorizationCode
         }
 
         guard self.isCurrentOperation(operation) else {
@@ -156,37 +126,17 @@ extension AuthAdapter {
   }
 
   static func generateCodeVerifier() -> String? {
-    var bytes = [UInt8](repeating: 0, count: 32)
-    guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-      return nil
+    AuthCore.generateCodeVerifier { bytes in
+      SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess
     }
-    return Data(bytes).base64EncodedString()
-      .replacingOccurrences(of: "+", with: "-")
-      .replacingOccurrences(of: "/", with: "_")
-      .replacingOccurrences(of: "=", with: "")
   }
 
   static func generateCodeChallenge(_ verifier: String) -> String? {
-    guard let data = verifier.data(using: .ascii) else { return nil }
-    var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-    data.withUnsafeBytes {
-      _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &hash)
-    }
-    return Data(hash).base64EncodedString()
-      .replacingOccurrences(of: "+", with: "-")
-      .replacingOccurrences(of: "/", with: "_")
-      .replacingOccurrences(of: "=", with: "")
+    AuthCore.generateCodeChallenge(verifier)
   }
 
   static func formUrlEncodedBody(_ params: [String: String]) -> Data? {
-    params
-      .map { key, value in
-        let encodedKey = key.addingPercentEncoding(withAllowedCharacters: formUrlEncodedAllowedCharacters) ?? key
-        let encodedValue = value.addingPercentEncoding(withAllowedCharacters: formUrlEncodedAllowedCharacters) ?? value
-        return "\(encodedKey)=\(encodedValue)"
-      }
-      .joined(separator: "&")
-      .data(using: .utf8)
+    AuthCore.formUrlEncodedBody(params)
   }
 
   static func exchangeCodeForTokens(
@@ -206,7 +156,7 @@ extension AuthAdapter {
       return
     }
     guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
-          let tokenUrl = URL(string: "\(authBaseUrl)oauth2/v2.0/token") else {
+          let tokenUrl = AuthCore.microsoftTokenUrl(authBaseUrl: authBaseUrl) else {
       DispatchQueue.main.async {
         guard self.isCurrentOperation(operation) else {
           completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
@@ -242,41 +192,21 @@ extension AuthAdapter {
           return
         }
 
-        guard let data = data,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-          if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-            completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nil)
-          } else {
-            completion(nil, NSNumber(value: PlatformAuthErrorCode.parseError.rawValue), nil)
-          }
+        let tokens: AuthCore.MicrosoftTokens
+        switch AuthCore.parseMicrosoftCodeExchange(
+          data: data,
+          statusCode: (response as? HTTPURLResponse)?.statusCode,
+          expectedNonce: expectedNonce,
+          nowSeconds: Date().timeIntervalSince1970,
+          decodeJwt: { decodeJwt($0) }
+        ) {
+        case .failure(let failureCode, let detail):
+          completion(nil, NSNumber(value: failureCode.rawValue), detail)
           return
+        case .success(let parsed):
+          tokens = parsed
         }
-
-        if let errorCode = json["error"] as? String {
-          completion(nil, NSNumber(value: mapOAuthError(errorCode, context: "token").rawValue), json["error_description"] as? String)
-          return
-        }
-
-        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nil)
-          return
-        }
-
-        guard let idToken = json["id_token"] as? String else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.noIdToken.rawValue), nil)
-          return
-        }
-
-        let claims = decodeJwt(idToken)
-        guard claims["nonce"] == expectedNonce else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.invalidNonce.rawValue), nil)
-          return
-        }
-
-        let accessToken = json["access_token"] as? String ?? ""
-        let refreshToken = json["refresh_token"] as? String ?? ""
-        let expiresIn = (json["expires_in"] as? Double).flatMap { $0 > 0 ? $0 : nil } ?? 3600.0
-        let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
+        let refreshToken = tokens.refreshToken
 
         let resultScopes = scopes.isEmpty ? defaultMicrosoftScopes : scopes
         guard self.commitCurrentOperation(operation, {
@@ -293,55 +223,13 @@ extension AuthAdapter {
           return
         }
 
-        let resultData: [String: Any] = [
-          "provider": "microsoft",
-          "email": claims["preferred_username"] ?? claims["email"] ?? "",
-          "name": claims["name"] ?? "",
-          "photo": "",
-          "idToken": idToken,
-          "accessToken": accessToken,
-          "serverAuthCode": "",
-          "scopes": resultScopes,
-          "expirationTime": expirationTime,
-        ]
-        completion(resultData as NSDictionary, nil, nil)
+        completion(AuthCore.microsoftUserData(tokens, scopes: resultScopes) as NSDictionary, nil, nil)
       }
     }.resume()
   }
 
   static func decodeJwt(_ token: String) -> [String: String] {
-    var payloadChars = [CChar](repeating: 0, count: max(token.utf8.count * 2, 8))
-    let written = token.withCString { pointer in
-      NitroAuthJwtPayloadJson(pointer, &payloadChars, payloadChars.count)
-    }
-    guard written >= 0 else { return [:] }
-    let payload = String(cString: payloadChars)
-    guard let data = payload.data(using: .utf8),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      return [:]
-    }
-
-    var result: [String: String] = [:]
-    for (key, value) in json {
-      if let string = jwtClaimString(value) {
-        result[key] = string
-      }
-    }
-    return result
-  }
-
-  private static func jwtClaimString(_ value: Any) -> String? {
-    if let string = value as? String {
-      return string
-    }
-    if let number = value as? NSNumber {
-      let objCType = String(cString: number.objCType)
-      if objCType == "c" || objCType == "B" {
-        return number.boolValue ? "true" : "false"
-      }
-      return number.stringValue
-    }
-    return nil
+    AuthCore.decodeJwt(token) { NitroAuthJwtPayloadJson($0, $1, $2) }
   }
 
   static func requestMicrosoftTokenRefresh(
@@ -361,7 +249,7 @@ extension AuthAdapter {
     let tenant = Bundle.main.object(forInfoDictionaryKey: "MSALTenant") as? String ?? "common"
     let b2cDomain = Bundle.main.object(forInfoDictionaryKey: "MSALB2cDomain") as? String
     guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
-          let tokenUrl = URL(string: "\(authBaseUrl)oauth2/v2.0/token") else {
+          let tokenUrl = AuthCore.microsoftTokenUrl(authBaseUrl: authBaseUrl) else {
       completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       return
     }
@@ -379,7 +267,7 @@ extension AuthAdapter {
   }
 
   static func clearMicrosoftRefreshTokenOnClientError(_ statusCode: Int, operation: AuthAdapter.AuthOperationToken) {
-    guard (400...499).contains(statusCode), statusCode != 408, statusCode != 429 else { return }
+    guard AuthCore.shouldClearMicrosoftRefreshToken(statusCode: statusCode) else { return }
     _ = commitCurrentOperation(operation) {
       inMemoryMicrosoftRefreshToken = nil
     }
@@ -407,29 +295,24 @@ extension AuthAdapter {
         completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), error.localizedDescription)
         return
       }
-      if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-        clearMicrosoftRefreshTokenOnClientError(httpResponse.statusCode, operation: operation)
-        if let data = data,
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let errorCode = json["error"] as? String {
-          completion(nil, NSNumber(value: mapOAuthError(errorCode, context: "refresh").rawValue), json["error_description"] as? String)
-        } else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nil)
-        }
-        return
+      let statusCode = (response as? HTTPURLResponse)?.statusCode
+      if let statusCode = statusCode, !(200...299).contains(statusCode) {
+        clearMicrosoftRefreshTokenOnClientError(statusCode, operation: operation)
       }
-      guard let data = data,
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let idToken = json["id_token"] as? String else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.parseError.rawValue), nil)
+      let tokens: AuthCore.MicrosoftTokens
+      switch AuthCore.parseMicrosoftSilentRefresh(
+        data: data,
+        statusCode: statusCode,
+        nowSeconds: Date().timeIntervalSince1970,
+        decodeJwt: { decodeJwt($0) }
+      ) {
+      case .failure(let failureCode, let detail):
+        completion(nil, NSNumber(value: failureCode.rawValue), detail)
         return
+      case .success(let parsed):
+        tokens = parsed
       }
-
-      let claims = decodeJwt(idToken)
-      let accessToken = json["access_token"] as? String ?? ""
-      let newRefreshToken = json["refresh_token"] as? String ?? ""
-      let expiresIn = (json["expires_in"] as? Double).flatMap { $0 > 0 ? $0 : nil } ?? 3600.0
-      let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
+      let newRefreshToken = tokens.refreshToken
 
       guard self.commitCurrentOperation(operation, {
         if !newRefreshToken.isEmpty {
@@ -444,18 +327,7 @@ extension AuthAdapter {
         return
       }
 
-      let resultData: [String: Any] = [
-        "provider": "microsoft",
-        "email": claims["preferred_username"] ?? claims["email"] ?? "",
-        "name": claims["name"] ?? "",
-        "photo": "",
-        "idToken": idToken,
-        "accessToken": accessToken,
-        "serverAuthCode": "",
-        "scopes": currentScopes,
-        "expirationTime": expirationTime
-      ]
-      completion(resultData as NSDictionary, nil, nil)
+      completion(AuthCore.microsoftUserData(tokens, scopes: currentScopes) as NSDictionary, nil, nil)
     }
   }
 
@@ -479,28 +351,19 @@ extension AuthAdapter {
       if let httpResponse = response as? HTTPURLResponse {
         clearMicrosoftRefreshTokenOnClientError(httpResponse.statusCode, operation: operation)
       }
-      guard let data = data,
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nil)
-        } else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.parseError.rawValue), nil)
-        }
+      let tokens: AuthCore.MicrosoftTokens
+      switch AuthCore.parseMicrosoftTokenRefresh(
+        data: data,
+        statusCode: (response as? HTTPURLResponse)?.statusCode,
+        nowSeconds: Date().timeIntervalSince1970
+      ) {
+      case .failure(let failureCode, let detail):
+        completion(nil, NSNumber(value: failureCode.rawValue), detail)
         return
+      case .success(let parsed):
+        tokens = parsed
       }
-      if let errorCode = json["error"] as? String {
-        completion(nil, NSNumber(value: mapOAuthError(errorCode, context: "refresh").rawValue), json["error_description"] as? String)
-        return
-      }
-      if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), nil)
-        return
-      }
-      let idToken = json["id_token"] as? String ?? ""
-      let accessToken = json["access_token"] as? String ?? ""
-      let newRefreshToken = json["refresh_token"] as? String ?? ""
-      let expiresIn = (json["expires_in"] as? Double).flatMap { $0 > 0 ? $0 : nil } ?? 3600.0
-      let expirationTime = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
+      let newRefreshToken = tokens.refreshToken
       guard self.commitCurrentOperation(operation, {
         if !newRefreshToken.isEmpty {
           inMemoryMicrosoftRefreshToken = newRefreshToken
@@ -513,72 +376,11 @@ extension AuthAdapter {
         completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
-      let tokensData: [String: Any] = [
-        "accessToken": accessToken,
-        "idToken": idToken,
-        "expirationTime": expirationTime,
-      ]
-      completion(tokensData as NSDictionary, nil, nil)
+      completion(AuthCore.microsoftTokensData(tokens) as NSDictionary, nil, nil)
     }
   }
 
   static func getMicrosoftAuthBaseUrl(tenant: String, b2cDomain: String?) -> String? {
-    let trimmedTenant = tenant.trimmingCharacters(in: .whitespacesAndNewlines)
-
-    if let domain = b2cDomain?.trimmingCharacters(in: .whitespacesAndNewlines), !domain.isEmpty {
-      let normalizedDomain = domain.lowercased()
-      guard isValidMicrosoftDomain(normalizedDomain) else { return nil }
-      guard let b2cTenantPath = getMicrosoftB2cTenantPath(trimmedTenant, domain: normalizedDomain) else { return nil }
-      return "https://\(normalizedDomain)/\(b2cTenantPath)/"
-    }
-    guard isValidMicrosoftTenant(trimmedTenant) else { return nil }
-    return "https://login.microsoftonline.com/\(trimmedTenant)/"
-  }
-
-  private static func isValidMicrosoftTenant(_ value: String) -> Bool {
-    return value.range(
-      of: #"^(common|organizations|consumers|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})$"#,
-      options: .regularExpression
-    ) != nil
-  }
-
-  private static func getMicrosoftB2cTenantPath(_ value: String, domain: String) -> String? {
-    if isValidMicrosoftB2cTenantPath(value) {
-      return value
-    }
-    guard isValidMicrosoftB2cPolicy(value),
-          let tenantName = getMicrosoftB2cTenantName(domain) else { return nil }
-    return "\(tenantName).onmicrosoft.com/\(value)"
-  }
-
-  private static func getMicrosoftB2cTenantName(_ domain: String) -> String? {
-    let suffix = ".b2clogin.com"
-    guard domain.hasSuffix(suffix) else { return nil }
-    let tenantName = String(domain.dropLast(suffix.count))
-    return tenantName.range(
-      of: #"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"#,
-      options: .regularExpression
-    ) != nil ? tenantName : nil
-  }
-
-  private static func isValidMicrosoftB2cTenantPath(_ value: String) -> Bool {
-    return value.range(
-      of: #"^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"#,
-      options: .regularExpression
-    ) != nil
-  }
-
-  private static func isValidMicrosoftB2cPolicy(_ value: String) -> Bool {
-    return value.range(
-      of: #"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"#,
-      options: .regularExpression
-    ) != nil
-  }
-
-  private static func isValidMicrosoftDomain(_ value: String) -> Bool {
-    return value.range(
-      of: #"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$"#,
-      options: .regularExpression
-    ) != nil
+    AuthCore.getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain)
   }
 }

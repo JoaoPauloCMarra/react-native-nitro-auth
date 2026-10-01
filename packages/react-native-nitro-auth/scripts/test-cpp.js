@@ -4,6 +4,34 @@ const fs = require("fs");
 const path = require("path");
 
 const coverageEnabled = process.argv.includes("--coverage");
+const sanitizeEnabled = process.argv.includes("--sanitize");
+if (coverageEnabled && sanitizeEnabled) {
+  console.error("--coverage and --sanitize cannot be combined");
+  process.exit(1);
+}
+const sanitizerModes = sanitizeEnabled
+  ? [
+      {
+        name: "asan+ubsan",
+        flags: [
+          "-fsanitize=address,undefined",
+          "-fno-sanitize-recover=all",
+          "-fno-omit-frame-pointer",
+          "-g",
+          "-O1",
+        ],
+        env: {
+          ASAN_OPTIONS: "abort_on_error=1:strict_string_checks=1",
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1",
+        },
+      },
+      {
+        name: "tsan",
+        flags: ["-fsanitize=thread", "-fno-omit-frame-pointer", "-g", "-O1"],
+        env: { TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1" },
+      },
+    ]
+  : [{ name: null, flags: [], env: {} }];
 const coverageThreshold = 90;
 const includeDir = path.join(__dirname, "../cpp");
 const nitrogenDir = path.join(__dirname, "../nitrogen/generated/shared/c++");
@@ -27,6 +55,15 @@ const tests = [
     ],
     output: path.join(__dirname, "../cpp/__tests__/auth_crypto_tests"),
     coverageSources: [path.join(__dirname, "../cpp/AuthCrypto.cpp")],
+  },
+  {
+    name: "platform-auth",
+    sources: [
+      path.join(__dirname, "../cpp/PlatformAuth.cpp"),
+      path.join(__dirname, "../cpp/__tests__/PlatformAuthTests.cpp"),
+    ],
+    output: path.join(__dirname, "../cpp/__tests__/platform_auth_tests"),
+    coverageSources: [path.join(__dirname, "../cpp/PlatformAuth.cpp")],
   },
 ];
 
@@ -115,6 +152,7 @@ function assertCoverage(reportOutput) {
 
 for (const file of [
   "HybridObject.hpp",
+  "HybridObjectRegistry.hpp",
   "JSIConverter.hpp",
   "JSIHelpers.hpp",
   "NitroDefines.hpp",
@@ -136,57 +174,62 @@ const coverageProfiles = [];
 const coverageObjects = [];
 const coverageSources = new Set();
 
-for (const test of tests) {
-  console.log(`Compiling ${test.name} C++ tests...`);
-  const coverageFlags = coverageEnabled
-    ? ["-fprofile-instr-generate", "-fcoverage-mapping"]
-    : [];
-  const compile = spawnSync(
-    "clang++",
-    [
-      "-std=c++20",
-      ...coverageFlags,
-      "-I" + includeDir,
-      "-I" + nitrogenDir,
-      "-I" + mockIncludeDir,
-      ...test.sources,
-      "-o",
-      test.output,
-    ],
-    { stdio: "inherit" },
-  );
+for (const mode of sanitizerModes) {
+  for (const test of tests) {
+    const label = mode.name ? `${test.name} (${mode.name})` : test.name;
+    console.log(`Compiling ${label} C++ tests...`);
+    const coverageFlags = coverageEnabled
+      ? ["-fprofile-instr-generate", "-fcoverage-mapping"]
+      : [];
+    const compile = spawnSync(
+      "clang++",
+      [
+        "-std=c++20",
+        ...coverageFlags,
+        ...mode.flags,
+        "-I" + includeDir,
+        "-I" + nitrogenDir,
+        "-I" + mockIncludeDir,
+        ...test.sources,
+        "-o",
+        test.output,
+      ],
+      { stdio: "inherit" },
+    );
 
-  if (compile.status !== 0) {
-    console.error(`${test.name} compilation failed`);
-    process.exit(1);
-  }
-
-  console.log(`Running ${test.name} C++ tests...`);
-  const profilePath = path.join(coverageDir, `${test.name}.profraw`);
-  const run = spawnSync(test.output, [], {
-    stdio: "inherit",
-    env: coverageEnabled
-      ? { ...process.env, LLVM_PROFILE_FILE: profilePath }
-      : process.env,
-  });
-
-  if (run.status !== 0) {
-    console.error(`${test.name} tests failed`);
-    process.exit(1);
-  }
-
-  if (coverageEnabled) {
-    coverageProfiles.push(profilePath);
-    coverageObjects.push(test.output);
-    for (const source of test.coverageSources) {
-      coverageSources.add(source);
+    if (compile.status !== 0) {
+      console.error(`${label} compilation failed`);
+      process.exit(1);
     }
-  }
 
-  if (fs.existsSync(test.output)) {
-    if (!coverageEnabled) {
-      fs.unlinkSync(test.output);
+    console.log(`Running ${label} C++ tests...`);
+    const profilePath = path.join(coverageDir, `${test.name}.profraw`);
+    const run = spawnSync(test.output, [], {
+      stdio: "inherit",
+      env: coverageEnabled
+        ? { ...process.env, LLVM_PROFILE_FILE: profilePath }
+        : { ...process.env, ...mode.env },
+    });
+
+    if (run.status !== 0) {
+      console.error(`${label} tests failed`);
+      process.exit(1);
     }
+
+    if (coverageEnabled) {
+      coverageProfiles.push(profilePath);
+      coverageObjects.push(test.output);
+      for (const source of test.coverageSources) {
+        coverageSources.add(source);
+      }
+    }
+
+    if (fs.existsSync(test.output)) {
+      if (!coverageEnabled) {
+        fs.unlinkSync(test.output);
+      }
+    }
+    fs.rmSync(`${test.output}.dSYM`, { recursive: true, force: true });
   }
 }
 

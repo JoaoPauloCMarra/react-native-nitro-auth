@@ -29,6 +29,12 @@ text for control flow or forward it to telemetry without redaction. Web throws
 public `AuthError` envelope. `AuthUser.underlyingError` is deprecated and
 reserved for compatibility; structured details live on `AuthError`.
 
+A native detail travels as a C string. A detail that contains a NUL byte is cut
+at that byte; the code prefix is never affected. The shipped iOS and Android adapters report
+failures through provider results, which keep their code and detail. Any
+adapter failure outside that path is reported as `unknown` (or `configuration_error` when
+the adapter cannot be created or cannot create a nonce) without its message.
+
 Getters and subscription setup can fail without an operation. An existing
 `AuthError` is preserved unchanged by `AuthError.from()`, including its existing
 or missing operation.
@@ -73,6 +79,17 @@ failures as `token_error`; `refresh` surfaces them as `refresh_failed`.
 - Android Google never returns an OAuth access token; its `expirationTime`
   uses the documented ID-token `exp` fallback
   (`AuthAdapter.getGoogleExpirationTimeMs`).
+- Platform differences when the provider gives no usable expiry:
+  - Microsoft token response without a usable `expires_in`: iOS treats a
+    missing, zero, negative, or non-numeric value (a string, for example) as
+    3600 seconds and reports `expirationTime` as the current time plus that; Android reports no
+    `expirationTime` when the value is missing, zero, negative, or not readable
+    as an integer.
+  - Google session whose SDK token has no expiry date: iOS reports
+    `expirationTime` `0`, so `getAccessToken()` refreshes on every call;
+    Android reports no `expirationTime`.
+  - `getAccessToken()` refreshes near expiry only when `expirationTime` is
+    present, so a session without one is never refreshed automatically.
 - Typed capabilities are exported via
   `getProviderTokenCapabilities(provider, platform)` and the
   `ProviderTokenCapabilities` type. Android Google reports

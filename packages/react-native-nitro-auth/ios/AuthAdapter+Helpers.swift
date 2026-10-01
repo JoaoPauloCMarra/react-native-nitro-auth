@@ -14,12 +14,7 @@ extension AuthAdapter {
   /// token/grant failures as `tokenError`; "refresh" surfaces them as
   /// `refreshFailed`.
   static func mapOAuthError(_ oauthCode: String, context: String = "authorize") -> PlatformAuthErrorCode {
-    let normalized = oauthCode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    var code = oauthErrorCodes[normalized] ?? .unknown
-    if context == "refresh" && code == .tokenError {
-      code = .refreshFailed
-    }
-    return code
+    AuthCore.mapOAuthError(oauthCode, context: context)
   }
 
   static func activeWindow() -> UIWindow? {

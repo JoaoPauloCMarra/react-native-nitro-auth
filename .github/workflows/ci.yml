@@ -71,6 +71,12 @@ jobs:
       - name: C++ coverage
         run: bun run --cwd packages/react-native-nitro-auth test:cpp:coverage
 
+      - name: C++ sanitizers
+        run: bun run test:cpp:sanitize
+
+      - name: Swift unit tests
+        run: bun run test:swift
+
       - name: Test lifecycle and release contracts
         run: bun run test:lifecycle
 
@@ -82,3 +88,24 @@ jobs:
 
       - name: Validate auth-free publication
         run: bun run publish-package:dry-run
+
+  linux-preflight:
+    name: Linux release gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install native test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm
+      - run: bun install --frozen-lockfile
+      - name: CI gate on Linux (the publish workflow runs it here)
+        env:
+          CC: clang
+          CXX: clang++
+        run: bun run check:ci

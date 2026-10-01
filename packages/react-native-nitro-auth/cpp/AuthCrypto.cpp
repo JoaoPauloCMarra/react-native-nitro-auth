@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 namespace NitroAuth {
@@ -118,14 +119,14 @@ std::optional<std::string> decodeBase64Url(std::string_view input) {
 
     std::string output;
     output.reserve((padded.size() * 3) / 4);
-    int value = 0;
+    uint32_t value = 0;
     int bits = 0;
     for (const char character : padded) {
         const int decoded = base64UrlValue(character);
         if (decoded < 0) {
             return std::nullopt;
         }
-        value = (value << 6) | decoded;
+        value = (value << 6) | static_cast<uint32_t>(decoded);
         bits += 6;
         if (bits >= 8) {
             bits -= 8;
@@ -178,7 +179,8 @@ extern "C" int NitroAuthJwtPayloadJson(const char* jwt, char* out, size_t outCap
         return -1;
     }
     const auto payload = NitroAuth::decodeJwtPayloadJson(jwt);
-    if (!payload.has_value() || payload->size() + 1 > outCap) {
+    if (!payload.has_value() || payload->size() >= outCap ||
+        payload->size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
         return -1;
     }
     std::memcpy(out, payload->data(), payload->size());

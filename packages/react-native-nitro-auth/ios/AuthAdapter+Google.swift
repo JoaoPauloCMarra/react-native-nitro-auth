@@ -73,7 +73,7 @@ extension AuthAdapter {
       "serverAuthCode": serverAuthCode,
       "userId": user.userID ?? "",
       "hostedDomain": user.configuration.hostedDomain ?? "",
-      "expirationTime": (user.accessToken.expirationDate?.timeIntervalSince1970 ?? 0) * 1000,
+      "expirationTime": AuthCore.googleExpirationTime(user.accessToken.expirationDate),
     ]
     completion(data as NSDictionary, nil, nil)
   }
@@ -113,29 +113,11 @@ extension AuthAdapter {
   }
 
   static func mapError(_ error: Error) -> PlatformAuthErrorCode {
-    let nsError = error as NSError
-    if nsError.domain == NSURLErrorDomain {
-      return .networkError
-    }
-    // GIDSignIn error codes
-    if nsError.domain == "com.google.GIDSignIn" {
-      switch nsError.code {
-      case -5: return .cancelled   // GIDSignInErrorCodeCanceled
-      case -4: return .notSignedIn  // GIDSignInErrorCodeNoCurrentUser
-      default: break
-      }
-    }
-    // ASAuthorizationError codes (Apple Sign-In / ASWebAuthenticationSession)
-    if nsError.domain == ASAuthorizationError.errorDomain {
-      switch nsError.code {
-      case ASAuthorizationError.canceled.rawValue: return .cancelled
-      case ASAuthorizationError.invalidResponse.rawValue: return .configurationError
-      default: return .unknown
-      }
-    }
-    let msg = error.localizedDescription.lowercased()
-    if msg.contains("cancel") { return .cancelled }
-    if msg.contains("network") || msg.contains("internet") || msg.contains("offline") { return .networkError }
-    return .unknown
+    AuthCore.mapProviderError(
+      error,
+      appleErrorDomain: ASAuthorizationError.errorDomain,
+      appleCanceledCode: ASAuthorizationError.canceled.rawValue,
+      appleInvalidResponseCode: ASAuthorizationError.invalidResponse.rawValue
+    )
   }
 }

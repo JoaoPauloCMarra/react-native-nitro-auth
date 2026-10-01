@@ -69,6 +69,12 @@ use that version. Older supported versions are not built by the release gate;
 the example app's compileSdk `36` and iOS `16.4` settings are its own choices,
 not package requirements.
 
+On Android the library compiles with your app's `compileSdkVersion`,
+`minSdkVersion`, and `targetSdkVersion`. compileSdk `35` and Android Gradle
+Plugin `8.6` are the minimums that its AndroidX Credentials `1.6.0` dependency
+accepts. The library's own defaults (compileSdk `36`, targetSdk `36`, minSdk
+`24`) apply only when the app does not set those values.
+
 iOS static frameworks are supported with source-built React Native. After
 upgrading, regenerate the Expo native project or run `pod install`, then rebuild
 the app so CocoaPods applies the updated header paths.

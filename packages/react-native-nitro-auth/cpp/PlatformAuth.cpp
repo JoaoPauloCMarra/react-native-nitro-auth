@@ -19,6 +19,12 @@ std::shared_ptr<HybridNativeAuthAdapterSpec> adapter() {
   return instance;
 }
 
+std::exception_ptr typedOr(const std::exception_ptr& error, AuthErrorCode fallback) {
+  try { std::rethrow_exception(error); }
+  catch (const AuthException&) { return error; }
+  catch (...) { return makeAuthError(fallback); }
+}
+
 void validateFailure(const std::optional<ProviderFailure>& failure) {
   if (failure) std::rethrow_exception(makeAuthError(failure->code, failure->detail));
 }
@@ -35,8 +41,8 @@ std::shared_ptr<Promise<T>> invoke(Start start, Convert convert) {
         else result->resolve(convert(value));
       } catch (...) { if (result->isPending()) result->reject(std::current_exception()); }
     });
-    pending->addOnRejectedListener([result](const std::exception_ptr&) {
-      if (result->isPending()) result->reject(makeAuthError(AuthErrorCode::UNKNOWN));
+    pending->addOnRejectedListener([result](const std::exception_ptr& error) {
+      if (result->isPending()) result->reject(typedOr(error, AuthErrorCode::UNKNOWN));
     });
   } catch (const AuthException&) { result->reject(std::current_exception()); }
   catch (...) { result->reject(makeAuthError(AuthErrorCode::CONFIGURATION_ERROR)); }
@@ -55,7 +61,7 @@ AuthUser requireUser(const ProviderUserResult& result) {
 std::shared_ptr<Promise<AuthNonce>> PlatformAuth::createNonce() {
   auto result = Promise<AuthNonce>::create();
   try { result->resolve(adapter()->createNonce()); }
-  catch (...) { result->reject(makeAuthError(AuthErrorCode::CONFIGURATION_ERROR)); }
+  catch (...) { result->reject(typedOr(std::current_exception(), AuthErrorCode::CONFIGURATION_ERROR)); }
   return result;
 }
 std::shared_ptr<Promise<AuthUser>> PlatformAuth::login(AuthProvider provider, const std::optional<LoginOptions>& options) {

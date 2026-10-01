@@ -13,6 +13,7 @@ React Native Nitro module for authentication (Google, Apple, Microsoft). C++ cor
 - `bun run codegen` — regenerate Nitro specs (nitrogen)
 - `bun run build` — build library (bob)
 - `bun run test` — run Jest tests; `bun run test:cpp` runs the C++ suites
+- `bun run test:cpp:sanitize` runs the C++ suites under ASan+UBSan and TSan (part of `check:ci`). `bun run test:swift` runs the SwiftPM tests for `ios/AuthCore.swift` on macOS; it is a separate `ci.yml` step, not part of `check:ci`, because the publish workflow runs `check:ci` on Linux. `bun run android:test` runs the Kotlin unit tests through the generated example Android project; run it locally before a release (it needs `apps/example/android`, so run it before a clean prebuild removes build state).
 - `bun run release:preflight` — run release gate, Expo SDK checks, config introspection, and package dry run
 
 ## Design Decisions
@@ -36,6 +37,7 @@ React Native Nitro module for authentication (Google, Apple, Microsoft). C++ cor
 - `HybridAuth::refreshToken` rejects `operation_in_progress` while a login, requestScopes or silentRestore is pending; it never cancels them
 - `./official-buttons` must stay free of `react-native-svg` and SVG artwork; SVG rendering lives in `./official-buttons/svg` (guarded by `social-button-import-graph.test.ts`)
 - Web `index.web.ts` must mirror exports from `index.ts` (e.g., `AuthError`)
+- Example React Compiler is on (`experiments.reactCompiler`). Never write try/finally without catch inside a React component or hook. The compiler cannot lower it ("Handle TryStatement without a catch clause") and skips the whole function. Use promise.finally() for async cleanup, or a real catch that handles or reports the error. try/catch/finally is not this bailout. Example lint fails that form (`TryStatement[handler=null]` via `compiler-bailout/no-try-without-catch`). A compiler bailout fails the check. It is not a type or lint warning to ignore.
 - The example app uses Expo CNG; `apps/example/android` and `apps/example/ios` are generated local artifacts and should not be hand-edited or committed.
 - Keep `expo-build-properties` `ios.usePrecompiledModules` disabled for the example app until Expo/Xcode precompiled module linking is proven stable; with Xcode 26.5 the precompiled Expo module path produced `SwiftUICore`/`ExpoFileSystem` link failures while source-built Expo modules passed.
 
