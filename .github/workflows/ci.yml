@@ -71,6 +71,9 @@ jobs:
       - name: C++ coverage
         run: bun run --cwd packages/react-native-nitro-auth test:cpp:coverage
 
+      - name: C++ sanitizers
+        run: bun run test:cpp:sanitize
+
       - name: Test lifecycle and release contracts
         run: bun run test:lifecycle
 
