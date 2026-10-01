@@ -104,6 +104,18 @@ class MicrosoftAuthConfigHardeningTest {
     }
 
     @Test
+    fun nullAndStructuredClaimsAreDroppedInsteadOfStringified() {
+        val claims = MicrosoftAuthConfig.decodeJwt(
+            "header.${encode("{\"email\":null,\"groups\":[\"a\"],\"address\":{\"x\":1},\"verified\":true,\"blocked\":false,\"exp\":5,\"ratio\":1.5,\"name\":\"Ada\"}")}.signature",
+        )
+
+        assertEquals(
+            mapOf("verified" to "true", "blocked" to "false", "exp" to "5", "ratio" to "1.5", "name" to "Ada"),
+            claims,
+        )
+    }
+
+    @Test
     fun authorityUrlRejectsHostileTenantsAndDomains() {
         assertEquals(
             "https://login.microsoftonline.com/common/",

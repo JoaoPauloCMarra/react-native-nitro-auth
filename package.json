@@ -57,6 +57,7 @@
     "test:coverage": "bun run --cwd packages/react-native-nitro-auth test -- --coverage",
     "test:cpp": "bun run --cwd packages/react-native-nitro-auth test:cpp",
     "test:cpp:sanitize": "bun run --cwd packages/react-native-nitro-auth test:cpp:sanitize",
+    "test:swift": "bun run --cwd packages/react-native-nitro-auth test:swift",
     "check": "bun run lint && bun run test:types && bun run test && bun run test:lifecycle",
     "check:ci": "bun run verify:core-versions && bun run verify:codegen && bun run build && bun run check && bun run test:cpp && bun run test:cpp:sanitize && bun run typecheck:rn087",
     "audit:package": "bun scripts/sync-package-docs.ts --check && bun scripts/check-social-button-assets.ts && bun scripts/check-pack-contents.js",

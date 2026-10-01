@@ -46,6 +46,7 @@
     "test:cpp": "node scripts/test-cpp.js",
     "test:cpp:coverage": "node scripts/test-cpp.js --coverage",
     "test:cpp:sanitize": "node scripts/test-cpp.js --sanitize",
+    "test:swift": "node scripts/test-swift.js",
     "prepublishOnly": "bun run clean && bun run codegen && bun run build && bun run typecheck && bun run lint && bun run test && bun run test:cpp",
     "prepack": "bun ../../scripts/sync-package-docs.ts prepare",
     "postpack": "bun ../../scripts/sync-package-docs.ts cleanup",

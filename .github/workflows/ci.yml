@@ -74,6 +74,9 @@ jobs:
       - name: C++ sanitizers
         run: bun run test:cpp:sanitize
 
+      - name: Swift unit tests
+        run: bun run test:swift
+
       - name: Test lifecycle and release contracts
         run: bun run test:lifecycle
 

@@ -266,11 +266,19 @@ void testCreateNonceBoundary() {
   assert(nonce->getResult().raw == "raw-value");
   assert(nonce->getResult().hashed == std::string(64, 'f'));
 
-  for (auto kind : {ThrowKind::AUTH, ThrowKind::RUNTIME, ThrowKind::NON_STD}) {
+  for (auto kind : {ThrowKind::RUNTIME, ThrowKind::NON_STD}) {
     fakeAdapter->throwKind = kind;
     auto failed = PlatformAuth::createNonce();
     assert(rejectionCode(failed) == AuthErrorCode::CONFIGURATION_ERROR);
     assert(rejectionMessage(failed) == "configuration_error");
+  }
+
+  fakeAdapter->throwKind = ThrowKind::AUTH;
+  for (auto code : kAllCodes) {
+    fakeAdapter->thrownCode = code;
+    auto typed = PlatformAuth::createNonce();
+    assert(rejectionCode(typed) == code);
+    assert(rejectionMessage(typed) == "adapter detail");
   }
 }
 
@@ -387,14 +395,19 @@ void testHostileDetailBytesPassThroughUnchanged() {
   assert(rejectionMessage(truncated) == "network_error: bad");
 }
 
-void testAdapterPromiseRejectionMapsToUnknownWithoutLeakingDetail() {
+void testUntypedAdapterPromiseRejectionMapsToUnknownWithoutLeakingDetail() {
   fakeAdapter->reset();
   for (const auto& error : {std::make_exception_ptr(std::runtime_error("secret token in message")),
-                            makeAuthError(AuthErrorCode::CANCELLED, "detail")}) {
+                            std::make_exception_ptr(std::logic_error("cancelled: looks typed but is not")),
+                            std::make_exception_ptr(42)}) {
     auto login = PlatformAuth::login(AuthProvider::GOOGLE);
     fakeAdapter->lastUser->reject(error);
     assert(rejectionCode(login) == AuthErrorCode::UNKNOWN);
     assert(rejectionMessage(login) == "unknown");
+
+    auto scopes = PlatformAuth::requestScopes({"email"});
+    fakeAdapter->lastUser->reject(error);
+    assert(rejectionCode(scopes) == AuthErrorCode::UNKNOWN);
 
     auto restore = PlatformAuth::silentRestore();
     fakeAdapter->lastUser->reject(error);
@@ -407,6 +420,43 @@ void testAdapterPromiseRejectionMapsToUnknownWithoutLeakingDetail() {
     auto revoke = PlatformAuth::revokeAccess(AuthProvider::GOOGLE);
     fakeAdapter->lastVoid->reject(error);
     assert(rejectionCode(revoke) == AuthErrorCode::UNKNOWN);
+    assert(rejectionMessage(revoke) == "unknown");
+  }
+}
+
+void testTypedAdapterPromiseRejectionKeepsItsCodeAndDetail() {
+  fakeAdapter->reset();
+  for (auto code : kAllCodes) {
+    const std::string name = authErrorCodeName(code);
+    for (const std::optional<std::string>& detail : {std::optional<std::string>{}, std::optional<std::string>{"provider said no"}}) {
+      const auto error = makeAuthError(code, detail);
+      const std::string expected = detail ? name + ": " + *detail : name;
+
+      auto login = PlatformAuth::login(AuthProvider::GOOGLE);
+      fakeAdapter->lastUser->reject(error);
+      assert(rejectionCode(login) == code);
+      assert(rejectionMessage(login) == expected);
+
+      auto scopes = PlatformAuth::requestScopes({"email"});
+      fakeAdapter->lastUser->reject(error);
+      assert(rejectionCode(scopes) == code);
+      assert(rejectionMessage(scopes) == expected);
+
+      auto restore = PlatformAuth::silentRestore();
+      fakeAdapter->lastUser->reject(error);
+      assert(rejectionCode(restore) == code);
+      assert(rejectionMessage(restore) == expected);
+
+      auto refresh = PlatformAuth::refreshToken();
+      fakeAdapter->lastTokens->reject(error);
+      assert(rejectionCode(refresh) == code);
+      assert(rejectionMessage(refresh) == expected);
+
+      auto revoke = PlatformAuth::revokeAccess(AuthProvider::GOOGLE);
+      fakeAdapter->lastVoid->reject(error);
+      assert(rejectionCode(revoke) == code);
+      assert(rejectionMessage(revoke) == expected);
+    }
   }
 }
 
@@ -544,7 +594,8 @@ int main() {
   testEveryProviderFailureCodeReachesTheJsEnvelope();
   testOutOfRangeFailureCodeUsesUnknownEnvelope();
   testHostileDetailBytesPassThroughUnchanged();
-  testAdapterPromiseRejectionMapsToUnknownWithoutLeakingDetail();
+  testUntypedAdapterPromiseRejectionMapsToUnknownWithoutLeakingDetail();
+  testTypedAdapterPromiseRejectionKeepsItsCodeAndDetail();
   testContradictoryOrEmptyProviderResults();
   testExpirationCastGuardsOnEveryUserAndTokenPath();
   testArgumentsAndSynchronousSettlementPassThrough();
