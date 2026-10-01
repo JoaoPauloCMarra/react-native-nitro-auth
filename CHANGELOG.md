@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [0.13.1] - 2026-10-01
+
+### Breaking changes
+
+None.
+
+### Fixed
+
+- Android: a Google ID token whose `exp` claim is too large to represent in milliseconds no longer produces a wrapped, incorrect `expirationTime`. The expiry is reported as absent.
+- Android: a Microsoft token response with an out-of-range `expires_in` no longer produces a wrapped, incorrect `expirationTime`. The expiry is reported as absent, as it already was for zero or negative values.
+- iOS and Android: JWT payload decoding no longer relies on signed-integer shift behavior, and the native decoder rejects payloads larger than `INT_MAX` bytes instead of returning a truncated length. Real tokens decode as before.
+- The README explains that compileSdk `35` and Android Gradle Plugin `8.6` are minimums set by AndroidX Credentials `1.6.0`, and that the library's compileSdk `36`, targetSdk `36`, and minSdk `24` defaults apply only when the app sets none.
+
 ## [0.13.0] - 2026-09-30
 
 ### Breaking changes
