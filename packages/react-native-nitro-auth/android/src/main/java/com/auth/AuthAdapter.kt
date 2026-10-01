@@ -1202,7 +1202,7 @@ object AuthAdapter {
             val accessToken = json.optString("access_token")
             val refreshToken = json.optString("refresh_token")
             val expiresIn = json.optLong("expires_in", 0)
-            val expirationTime = if (expiresIn > 0) System.currentTimeMillis() + expiresIn * 1000 else null
+            val expirationTime = expirationMillisFromExpiresIn(System.currentTimeMillis(), expiresIn)
             if (idToken.isEmpty()) {
                 return@synchronized MicrosoftTokenCompletion(
                     origin = origin,
@@ -1759,7 +1759,7 @@ object AuthAdapter {
     private fun getGoogleExpirationTimeMs(idToken: String?): Long? {
         if (idToken.isNullOrEmpty()) return null
         val expSeconds = MicrosoftAuthConfig.decodeJwt(idToken)["exp"]?.toLongOrNull() ?: return null
-        return expSeconds * 1000
+        return epochSecondsToMillisOrNull(expSeconds)
     }
 
     private fun getMicrosoftClientIdFromResources(context: Context): String? {
@@ -2600,7 +2600,7 @@ object AuthAdapter {
             val accessToken = json.optString("access_token")
             val newRefreshToken = json.optString("refresh_token")
             val expiresIn = json.optLong("expires_in", 0)
-            val expirationTime = if (expiresIn > 0) System.currentTimeMillis() + expiresIn * 1000 else null
+            val expirationTime = expirationMillisFromExpiresIn(System.currentTimeMillis(), expiresIn)
             val claims = MicrosoftAuthConfig.decodeJwt(idToken)
             MicrosoftRefreshCompletion(
                 operation = operation,
