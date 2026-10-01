@@ -13,6 +13,7 @@ React Native Nitro module for authentication (Google, Apple, Microsoft). C++ cor
 - `bun run codegen` — regenerate Nitro specs (nitrogen)
 - `bun run build` — build library (bob)
 - `bun run test` — run Jest tests; `bun run test:cpp` runs the C++ suites
+- `bun run test:cpp:sanitize` runs the C++ suites under ASan+UBSan and TSan (part of `check:ci`). `bun run test:swift` runs the SwiftPM tests for `ios/AuthCore.swift` on macOS; it is a separate `ci.yml` step, not part of `check:ci`, because the publish workflow runs `check:ci` on Linux. `bun run android:test` runs the Kotlin unit tests through the generated example Android project; run it locally before a release (it needs `apps/example/android`, so run it before a clean prebuild removes build state).
 - `bun run release:preflight` — run release gate, Expo SDK checks, config introspection, and package dry run
 
 ## Design Decisions

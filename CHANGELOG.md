@@ -17,6 +17,12 @@ None.
 - Android: a Google ID token whose `exp` claim is too large to represent in milliseconds no longer produces a wrapped, incorrect `expirationTime`. The expiry is reported as absent.
 - Android: a Microsoft token response with an out-of-range `expires_in` no longer produces a wrapped, incorrect `expirationTime`. The expiry is reported as absent, as it already was for zero or negative values.
 - iOS and Android: JWT payload decoding no longer relies on signed-integer shift behavior, and the native decoder rejects payloads larger than `INT_MAX` bytes instead of returning a truncated length. Real tokens decode as before.
+- iOS: an ID token whose payload is not valid UTF-8, or contains a NUL byte, yields no claims, as on Android. A Microsoft or nonce-bound sign-in with such a token fails with `invalid_nonce` instead of using altered claim text.
+- iOS: Microsoft sign-in falls back to the `email` claim when `preferred_username` is present but empty, as on Android.
+- iOS: a Microsoft sign-in is reported as `cancelled` only when the web authentication session reports a user cancel. An unrelated error with the same numeric code is reported as `network_error` or `unknown`.
+- iOS: when Microsoft returns an `error` without an `error_description`, the error detail is the provider error code, as on Android.
+- Android: `null`, array, and object ID-token claims are ignored instead of being turned into text, so a `null` email or name is no longer reported as the string `"null"`.
+- The error contract documents that a native error detail is cut at a NUL byte, and how iOS and Android differ when a provider gives no usable token expiry.
 - The README explains that compileSdk `35` and Android Gradle Plugin `8.6` are minimums set by AndroidX Credentials `1.6.0`, and that the library's compileSdk `36`, targetSdk `36`, and minSdk `24` defaults apply only when the app sets none.
 
 ## [0.13.0] - 2026-09-30
