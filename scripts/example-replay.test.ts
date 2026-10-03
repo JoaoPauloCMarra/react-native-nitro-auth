@@ -251,7 +251,13 @@ test("all manifest flows are distinct, safe, present, and closed", () => {
   const suites = readSuites();
   assert.deepEqual(
     suites.map((suite) => suite.id),
-    ["full-features", "deeplink", "credentials"],
+    [
+      "full-features",
+      "deeplink",
+      "credentials",
+      "signed-out-extended",
+      "button-behavior",
+    ],
   );
   for (const suite of suites) {
     const source = fs.readFileSync(path.join(projectRoot, suite.path), "utf8");
@@ -271,7 +277,16 @@ test("coverage distinguishes visual-only assertions from provider acceptance", (
   );
   assert.deepEqual(
     visualFeatures.map((feature: { id: string }) => feature.id),
-    ["social-button.google-visual", "social-button.apple-visual"],
+    [
+      "social-button.google-visual",
+      "social-button.apple-visual",
+      "social-button.icon-only-size",
+      "social-button.disabled-press",
+      "social-button.busy-press-guard",
+      "social-button.on-error",
+      "social-button.microsoft-outline",
+      "social-button.busy-state-propagation",
+    ],
   );
   assert.ok(
     visualFeatures.every(
@@ -313,12 +328,22 @@ test("coverage distinguishes visual-only assertions from provider acceptance", (
         feature.kind === "coverage-state",
     ),
   );
+  assert.ok(
+    manifest.pending.some(
+      (row: { id: string }) =>
+        row.id === "auth.provider-cancellation-and-dispose",
+    ),
+  );
+  assert.ok(
+    !manifest.features.some((feature: { id: string }) =>
+      feature.id.startsWith("provider-cancel."),
+    ),
+  );
   for (const suite of manifest.suites) {
     const source = fs.readFileSync(path.join(projectRoot, suite.path), "utf8");
     assert.doesNotMatch(source, /press id="e2e-silent-restore"/);
     assert.doesNotMatch(source, /press id="smoke-run-provider-probes"/);
     assert.doesNotMatch(source, /wait id="smoke-[^"]+-status"/);
-    assert.doesNotMatch(source, /requestScopes/);
   }
 });
 
@@ -472,11 +497,14 @@ test("default selection runs every manifest flow with one unique temp directory 
       },
     });
     assert.equal(status, 0);
-    assert.deepEqual(calls[0]?.args.slice(1, 4), [
+    assert.deepEqual(calls[0]?.args.slice(1, 6), [
       "e2e/qa-full-features.ad",
       "e2e/qa-deeplink.ad",
       "e2e/qa-credentials.ad",
+      "e2e/qa-signed-out-extended.ad",
+      "e2e/qa-button-behavior.ad",
     ]);
+    assert.equal(calls[0]?.args[6], "--serial");
     assert.equal(artifacts.length, 1);
     assert.match(
       calls[0]?.args.join(" ") ?? "",

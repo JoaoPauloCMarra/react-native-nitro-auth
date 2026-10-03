@@ -61,7 +61,7 @@ export function AuthE2eLab() {
     <View testID="e2e-lab" style={styles.lab} accessibilityLabel="E2E Lab">
       <Text style={styles.title}>E2E Lab</Text>
       <Text style={styles.subtitle}>
-        The default replay requires an already signed-out package session and
+        This lab requires an already signed-out package session and its replay
         never starts provider login or restore. The manual restore control may
         find an existing provider session.
       </Text>
@@ -133,8 +133,18 @@ export function AuthE2eLab() {
               setApiStatus("fail:session-snapshot=legacy-getter-mismatch");
               return;
             }
+            const playServices: unknown = AuthService.hasPlayServices;
+            if (
+              typeof playServices !== "boolean" ||
+              (Platform.OS === "ios" && playServices !== true)
+            ) {
+              setApiStatus(
+                `fail:session-snapshot=play-services-${String(playServices)}`,
+              );
+              return;
+            }
             setApiStatus(
-              `ok:session=user=${snapshot.user ? "present" : "none"}:scopes=${snapshot.scopes.length}:revision=${snapshot.revision}:play-services=${AuthService.hasPlayServices ? "available" : "unavailable"}`,
+              `ok:session=user=${snapshot.user ? "present" : "none"}:scopes=${snapshot.scopes.length}:play-services=${playServices ? "available" : "unavailable"}:revision=${snapshot.revision}`,
             );
           }}
         />

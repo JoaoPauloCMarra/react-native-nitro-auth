@@ -1,0 +1,14 @@
+open "com.auth.example" "auth://e2e-signed-out-extended" --relaunch
+wait "stable"
+wait id="e2e-ext-screen"
+wait id="e2e-ext-results"
+wait text "ok:credential-in-progress=operation_in_progress:op=getCredential"
+wait text "ok:error-envelope=structured:legacy=2:prefix:identity"
+wait text "ok:play-services="
+wait text "ok:silent-restore=no-session"
+wait text "ok:logout=event:snapshot=empty"
+wait text "ok:requestScopes=not_signed_in:user=none"
+wait text "ok:apple-android-gate="
+wait text "ok:dispose-pending=cancelled-event:dispose-event"
+wait text "ok:dispose=recreated:revision-advanced:listeners-detached:token=undefined"
+close

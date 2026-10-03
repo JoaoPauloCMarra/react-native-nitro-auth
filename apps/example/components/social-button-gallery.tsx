@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
+  GoogleSocialButtonContent,
   SocialButton,
+  type AuthError,
   type SocialButtonAppearance,
+  type SocialButtonContentProps,
   type SocialButtonRenderMode,
   type SocialButtonShape,
 } from "react-native-nitro-auth";
@@ -166,6 +169,138 @@ export function SocialButtonGallery() {
   );
 }
 
+const BUSY_HOLD_MS = 3000;
+
+type BusyReport = (loading: boolean, disabled: boolean) => void;
+
+const BusyReportContext = createContext<BusyReport>(() => {});
+
+function BusyObserverContent(props: SocialButtonContentProps) {
+  const report = useContext(BusyReportContext);
+  const { loading, disabled } = props;
+  useEffect(() => {
+    report(loading, disabled);
+  }, [report, loading, disabled]);
+  return <GoogleSocialButtonContent {...props} />;
+}
+
+const observerComponents = { google: BusyObserverContent };
+
+export function SocialButtonBehaviorLab() {
+  const [disabledPresses, setDisabledPresses] = useState(0);
+  const [busyPresses, setBusyPresses] = useState(0);
+  const [errorCode, setErrorCode] = useState("none");
+  const [microsoftPresses, setMicrosoftPresses] = useState(0);
+  const [iconSize, setIconSize] = useState("pending");
+  const [observerLoading, setObserverLoading] = useState(false);
+  const [observed, setObserved] = useState({ loading: false, disabled: false });
+
+  const report: BusyReport = (loading, disabled) => {
+    setObserved((current) =>
+      current.loading === loading && current.disabled === disabled
+        ? current
+        : { loading, disabled },
+    );
+  };
+
+  const tokens = [
+    `disabled-press=${disabledPresses}:`,
+    `busy-press=${busyPresses}:`,
+    `onError=${errorCode}:`,
+    `ms-press=${microsoftPresses}:`,
+    `icon-size=${iconSize}:`,
+    `pkg-busy=${observed.loading}:pkg-disabled=${observed.disabled}:`,
+  ];
+
+  return (
+    <View testID="gallery-behavior" style={styles.gallery}>
+      <Text style={styles.title}>Button behavior</Text>
+      <Text style={styles.description}>
+        Visual checks only. Every button has its own onPress, so none signs in.
+      </Text>
+      <Text style={styles.probeText}>{tokens.join(" ")}</Text>
+      <View style={styles.stage}>
+        <SocialButton
+          testID="gallery-disabled"
+          provider="google"
+          disabled
+          onPress={() => {
+            setDisabledPresses((count) => count + 1);
+          }}
+        />
+        <SocialButton
+          testID="gallery-busy"
+          provider="apple"
+          loadingIndicator={null}
+          onPress={async () => {
+            setBusyPresses((count) => count + 1);
+            await new Promise((resolve) => setTimeout(resolve, BUSY_HOLD_MS));
+          }}
+        />
+        <SocialButton
+          testID="gallery-error"
+          provider="google"
+          onPress={() => {
+            throw new Error("timeout");
+          }}
+          onError={(error: AuthError) => {
+            setErrorCode(error.code);
+          }}
+        />
+        <SocialButton
+          testID="gallery-microsoft"
+          provider="microsoft"
+          variant="outline"
+          onPress={() => {
+            setMicrosoftPresses((count) => count + 1);
+          }}
+        />
+        <View
+          style={styles.measured}
+          onLayout={(event) => {
+            const { width, height } = event.nativeEvent.layout;
+            setIconSize(`${Math.round(width)}x${Math.round(height)}`);
+          }}
+        >
+          <SocialButton
+            testID="gallery-icon-only"
+            provider="apple"
+            iconOnly
+            onPress={() => {}}
+          />
+        </View>
+        <BusyReportContext value={report}>
+          <SocialButton
+            testID="gallery-busy-observer"
+            provider="google"
+            loading={observerLoading}
+            loadingIndicator={null}
+            customComponents={observerComponents}
+            onPress={() => {}}
+          />
+        </BusyReportContext>
+      </View>
+      <Toggle
+        label="Toggle observed loading"
+        testID="gallery-observer-loading"
+        selected={observerLoading}
+        text={
+          observerLoading ? "Clear observed loading" : "Show observed loading"
+        }
+        onPress={() => {
+          setObserverLoading(!observerLoading);
+        }}
+      />
+      <View
+        testID="gallery-probe"
+        accessible
+        accessibilityLabel={tokens.join(" ")}
+        style={styles.resultsProbe}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   gallery: { padding: 16, gap: 12, backgroundColor: "#FFFFFF" },
   title: { fontSize: 20, fontWeight: "600", color: "#111827" },
@@ -189,4 +324,7 @@ const styles = StyleSheet.create({
   },
   controlSelected: { backgroundColor: "#DBEAFE" },
   controlLabel: { fontSize: 14, color: "#111827" },
+  resultsProbe: { height: 1 },
+  probeText: { fontSize: 11, color: "#111827", fontFamily: "Menlo" },
+  measured: { alignSelf: "center" },
 });

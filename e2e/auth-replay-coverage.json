@@ -21,6 +21,16 @@
       "id": "credentials",
       "path": "e2e/qa-credentials.ad",
       "purpose": "Validate nonce shape, public provider capability matrix, and coherent empty-session values without displaying credentials"
+    },
+    {
+      "id": "signed-out-extended",
+      "path": "e2e/qa-signed-out-extended.ad",
+      "purpose": "Run-on-load signed-out guard, error envelope, Play Services, restore, logout, scope, Apple Android setup gate, and dispose checks on a disposable QA target"
+    },
+    {
+      "id": "button-behavior",
+      "path": "e2e/qa-button-behavior.ad",
+      "purpose": "Visual SocialButton disabled, busy, error, Microsoft outline, icon-only size, and busy-propagation behavior without sign-in"
     }
   ],
   "features": [
@@ -93,12 +103,12 @@
       "id": "auth.session-snapshot-getters",
       "coverage": "replay-asserted",
       "kind": "public-api",
-      "transport": "Public session snapshot agrees with currentUser and grantedScopes in the required signed-out fixture state",
+      "transport": "Public session snapshot agrees with currentUser and grantedScopes in the required signed-out fixture state, and hasPlayServices is a boolean (true on iOS)",
       "suite": "e2e/qa-full-features.ad",
       "source": "apps/example/components/e2e-lab.tsx",
       "controlId": "e2e-api-run",
       "statusId": "e2e-api-status",
-      "expectedText": "ok:session=user=none:scopes=0:revision=",
+      "expectedText": "ok:session=user=none:scopes=0:play-services=",
       "assertion": "snapshot.user === currentUser"
     },
     {
@@ -117,7 +127,7 @@
       "id": "auth.signed-out-scope-contract",
       "coverage": "replay-asserted",
       "kind": "public-api",
-      "transport": "Local scope revoke resolves empty and revokeAccess returns typed not_signed_in; requestScopes is held for explicit provider acceptance",
+      "transport": "Local scope revoke resolves empty and revokeAccess returns typed not_signed_in; signed-out requestScopes is asserted in the signed-out-extended flow",
       "suite": "e2e/qa-full-features.ad",
       "source": "apps/example/components/e2e-lab.tsx",
       "controlId": "e2e-scopes-run",
@@ -317,6 +327,198 @@
       "statusId": "e2e-credentials-snapshot",
       "expectedText": "ok:session=user=none:scopes=0:revision=safe-integer",
       "assertion": "session.user === undefined &&\n    AuthService.currentUser === undefined"
+    },
+    {
+      "id": "auth.in-progress-guard",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "A pending getAccessToken makes an immediate getCredential(\"google\") reject with AuthError operation_in_progress and operation getCredential before any native credential request",
+      "suite": "e2e/qa-signed-out-extended.ad",
+      "source": "apps/example/app/e2e-signed-out-extended.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-ext-results",
+      "expectedText": "ok:credential-in-progress=operation_in_progress:op=getCredential",
+      "assertion": "error.operation === \"getCredential\""
+    },
+    {
+      "id": "auth.error-envelope",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public AuthError.from keeps the structured code, operation, message, and underlying message; toAuthErrorCode maps legacy no_window and disposed codes and the disposed prefix; AuthError.from returns an AuthError that already has an operation unchanged",
+      "suite": "e2e/qa-signed-out-extended.ad",
+      "source": "apps/example/app/e2e-signed-out-extended.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-ext-results",
+      "expectedText": "ok:error-envelope=structured:legacy=2:prefix:identity",
+      "assertion": "AuthError.from(errWithOp) === errWithOp"
+    },
+    {
+      "id": "auth.play-services",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public hasPlayServices is a boolean; the screen requires true on iOS",
+      "claimLimit": "On Android this asserts only that the value is a boolean, because the emulator image may not include Google Play services.",
+      "suite": "e2e/qa-signed-out-extended.ad",
+      "source": "apps/example/app/e2e-signed-out-extended.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-ext-results",
+      "expectedText": "ok:play-services=",
+      "assertion": "platform === \"ios\" && value !== true"
+    },
+    {
+      "id": "auth.silent-restore-empty",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "silentRestore on a signed-out, account-free target resolves without a user or rejects not_signed_in; a restored user fails the check and is logged out",
+      "claimLimit": "Proves only the empty-session restore outcome. Cached-valid and revoked provider sessions stay pending.",
+      "suite": "e2e/qa-signed-out-extended.ad",
+      "source": "apps/example/app/e2e-signed-out-extended.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-ext-results",
+      "expectedText": "ok:silent-restore=no-session",
+      "assertion": "code === \"resolved\" || code === \"not_signed_in\""
+    },
+    {
+      "id": "auth.signed-out-logout",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public logout on an empty session emits a logout lifecycle event and leaves the user and scopes empty",
+      "claimLimit": "Proves only signed-out logout. Signed-in logout cleanup stays pending.",
+      "suite": "e2e/qa-signed-out-extended.ad",
+      "source": "apps/example/app/e2e-signed-out-extended.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-ext-results",
+      "expectedText": "ok:logout=event:snapshot=empty",
+      "assertion": "events.some((event) => event.type === \"logout\")"
+    },
+    {
+      "id": "auth.signed-out-request-scopes",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "requestScopes([\"email\"]) after logout rejects not_signed_in and publishes no user on iOS and Android",
+      "claimLimit": "Proves only the signed-out branch on a target without a cached Google or Microsoft account. Consent outcomes stay pending.",
+      "suite": "e2e/qa-signed-out-extended.ad",
+      "source": "apps/example/app/e2e-signed-out-extended.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-ext-results",
+      "expectedText": "ok:requestScopes=not_signed_in:user=none",
+      "assertion": "AuthService.requestScopes([\"email\"])"
+    },
+    {
+      "id": "auth.apple-android-setup-gate",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "On Android, login(\"apple\") without a configured broker rejects configuration_error and publishes no user; on iOS the screen makes no Apple call and reports the check as skipped",
+      "claimLimit": "The flow asserts the platform-neutral ok prefix. On iOS this proves nothing about Apple; on Android it proves only the missing-broker setup gate of an example build without APPLE_ANDROID_BROKER_URL.",
+      "suite": "e2e/qa-signed-out-extended.ad",
+      "source": "apps/example/app/e2e-signed-out-extended.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-ext-results",
+      "expectedText": "ok:apple-android-gate=",
+      "assertion": "code === \"configuration_error\""
+    },
+    {
+      "id": "auth.dispose-pending-event",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "dispose while getAccessToken is pending emits operation_failed for getAccessToken with errorCode cancelled and the same operationId, then a dispose event",
+      "claimLimit": "Proves dispose of a pending signed-out operation only. Dispose during a live provider request stays pending.",
+      "suite": "e2e/qa-signed-out-extended.ad",
+      "source": "apps/example/app/e2e-signed-out-extended.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-ext-results",
+      "expectedText": "ok:dispose-pending=cancelled-event:dispose-event",
+      "assertion": "failed.errorCode === \"cancelled\""
+    },
+    {
+      "id": "auth.dispose-recreate",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "After dispose the service recreates the native object: snapshot revision advances, user and scopes are empty, pre-dispose listeners are detached, a new subscription receives events, and getAccessToken resolves undefined",
+      "suite": "e2e/qa-signed-out-extended.ad",
+      "source": "apps/example/app/e2e-signed-out-extended.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-ext-results",
+      "expectedText": "ok:dispose=recreated:revision-advanced:listeners-detached:token=undefined",
+      "assertion": "snapshot.revision > revisionBefore"
+    },
+    {
+      "id": "social-button.icon-only-size",
+      "coverage": "replay-asserted",
+      "kind": "visual-only",
+      "transport": "Icon-only Apple SocialButton lays out as a 48 by 48 square",
+      "claimLimit": "This proves only SocialButton press and state behavior with an app onPress handler and never proves authentication.",
+      "suite": "e2e/qa-button-behavior.ad",
+      "source": "apps/example/components/social-button-gallery.tsx",
+      "trigger": "screen-load",
+      "statusId": "gallery-probe",
+      "expectedText": "icon-size=48x48:",
+      "assertion": "Math.round(width)"
+    },
+    {
+      "id": "social-button.disabled-press",
+      "coverage": "replay-asserted",
+      "kind": "visual-only",
+      "transport": "A disabled SocialButton does not call onPress when pressed",
+      "claimLimit": "This proves only SocialButton press and state behavior with an app onPress handler and never proves authentication.",
+      "suite": "e2e/qa-button-behavior.ad",
+      "source": "apps/example/components/social-button-gallery.tsx",
+      "controlId": "gallery-disabled",
+      "statusId": "gallery-probe",
+      "expectedText": "disabled-press=0:",
+      "assertion": "setDisabledPresses((count) => count + 1)"
+    },
+    {
+      "id": "social-button.busy-press-guard",
+      "coverage": "replay-asserted",
+      "kind": "visual-only",
+      "transport": "A second press during a 3 second async onPress is ignored while the package marks the button busy",
+      "claimLimit": "This proves only SocialButton press and state behavior with an app onPress handler and never proves authentication.",
+      "suite": "e2e/qa-button-behavior.ad",
+      "source": "apps/example/components/social-button-gallery.tsx",
+      "controlId": "gallery-busy",
+      "statusId": "gallery-probe",
+      "expectedText": "busy-press=1:",
+      "assertion": "setTimeout(resolve, BUSY_HOLD_MS)"
+    },
+    {
+      "id": "social-button.on-error",
+      "coverage": "replay-asserted",
+      "kind": "visual-only",
+      "transport": "An onPress that throws Error(\"timeout\") reaches onError as AuthError code timeout",
+      "claimLimit": "This proves only SocialButton press and state behavior with an app onPress handler and never proves authentication.",
+      "suite": "e2e/qa-button-behavior.ad",
+      "source": "apps/example/components/social-button-gallery.tsx",
+      "controlId": "gallery-error",
+      "statusId": "gallery-probe",
+      "expectedText": "onError=timeout:",
+      "assertion": "throw new Error(\"timeout\")"
+    },
+    {
+      "id": "social-button.microsoft-outline",
+      "coverage": "replay-asserted",
+      "kind": "visual-only",
+      "transport": "Microsoft SocialButton with variant outline calls its onPress",
+      "claimLimit": "This proves only SocialButton press and state behavior with an app onPress handler and never proves authentication.",
+      "suite": "e2e/qa-button-behavior.ad",
+      "source": "apps/example/components/social-button-gallery.tsx",
+      "controlId": "gallery-microsoft",
+      "statusId": "gallery-probe",
+      "expectedText": "ms-press=1:",
+      "assertion": "variant=\"outline\""
+    },
+    {
+      "id": "social-button.busy-state-propagation",
+      "coverage": "replay-asserted",
+      "kind": "visual-only",
+      "transport": "The external loading prop reaches custom content as loading and disabled; full-features toggles gallery loading but agent-device cannot read busy state",
+      "claimLimit": "This proves only SocialButton press and state behavior with an app onPress handler and never proves authentication.",
+      "suite": "e2e/qa-button-behavior.ad",
+      "source": "apps/example/components/social-button-gallery.tsx",
+      "controlId": "gallery-observer-loading",
+      "statusId": "gallery-probe",
+      "expectedText": "pkg-busy=true:pkg-disabled=true:",
+      "assertion": "report(loading, disabled)"
     }
   ],
   "pending": [
@@ -344,7 +546,7 @@
     {
       "id": "auth.apple-android-broker",
       "state": "pending-prerequisites",
-      "reason": "The default replay makes no Apple Android broker request and cannot prove broker or server behavior.",
+      "reason": "The signed-out-extended flow asserts only the configuration_error gate of an example build without a broker. No broker request runs, so broker and server behavior stay unproven.",
       "prerequisites": [
         "Configured staging Apple broker and reachable server endpoint",
         "Dedicated Apple QA account and Android release example configuration"
@@ -384,7 +586,7 @@
     {
       "id": "auth.scope-consent",
       "state": "pending-prerequisites",
-      "reason": "The default replay checks local empty revoke and signed-out revokeAccess only. requestScopes may interact with cached native provider state and is not called by the default replay.",
+      "reason": "The full-features flow checks local empty revoke and signed-out revokeAccess. The signed-out-extended flow calls requestScopes only after logout and asserts not_signed_in. Granted and declined provider consent is never requested.",
       "prerequisites": [
         "Provider test account and requested consent scopes approved for the staging application",
         "Separate account able to grant and decline the requested consent",
@@ -405,28 +607,28 @@
     {
       "id": "auth.silent-restore",
       "state": "pending-prerequisites",
-      "reason": "silentRestore may recover a cached provider identity, so the default replay never calls it.",
+      "reason": "The signed-out-extended flow asserts only the empty-session restore outcome on an account-free target (auth.silent-restore-empty). Restore of a cached-valid or revoked provider session is not exercised.",
       "prerequisites": [
         "Dedicated QA device or simulator with known provider account state",
         "Explicit opt-in restore run and post-run account cleanup plan"
       ],
-      "acceptance": "Run restore separately for signed-out, cached-valid, and revoked provider sessions; record the public outcome and final session state without claiming successful provider validation from the default suite."
+      "acceptance": "Run restore separately for cached-valid and revoked provider sessions; record the public outcome and final session state without token values."
     },
     {
       "id": "auth.provider-cancellation-and-dispose",
       "state": "pending-prerequisites",
-      "reason": "Provider cancellation, credential cancellation, and dispose cancellation probes can open native provider UI and are not run by default. Their cancellation helper also invokes the public logout path.",
+      "reason": "Only the signed-out dispose and logout paths are replay-asserted, by auth.dispose-pending-event, auth.dispose-recreate, and auth.signed-out-logout in the signed-out-extended flow. Provider cancellation is not deterministic: on an Android release emulator, the Provider QA login probe opened Chrome or a Custom Tab (Chrome first-run sheet) before the synchronous logout cancellation landed. The Provider QA probes now accept cancelled or the explicit configuration_error setup gate, but they need an explicit manual run.",
       "prerequisites": [
         "Configured provider test app and dedicated test account or deterministic provider fixture",
-        "Explicit invocation of the Provider QA control on an isolated signed-out QA target",
+        "Explicit manual Provider QA run on an isolated signed-out QA target with Chrome first-run completed on Android",
         "Dedicated provider state because native logout may sign out the provider SDK"
       ],
-      "acceptance": "For login, loginAndGetUser, getCredential, and dispose, assert the typed cancellation/setup contract, no published user after cancellation, empty recreated snapshot, and no token or credential text in artifacts."
+      "acceptance": "For login, loginAndGetUser, and getCredential on each provider, and for dispose during a live provider request, assert typed cancelled or configuration_error, no published user, an empty recreated snapshot, and no token or credential text in artifacts, with provider UI handled deterministically."
     },
     {
       "id": "auth.provider-logout-cleanup",
       "state": "pending-prerequisites",
-      "reason": "The default replay avoids public logout because the native adapter may sign out its provider SDK even when the package session is empty.",
+      "reason": "The signed-out-extended flow asserts logout only on an empty session (auth.signed-out-logout). Logout of a signed-in provider session is not exercised.",
       "prerequisites": [
         "Dedicated provider test account and an isolated target",
         "Known provider and package session state before logout"

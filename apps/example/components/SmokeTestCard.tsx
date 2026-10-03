@@ -25,6 +25,7 @@ type TestResult = {
   name: string;
   status: TestStatus;
   detail?: string;
+  outcome?: string;
 };
 
 type TestCase = {
@@ -44,8 +45,13 @@ function probeId(name: string): string {
     .replace(/^-|-$/g, "");
 }
 
-function pass(item: Pick<TestCase, "id" | "name">): TestResult {
-  return { id: item.id, name: item.name, status: "pass" };
+function pass(
+  item: Pick<TestCase, "id" | "name">,
+  outcome?: string,
+): TestResult {
+  return outcome === undefined
+    ? { id: item.id, name: item.name, status: "pass" }
+    : { id: item.id, name: item.name, status: "pass", outcome };
 }
 
 function skip(item: TestCase, detail: string): TestResult {
@@ -77,7 +83,7 @@ function assert(condition: boolean, message: string) {
 
 function test(
   name: string,
-  run: () => void | Promise<void>,
+  run: () => void | string | Promise<void | string>,
   requiresProvider = false,
   unsupportedReason?: string,
 ): TestCase {
@@ -86,8 +92,8 @@ function test(
     ...item,
     run: async () => {
       try {
-        await run();
-        return pass(item);
+        const outcome = await run();
+        return pass(item, typeof outcome === "string" ? outcome : undefined);
       } catch (e) {
         return {
           id: item.id,
@@ -118,26 +124,31 @@ async function expectSignedOutError(run: () => Promise<unknown>) {
   assert(false, "Expected rejection without a session");
 }
 
-async function cancelProviderOperation(run: () => Promise<unknown>) {
+async function cancelProviderOperation(
+  run: () => Promise<unknown>,
+): Promise<string> {
   const pending = run();
   AuthService.logout();
-  await pending.then(
-    () => {
+  const code = await pending.then(
+    (): string => {
       assert(false, "Provider operation completed after cancellation");
+      return "resolved";
     },
-    (error: unknown) => {
-      const code = error instanceof AuthError ? error.code : "unknown";
+    (error: unknown): string => {
+      const errorCode = error instanceof AuthError ? error.code : "unknown";
       assert(error instanceof AuthError, "Provider error must be an AuthError");
       assert(
-        code === "cancelled",
-        `Unexpected provider cancellation code: ${code}`,
+        errorCode === "cancelled" || errorCode === "configuration_error",
+        `Unexpected provider cancellation code: ${errorCode}`,
       );
+      return errorCode;
     },
   );
   assert(
     AuthService.currentUser === undefined,
     "Cancelled operation published a user",
   );
+  return code;
 }
 
 function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
@@ -571,7 +582,10 @@ export const SmokeTestCard = memo(function SmokeTestCard() {
               testID="smoke-results"
               accessible
               accessibilityLabel={results
-                .map((result) => `${result.status.toUpperCase()}:${result.id}`)
+                .map(
+                  (result) =>
+                    `${result.status.toUpperCase()}:${result.id}${result.outcome ? `=${result.outcome}` : ""}`,
+                )
                 .join(" ")}
               style={styles.resultsProbe}
             />

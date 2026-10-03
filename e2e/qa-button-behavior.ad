@@ -1,0 +1,27 @@
+open "com.auth.example" "auth://e2e-buttons" --relaunch
+wait "stable"
+wait id="e2e-buttons-screen"
+scroll down
+wait id="gallery-probe"
+wait text "icon-size=48x48:"
+scroll down
+press id="gallery-disabled"
+wait id="gallery-probe"
+wait text "disabled-press=0:"
+scroll down
+press id="gallery-busy"
+press id="gallery-busy"
+wait text "busy-press=1:"
+scroll down
+press id="gallery-error"
+wait text "onError=timeout:"
+scroll down
+press id="gallery-microsoft"
+wait text "ms-press=1:"
+scroll down
+press id="gallery-observer-loading"
+wait text "pkg-busy=true:pkg-disabled=true:"
+scroll down
+press id="gallery-observer-loading"
+wait text "pkg-busy=false:pkg-disabled=false:"
+close

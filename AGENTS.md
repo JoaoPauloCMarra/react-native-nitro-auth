@@ -63,4 +63,5 @@ React Native Nitro module for authentication (Google, Apple, Microsoft). C++ cor
 - Flows assert smoke rows through the on-screen `smoke-results` label because agent-device `.ad` waits only see on-screen elements.
 - Keep `example:replay:check` and `example:replay:test` in the normal quality gate. They are device-free; refreshing a digest does not prove runtime behavior.
 - Run `example:replay` only against an explicit platform and device identifier, using the matching installed example. Keep device execution out of CI and artifacts in OS temp.
+- Do not add a replay flow that presses Provider QA or starts provider login. On Android, provider login opens Chrome or a Custom Tab before cancellation lands, so the result is not deterministic. Keep provider cancellation in the `auth.provider-cancellation-and-dispose` pending row.
 - Signed-out checks, cancellation, button rendering, and provider authentication are distinct evidence. Keep provider-dependent rows pending until their configured account, platform, and server prerequisites are verified.
