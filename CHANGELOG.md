@@ -17,6 +17,8 @@ None.
 - Web: a refresh from an earlier session cannot overwrite a new login.
   Refresh rejects with `operation_in_progress` while an interactive session
   operation is pending, and logout still cancels a login started in the same turn.
+- Web: a refresh cancelled by login, `requestScopes`, or logout rejects without
+  emitting a `refresh_failed` auth event, matching iOS and Android.
 - iOS and web: Apple sign-in respects an explicit empty `scopes` list instead
   of requesting name and email. Omitted scopes retain the existing defaults.
 - Clarify that web provider sign-in uses Expo configuration through
