@@ -620,10 +620,7 @@ export const SmokeTestCard = memo(function SmokeTestCard() {
           key={result.name}
           style={[styles.row, result.status === "skip" && styles.rowSkipped]}
         >
-          <Text
-            testID={`smoke-${result.id}-status`}
-            style={[styles.status, statusTextStyle(result.status)]}
-          >
+          <Text style={[styles.status, statusTextStyle(result.status)]}>
             {`${result.status.toUpperCase()}:${result.id}`}
           </Text>
           <View style={styles.rowBody}>
