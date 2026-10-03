@@ -41,6 +41,32 @@ for (const [name, job] of Object.entries(workflow.jobs)) {
   );
 }
 
+const publishSteps = workflow.jobs.publish.steps;
+const checkoutIndex = publishSteps.findIndex((step) =>
+  step.uses?.startsWith("actions/checkout@"),
+);
+assert.notEqual(checkoutIndex, -1, "publish must check out validated source");
+assert.equal(
+  publishSteps[checkoutIndex].with?.ref,
+  "${{ needs.validate.outputs.release_commit }}",
+  "publish must use the commit that passed validation",
+);
+const sourceCheckIndex = publishSteps.findIndex(
+  (step) => step.id === "validated_source",
+);
+assert.ok(sourceCheckIndex > checkoutIndex, "publish must check its checkout");
+assert.equal(
+  publishSteps[sourceCheckIndex].env?.RELEASE_COMMIT,
+  "${{ needs.validate.outputs.release_commit }}",
+);
+const publishIndex = publishSteps.findIndex(
+  (step) => step.name === "Publish to npm with Trusted Publishing",
+);
+assert.ok(
+  publishIndex > sourceCheckIndex,
+  "source verification must finish before publication",
+);
+
 console.log(
-  "Publish workflow keeps workflow_dispatch validation-only and publishes only on GitHub Release events.",
+  "Publish workflow validates source identity and publishes only on GitHub Release events.",
 );
