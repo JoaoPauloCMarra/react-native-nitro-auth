@@ -1,10 +1,12 @@
 {
   "version": 1,
-  "runtimeSourceSha256": "6214af8009c6961f342ce4b63f133295502a1b423769da034a848a16935d530f",
+  "runtimeSourceSha256": "ddd88ea9e93746fdeefd6f800ba60b5c961e2de42e942ff92531cb0fb3319706",
   "runtimeSourceFiles": [
     "apps/example/app.config.js",
     "apps/example/app/_layout.tsx",
+    "apps/example/app/e2e-buttons.tsx",
     "apps/example/app/e2e-credentials.tsx",
+    "apps/example/app/e2e-signed-out-extended.tsx",
     "apps/example/app/e2e.tsx",
     "apps/example/app/index.tsx",
     "apps/example/app/index.web.tsx",
@@ -264,16 +266,20 @@
     "packages/react-native-nitro-auth/src/utils/oauth-error.ts",
     "packages/react-native-nitro-auth/src/utils/oauth-token-client.ts"
   ],
-  "replayInputsSha256": "80797921dba34e7ee3e0028e4b703d1984e0e0aec04ed254d062708bb2911799",
+  "replayInputsSha256": "914912f0c65e0dd6d2a84944ad2bfec48294a98f64c33b74abd52d476ab59751",
   "replayInputs": [
     "e2e/auth-replay-coverage.json",
+    "e2e/qa-button-behavior.ad",
     "e2e/qa-credentials.ad",
     "e2e/qa-deeplink.ad",
-    "e2e/qa-full-features.ad"
+    "e2e/qa-full-features.ad",
+    "e2e/qa-signed-out-extended.ad"
   ],
   "suites": [
     "full-features",
     "deeplink",
-    "credentials"
+    "credentials",
+    "signed-out-extended",
+    "button-behavior"
   ]
 }

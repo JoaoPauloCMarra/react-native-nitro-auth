@@ -10,8 +10,8 @@ const coveragePath = path.join(projectRoot, "e2e", "auth-replay-coverage.json");
 function usage() {
   return [
     "Usage:",
-    "  bun scripts/run-example-replay.js --platform ios --udid <exact-target> [--flow full-features|deeplink|credentials]",
-    "  bun scripts/run-example-replay.js --platform android --serial <exact-target> [--flow full-features|deeplink|credentials]",
+    "  bun scripts/run-example-replay.js --platform ios --udid <exact-target> [--flow <manifest-flow-id>]",
+    "  bun scripts/run-example-replay.js --platform android --serial <exact-target> [--flow <manifest-flow-id>]",
     "",
     "Without --flow, the runner executes every flow in e2e/auth-replay-coverage.json.",
     "The selected release example must already be installed and signed out.",
