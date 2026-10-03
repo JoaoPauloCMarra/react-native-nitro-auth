@@ -76,8 +76,10 @@ final class HybridNativeAuthAdapter: HybridNativeAuthAdapterSpec {
     return AuthNonce(raw: raw, hashed: hashed)
   }
   func login(provider: AuthProvider, options: LoginOptions?) throws -> Promise<ProviderUserResult> {
-    request(cancelled: ProviderUserResult(user: nil, failure: ProviderFailure(code: .cancelled, detail: nil))) { finish in
-      AuthAdapter.login(provider: provider.stringValue, scopes: options?.scopes ?? [], loginHint: options?.loginHint,
+    let providerName = provider.stringValue
+    return request(cancelled: ProviderUserResult(user: nil, failure: ProviderFailure(code: .cancelled, detail: nil))) { finish in
+      AuthAdapter.login(provider: providerName,
+        scopes: AuthCore.effectiveLoginScopes(provider: providerName, scopes: options?.scopes), loginHint: options?.loginHint,
         nonce: options?.nonce, useSheet: options?.useSheet ?? false, forceAccountPicker: options?.forceAccountPicker ?? false,
         tenant: options?.tenant, prompt: options?.prompt?.stringValue, hostedDomain: options?.hostedDomain,
         openIDRealm: options?.openIDRealm) { finish(Self.userResult($0, $1, $2)) }

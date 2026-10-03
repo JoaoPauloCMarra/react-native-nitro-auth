@@ -814,6 +814,7 @@ class AuthWeb implements Auth {
 
   private async runLoginOperation(
     operation: () => Promise<void>,
+    onStart?: () => void,
   ): Promise<AuthUser | undefined> {
     if (this._disposed) {
       throw new AuthWebError("cancelled", "Auth module disposed");
@@ -826,6 +827,7 @@ class AuthWeb implements Auth {
     }
 
     this._loginInFlight = true;
+    onStart?.();
     let completedUser: AuthUser | undefined;
     const capture = (user: AuthUser) => {
       completedUser = {
@@ -852,6 +854,15 @@ class AuthWeb implements Auth {
         this._loginReject = undefined;
       }
     }
+  }
+
+  private beginSessionChange(): number {
+    const generation = ++this._sessionGeneration;
+    const rejectRefresh = this._refreshReject;
+    this._refreshPromise = undefined;
+    this._refreshReject = undefined;
+    rejectRefresh?.(new AuthWebError("cancelled", "Auth session is changing"));
+    return generation;
   }
 
   /** Cancels the active login so logout/dispose settle pending work. */
@@ -938,41 +949,46 @@ class AuthWeb implements Auth {
   ): Promise<AuthUser> {
     this.assertNoCredential();
     const loginHint = options?.loginHint;
-    const generation = this._sessionGeneration;
+    let generation = this._sessionGeneration;
     logger.log(`Starting login with ${provider}`, { scopes: options?.scopes });
     try {
-      const user = await this.runLoginOperation(async () => {
-        // Only emit after the in-flight guard: a rejected duplicate login
-        // must not claim it "started".
-        this.emitEvent("login_started", provider);
-        if (provider === "google") {
-          const scopes = options?.scopes ?? DEFAULT_SCOPES;
-          await this.loginGoogle(scopes, loginHint, options, generation);
-          return;
-        }
+      const user = await this.runLoginOperation(
+        async () => {
+          // Only emit after the in-flight guard: a rejected duplicate login
+          // must not claim it "started".
+          this.emitEvent("login_started", provider);
+          if (provider === "google") {
+            const scopes = options?.scopes ?? DEFAULT_SCOPES;
+            await this.loginGoogle(scopes, loginHint, options, generation);
+            return;
+          }
 
-        if (provider === "microsoft") {
-          const scopes = options?.scopes ?? MS_DEFAULT_SCOPES;
-          await this.loginMicrosoft(
-            scopes,
-            loginHint,
-            options?.tenant,
-            options?.prompt,
-            generation,
+          if (provider === "microsoft") {
+            const scopes = options?.scopes ?? MS_DEFAULT_SCOPES;
+            await this.loginMicrosoft(
+              scopes,
+              loginHint,
+              options?.tenant,
+              options?.prompt,
+              generation,
+            );
+            return;
+          }
+
+          if (provider === "apple") {
+            await this.loginApple(options, generation);
+            return;
+          }
+
+          throw new AuthWebError(
+            "unsupported_provider",
+            `Unsupported auth provider: ${provider}`,
           );
-          return;
-        }
-
-        if (provider === "apple") {
-          await this.loginApple(options, generation);
-          return;
-        }
-
-        throw new AuthWebError(
-          "unsupported_provider",
-          `Unsupported auth provider: ${provider}`,
-        );
-      });
+        },
+        () => {
+          generation = this.beginSessionChange();
+        },
+      );
       this.emitEvent("login_succeeded", provider);
       logger.log(`Login successful with ${provider}`);
       if (!user) throw new AuthWebError("not_signed_in");
@@ -1000,21 +1016,26 @@ class AuthWeb implements Auth {
     logger.log("Requesting additional scopes:", scopes);
     const newScopes = [...new Set([...this._grantedScopes, ...scopes])];
     try {
-      const generation = this._sessionGeneration;
-      await this.runLoginOperation(async () => {
-        if (provider === "google") {
-          await this.loginGoogle(newScopes, undefined, undefined, generation);
-          return;
-        }
+      let generation = this._sessionGeneration;
+      await this.runLoginOperation(
+        async () => {
+          if (provider === "google") {
+            await this.loginGoogle(newScopes, undefined, undefined, generation);
+            return;
+          }
 
-        await this.loginMicrosoft(
-          newScopes,
-          undefined,
-          undefined,
-          undefined,
-          generation,
-        );
-      });
+          await this.loginMicrosoft(
+            newScopes,
+            undefined,
+            undefined,
+            undefined,
+            generation,
+          );
+        },
+        () => {
+          generation = this.beginSessionChange();
+        },
+      );
     } catch (e) {
       const error = this.mapError(e);
       logger.error("Requesting scopes failed:", error.message);
@@ -1105,6 +1126,9 @@ class AuthWeb implements Auth {
     if (this._refreshPromise) {
       return this._refreshPromise;
     }
+    if (this._loginInFlight) {
+      throw new AuthWebError("operation_in_progress");
+    }
 
     const generation = this._sessionGeneration;
     let rejectRefresh: ((error: unknown) => void) | undefined;
@@ -1118,7 +1142,13 @@ class AuthWeb implements Auth {
       return await refreshPromise;
     } catch (e: unknown) {
       const error = this.mapError(e, "refresh");
-      this.emitEvent("refresh_failed", this._currentUser?.provider, error.code);
+      if (this._sessionGeneration === generation) {
+        this.emitEvent(
+          "refresh_failed",
+          this._currentUser?.provider,
+          error.code,
+        );
+      }
       throw error;
     } finally {
       if (this._refreshPromise === refreshPromise) {
@@ -2010,7 +2040,7 @@ class AuthWeb implements Auth {
     const nonce = options?.nonce ?? crypto.randomUUID();
     const appleAuthConfig: AppleAuthInitConfig = {
       clientId,
-      scope: (options?.scopes?.length ? options.scopes : ["name", "email"])
+      scope: (options?.scopes ?? ["name", "email"])
         .map((scope) => (scope === "fullName" ? "name" : scope))
         .join(" "),
       redirectURI: window.location.origin,

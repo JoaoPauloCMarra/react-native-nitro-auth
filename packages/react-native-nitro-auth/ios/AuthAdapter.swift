@@ -219,15 +219,12 @@ public class AuthAdapter: NSObject {
       let complete = completeInteractiveAuth(operation, completion)
       let appleIDProvider = ASAuthorizationAppleIDProvider()
       let request = appleIDProvider.createRequest()
-      request.requestedScopes = scopes.isEmpty
-        ? [.fullName, .email]
-        : scopes.compactMap { scope in
-          switch scope {
-          case "fullName", "name": return .fullName
-          case "email": return .email
-          default: return nil
-          }
+      request.requestedScopes = AuthCore.appleRequestedScopes(scopes).map { scope in
+        switch scope {
+        case .fullName: return .fullName
+        case .email: return .email
         }
+      }
       if let nonce = nonce {
         request.nonce = nonce
       }

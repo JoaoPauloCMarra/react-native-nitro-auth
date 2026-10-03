@@ -19,6 +19,11 @@ enum AuthCore {
     let claims: [String: String]
   }
 
+  enum AppleRequestedScope: Equatable {
+    case fullName
+    case email
+  }
+
   enum MicrosoftTokenOutcome: Equatable {
     case success(MicrosoftTokens)
     case failure(PlatformAuthErrorCode, String?)
@@ -31,6 +36,23 @@ enum AuthCore {
 
   static let defaultMicrosoftScopes = ["openid", "email", "profile", "offline_access", "User.Read"]
   static let defaultMicrosoftExpiresInSeconds = 3600.0
+
+  static func effectiveLoginScopes(provider: String, scopes: [String]?) -> [String] {
+    if provider == "apple", scopes == nil {
+      return ["fullName", "email"]
+    }
+    return scopes ?? []
+  }
+
+  static func appleRequestedScopes(_ scopes: [String]) -> [AppleRequestedScope] {
+    scopes.compactMap { scope in
+      switch scope {
+      case "fullName", "name": return .fullName
+      case "email": return .email
+      default: return nil
+      }
+    }
+  }
 
   static let formUrlEncodedAllowedCharacters = CharacterSet(
     charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
