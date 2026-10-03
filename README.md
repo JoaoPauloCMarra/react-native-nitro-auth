@@ -46,8 +46,10 @@ Optional peers:
 - `react-native-svg` (`>=15.8.0`) is needed only when you import
   `react-native-nitro-auth/official-buttons/svg`. Install it with
   `bunx expo install react-native-svg` or `bun add react-native-svg`.
-- `expo` is needed only for the Expo config plugin. Expo apps already have it.
-- `expo-constants` is needed only to read web client IDs from `expo.extra`.
+- `expo` supplies the Expo config plugin environment and the supported web
+  configuration path. Expo apps already have it.
+- `expo-constants` is needed for web provider configuration from `expo.extra`;
+  native apps do not need it.
 
 ## Requirements
 
@@ -170,9 +172,10 @@ Web options in `expo.extra`:
 | `nitroAuthPersistTokensOnWeb`  | `false`   | Persist token fields in configured storage.     |
 | `nitroAuthPersistProfileOnWeb` | `true`    | Persist email/name/photo in configured storage. |
 
-Web reads `expo-constants` for these options. `expo-constants` is an optional
-peer dependency: without it, web falls back to defaults and provider client
-IDs must be configured another way.
+Web reads `expo-constants` for these options. It is optional for native
+consumers. Use Expo web configuration for provider sign-in: without
+`expo-constants`, web falls back to defaults with no provider client IDs.
+The package does not expose a separate configuration API for plain browser apps.
 
 ### Apple on Android
 
@@ -384,7 +387,9 @@ with `operation_in_progress`; `logout()` and `dispose()` can cancel it. Cleanup
 preserves the original acquisition error if cleanup also fails. Credential acquisition emits correlated operation events without temporary
 login, state, or logout events.
 Google defaults to `openid`, `email`, and `profile`; Apple defaults to `email`
-and `fullName` (`name` in Apple's web SDK). Explicit `scopes` replace those defaults. Caller-supplied `nonce`
+and `fullName` (`name` in Apple's web SDK). Explicit `scopes` replace those defaults.
+For Apple login and credential acquisition, omit `scopes` to request those
+defaults or pass `scopes: []` to request neither name nor email. Caller-supplied `nonce`
 and Android `useLegacyGoogleSignIn` are not accepted. Android nonce-bound Google
 flows use Credential Manager even with `forceAccountPicker: true`; they reject
 when Credential Manager cannot provide and verify a matching ID token instead
@@ -766,7 +771,9 @@ do not forward raw details automatically.
 
 The native package gate and Expo example use React Native `0.86.3`. The
 `check:ci` workflow also compiles the public source against React Native
-`0.87.0`'s Strict TypeScript API to catch declaration and callback regressions;
+`0.87.0`'s Strict TypeScript API. It then type-checks an installed tarball
+consumer against React Native `0.87.0`'s default type entry. The consumer
+checks import and require declarations for the root and both button subpaths;
 that compatibility check does not change the runtime baseline. Expo SDK
 `57.0.26` selects React Native `0.86.3`; do not override it in an Expo app.
 
@@ -865,6 +872,19 @@ bun run example:ios
 Run native example builds locally before release when changing plugin, native,
 Nitro, or packaging files. GitHub CI does not build the Android or iOS example;
 use the commands above for local validation.
+
+The maintained Agent Device suite uses the installed example and requires an
+exact target:
+
+```sh
+bun run example:replay --platform ios --udid <UDID>
+bun run example:replay --platform android --serial <SERIAL>
+```
+
+See the [replay guide](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/docs/qa/agent-device-replay.md) for coverage, provider
+prerequisites, artifacts, and maintenance. `bun run check` validates the replay
+source lock and helper tests without starting a device. Review affected flows
+before running `bun run example:replay:refresh` after a package or example change.
 
 The [native performance investigation](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/docs/native-performance-plan.md) maps
 current C++ ownership and implemented credential, event, error, and snapshot

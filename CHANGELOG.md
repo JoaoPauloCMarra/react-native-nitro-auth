@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [0.13.2] - 2026-10-03
+
+### Breaking changes
+
+None.
+
+### Fixed
+
+- Web: a refresh from an earlier session cannot overwrite a new login.
+  Refresh rejects with `operation_in_progress` while an interactive session
+  operation is pending, and logout still cancels a login started in the same turn.
+- iOS and web: Apple sign-in respects an explicit empty `scopes` list instead
+  of requesting name and email. Omitted scopes retain the existing defaults.
+- Clarify that web provider sign-in uses Expo configuration through
+  `expo-constants`; the package has no separate plain-browser configuration API.
+
 ## [0.13.1] - 2026-10-01
 
 ### Breaking changes
