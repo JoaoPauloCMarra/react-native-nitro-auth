@@ -1,45 +1,40 @@
-# Example smoke coverage
+# Auth example smoke coverage
 
-The automated run clears only the example's package session. It requires no
-provider IDs or accounts. A pass proves the signed-out behavior below; it does
-not prove successful provider authentication.
+The maintained replay uses the example's installed release build. It expects
+the package session to be signed out before the run. The replay checks that
+precondition and stops if a user is present; it does not sign an existing user
+out. It does not build the app, start Metro, or inject provider credentials.
 
-| Feature                                  | Example runtime proof without providers                                                   | Additional provider acceptance                      |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Google, Apple, Microsoft `login`         | Each call is cancelled or returns its typed setup/unsupported error; no user is published | Successful sign-in and profile fields               |
-| `loginAndGetUser`                        | Each provider's pending call settles without returning a cancelled user                   | Returned user belongs to the completed login        |
-| Google/Apple `getCredential`             | Cancellation/setup failure leaves no package session                                      | Nonce-bound ID token and server verification        |
-| Session getters and snapshot             | Empty user/scopes agree; revision is an integer                                           | Atomic signed-in state and refreshed fields         |
-| `onSessionChanged`, `onAuthStateChanged` | Logout delivery, throwing listener isolation, queued unsubscribe suppression              | Signed-in transitions                               |
-| `onTokensRefreshed`                      | Registration and idempotent cleanup                                                       | Real token refresh payload                          |
-| `onAuthEvent`                            | Operation IDs, terminal timing, typed errors; no credential/detail fields                 | Real provider success/failure events                |
-| `getAccessToken`, `refreshToken`         | Undefined token and typed signed-out rejection                                            | Expiry refresh and deduplication against provider   |
-| `requestScopes`                          | Typed signed-out rejection                                                                | Provider consent                                    |
-| `revokeScopes`, `revokeScopesWithResult` | Empty local result, `revokedAtProvider: false`                                            | Local reduction of granted scopes                   |
-| `revokeAccess`                           | Typed signed-out rejection                                                                | Eligible Google revocation                          |
-| `silentRestore`                          | Empty session settles without interactive UI                                              | Provider SDK restoration                            |
-| `logout`, `dispose`                      | Empty state, cancellation, recreation and subsequent API use                              | Cleanup of real provider state                      |
-| `useAuth`                                | Real hook actions, error paths, shared snapshot updates                                   | Signed-in rendering                                 |
-| Capabilities and errors                  | Every provider/platform capability shape; all public error codes                          | Provider-specific capabilities with configured SDKs |
-| Logging                                  | Toggle on/off                                                                             | No extra acceptance required                        |
-| Social buttons                           | Custom/official image/SVG gallery, Google/Apple press handlers, icon-only and loading     | Authentication handlers are covered separately      |
+The default Smoke Tests action covers public signed-out behavior: session
+getters and snapshots, lifecycle listeners, operation event correlation,
+typed token and scope results, `useAuth`, capability values, error mapping, and
+logging controls. It leaves provider-dependent cancellation, credential,
+restore, and dispose probes visibly `PENDING`. The completion text names those
+pending provider checks. It stops after a failed signed-out precondition and
+does not run later API probes against an existing account. A separate Provider
+QA action can open native provider UI and is outside the default replay.
 
-## Commands
+The visual button gallery is separate from authentication. Its Google and
+Apple handlers only update the “Last visual button pressed” label. Image, SVG,
+shape, appearance, icon-only, and loading assertions prove rendering and press
+feedback only.
 
-1. `CI=1 bun run --cwd apps/example prebuild -- --platform android`
-2. `bun run example:android:assemble`
-3. Install the generated APK on the selected Android emulator and connect it to
-   this example's Metro server. Use a free port and confirm server ownership.
-4. `agent-device test e2e/qa-full-features.ad --device '<emulator name>'`
-5. `CI=1 bun run --cwd apps/example prebuild -- --platform ios`
-6. `bun run example:ios:build`
-7. Install and launch the resulting app on the selected iOS simulator or
-   physical iPhone, then run
-   `agent-device test e2e/qa-full-features.ad --device '<simulator name>'`.
-   A free personal team cannot provision Sign In with Apple. Leave
-   `NITRO_AUTH_APPLE_SIGN_IN` unset so the example installs; set it to `1`
-   only on a paid Apple Developer team when live Apple Sign-In is required.
+| Area                          | Default replay assertion                                                                                                                                                                        | Additional acceptance still pending                                                                                     |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Session getters and snapshots | Empty user and scopes agree with legacy getters; snapshot revision is a safe integer                                                                                                            | Coherent signed-in state and refreshed fields                                                                           |
+| Session listeners             | On native, user and snapshot listeners receive a signed-out local scope update; throwing listeners are isolated; unsubscribe blocks later callbacks while an active control receives the update | Web local-revoke events, signed-in and provider-driven transitions                                                      |
+| Lifecycle events              | A signed-out refresh failure has matching operation IDs, a typed `not_signed_in` code, and no credential fields                                                                                 | Real provider success and failure events                                                                                |
+| Access token and scopes       | Signed-out access token is `undefined`; `revokeAccess` returns typed `not_signed_in`; local scope revoke is empty and says `revokedAtProvider: false`                                           | `requestScopes`, token refresh, scope consent, and provider revocation                                                  |
+| Logout                        | Not invoked by the default replay                                                                                                                                                               | Provider SDK cleanup and account isolation on a dedicated test target                                                   |
+| Silent restore                | Marked pending because it may restore a cached provider identity                                                                                                                                | Separate run on a dedicated QA target with known provider state                                                         |
+| Login and credentials         | Provider login, `loginAndGetUser`, `getCredential`, cancellation, and disposal probes remain pending and are not called by default                                                              | Configured provider app, dedicated account, typed outcomes, and no published user after cancellation                    |
+| Nonce                         | On iOS and Android, raw nonce has the expected base64url shape and hash has the SHA-256 hex shape; values are never rendered                                                                    | Web nonce API if supported; provider credential exchange and server signature, audience, expiry, and nonce verification |
+| Capabilities and errors       | Public provider capability matrix and declared error codes match their concrete values                                                                                                          | Provider-specific results with configured SDKs                                                                          |
+| Visual buttons                | Google and Apple presses update the gallery feedback label                                                                                                                                      | No authentication claim; provider login is covered separately                                                           |
 
-Inspect package-owned runtime errors after each run. The smoke result must reach
-`Complete: PASS`; a build alone or a screen that only lists APIs is insufficient.
-Provider acceptance was excluded from this validation pass by user instruction.
+Google, Apple iOS, Apple Android broker, Microsoft, `loginAndGetUser`, real
+refresh and deduplication, scope consent, credential server verification,
+logout cleanup, silent restore, and provider cancellation acceptance remain
+`PENDING` until the prerequisites in [the replay coverage manifest](../e2e/auth-replay-coverage.json)
+are met. A visual press, API-name check, setup error, or cancellation does not
+close those rows.

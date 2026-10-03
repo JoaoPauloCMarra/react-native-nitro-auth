@@ -1,14 +1,17 @@
 # AGENTS.md — react-native-nitro-auth
 
 ## Project Overview
+
 React Native Nitro module for authentication (Google, Apple, Microsoft). C++ core with iOS/Android native bridges and a web implementation.
 
 ## Structure
+
 - `packages/react-native-nitro-auth/` — published library
 - `apps/example/` — Expo example app
 - Monorepo: bun workspaces (no Turborepo)
 
 ## Commands
+
 - `bun install` — install deps
 - `bun run codegen` — regenerate Nitro specs (nitrogen)
 - `bun run build` — build library (bob)
@@ -17,10 +20,12 @@ React Native Nitro module for authentication (Google, Apple, Microsoft). C++ cor
 - `bun run release:preflight` — run release gate, Expo SDK checks, config introspection, and package dry run
 
 ## Design Decisions
+
 - **In-memory token storage is intentional.** Microsoft refresh tokens and all tokens are kept in memory only. The consuming project decides its own persistence/secure-storage strategy. This is NOT a bug — do not flag it.
 - **JWT signature validation is the server's responsibility.** Client-side JWT decode is for display only. Native payload splits live in `cpp/AuthCrypto.cpp`; do not add jwt-cpp or client signature verify.
 
 ## Key Patterns
+
 - `AuthAdapter.swift` / `AuthAdapter.kt` — platform bridges
 - `HybridAuth.cpp` — shared C++ HybridObject (Nitro)
 - `PlatformAuth.cpp` + `HybridNativeAuthAdapter.swift` / `HybridNativeAuthAdapter.kt` — Nitro adapter bridge to the platform code
@@ -29,6 +34,7 @@ React Native Nitro module for authentication (Google, Apple, Microsoft). C++ cor
 - Error contract: all public-facing errors must be `AuthError` instances with `AuthErrorCode`
 
 ## Pitfalls
+
 - After upgrading nitrogen, delete stale `packages/react-native-nitro-auth/node_modules/nitrogen/` before codegen
 - Nitro `0.35.1+` autolinking expects `"c++"` in `nitro.json`, not `"cpp"`
 - `HybridAuth.cpp` lambdas capturing `this` — must use `shared_from_this()` or `weak_from_this()` for safety
@@ -42,6 +48,7 @@ React Native Nitro module for authentication (Google, Apple, Microsoft). C++ cor
 - Keep `expo-build-properties` `ios.usePrecompiledModules` disabled for the example app until Expo/Xcode precompiled module linking is proven stable; with Xcode 26.5 the precompiled Expo module path produced `SwiftUICore`/`ExpoFileSystem` link failures while source-built Expo modules passed.
 
 ## Code Style
+
 - kebab-case file names
 - No `any` casts — type properly
 - Early returns over deep nesting
@@ -49,3 +56,10 @@ React Native Nitro module for authentication (Google, Apple, Microsoft). C++ cor
 - Conventional commits: `fix:`, `feat:`, `chore:`, `refactor:`, `docs:`
 - PR body is the current version's CHANGELOG section. The GitHub release
   description must match it. Do not add Summary, Test plan, or extra sections.
+
+## Replay maintenance
+
+- Review `e2e/auth-replay-coverage.json` and the affected `.ad` assertions whenever package runtime or example behavior changes. Update them before refreshing the source lock with `bun run example:replay:refresh`.
+- Keep `example:replay:check` and `example:replay:test` in the normal quality gate. They are device-free; refreshing a digest does not prove runtime behavior.
+- Run `example:replay` only against an explicit platform and device identifier, using the matching installed example. Keep device execution out of CI and artifacts in OS temp.
+- Signed-out checks, cancellation, button rendering, and provider authentication are distinct evidence. Keep provider-dependent rows pending until their configured account, platform, and server prerequisites are verified.

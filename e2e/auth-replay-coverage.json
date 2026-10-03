@@ -1,0 +1,479 @@
+{
+  "version": 1,
+  "entry": "scripts/run-example-replay.js",
+  "sourceScope": [
+    "Auth package JavaScript, TypeScript, C++, iOS, Android, generated Nitro bindings, and native wiring",
+    "Example app and component source, assets, runtime configuration, package manifests, and workspace lockfile",
+    "Auth replay flows and this coverage manifest are pinned separately in the source lock"
+  ],
+  "suites": [
+    {
+      "id": "full-features",
+      "path": "e2e/qa-full-features.ad",
+      "purpose": "Visual social-button feedback plus signed-out session, token, scope, lifecycle-event, and deterministic smoke assertions"
+    },
+    {
+      "id": "deeplink",
+      "path": "e2e/qa-deeplink.ad",
+      "purpose": "Open the Auth example E2E route and confirm it remains signed out"
+    },
+    {
+      "id": "credentials",
+      "path": "e2e/qa-credentials.ad",
+      "purpose": "Validate nonce shape, public provider capability matrix, and coherent empty-session values without displaying credentials"
+    }
+  ],
+  "features": [
+    {
+      "id": "social-button.google-visual",
+      "coverage": "replay-asserted",
+      "kind": "visual-only",
+      "transport": "Google social-button press updates the gallery's last-pressed label; the handler does not call AuthService",
+      "claimLimit": "This proves only visual button interaction and never proves authentication.",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/social-button-gallery.tsx",
+      "statusSource": "apps/example/app/e2e.tsx",
+      "controlId": "gallery-google",
+      "statusId": "e2e-screen",
+      "expectedText": "Last visual button pressed: Google",
+      "assertion": "setLastProvider(\"Google\")"
+    },
+    {
+      "id": "social-button.apple-visual",
+      "coverage": "replay-asserted",
+      "kind": "visual-only",
+      "transport": "Apple social-button press updates the gallery's last-pressed label; the handler does not call AuthService",
+      "claimLimit": "This proves only visual button interaction and never proves authentication.",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/social-button-gallery.tsx",
+      "statusSource": "apps/example/app/e2e.tsx",
+      "controlId": "gallery-apple",
+      "statusId": "e2e-screen",
+      "expectedText": "Last visual button pressed: Apple",
+      "assertion": "setLastProvider(\"Apple\")"
+    },
+    {
+      "id": "auth.e2e-deeplink",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Installed example route opened through auth://e2e; a signed-out package session is a precondition",
+      "suite": "e2e/qa-deeplink.ad",
+      "source": "apps/example/components/e2e-lab.tsx",
+      "statusSource": "apps/example/app/e2e.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-screen",
+      "expectedText": "e2e-ready",
+      "assertion": "auth://e2e"
+    },
+    {
+      "id": "auth.capability-matrix",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public getProviderTokenCapabilities result compared with the documented iOS or Android matrix",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/e2e-lab.tsx",
+      "controlId": "e2e-capabilities-run",
+      "statusId": "e2e-capabilities",
+      "expectedText": "ok:provider-capability-matrix=match",
+      "assertion": "capabilityMatrixMatches(platform)"
+    },
+    {
+      "id": "auth.capability-matrix-repeat",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Forty repeated public provider capability matrix checks retain the documented platform values",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/e2e-lab.tsx",
+      "controlId": "e2e-run-stress",
+      "statusId": "e2e-stress-result",
+      "expectedText": "ok:provider-capability-matrix-repeat=40",
+      "assertion": "capabilityMatrixMatches(platform)"
+    },
+    {
+      "id": "auth.session-snapshot-getters",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public session snapshot agrees with currentUser and grantedScopes in the required signed-out fixture state",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/e2e-lab.tsx",
+      "controlId": "e2e-api-run",
+      "statusId": "e2e-api-status",
+      "expectedText": "ok:session=user=none:scopes=0:revision=",
+      "assertion": "snapshot.user === currentUser"
+    },
+    {
+      "id": "auth.signed-out-access-token",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public getAccessToken result is checked as undefined without printing a token value",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/e2e-lab.tsx",
+      "controlId": "e2e-get-token",
+      "statusId": "e2e-session-action",
+      "expectedText": "ok:access-token=undefined",
+      "assertion": "token === undefined"
+    },
+    {
+      "id": "auth.signed-out-scope-contract",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Local scope revoke resolves empty and revokeAccess returns typed not_signed_in; requestScopes is held for explicit provider acceptance",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/e2e-lab.tsx",
+      "controlId": "e2e-scopes-run",
+      "statusId": "e2e-scopes-status",
+      "expectedText": "ok:revokeScopes=resolved:revokedScopes=0:revokedAtProvider=false:revokeAccess=not_signed_in",
+      "assertion": "revocation.revokedAtProvider !== false"
+    },
+    {
+      "id": "auth.lifecycle-event-delivery",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Mounted public onAuthEvent listener receives signed-out API operation events",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/e2e-lab.tsx",
+      "controlId": "e2e-events-run",
+      "statusId": "e2e-events",
+      "expectedText": "ok:auth-event-listener=received:",
+      "assertion": "eventCount > 0"
+    },
+    {
+      "id": "smoke.signed-out-precondition",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "SmokeTestCard reads the existing package snapshot and refuses to clear a pre-existing session",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "statusPattern": "smoke-case",
+      "probeName": "Start from a signed-out example session",
+      "probeId": "start-from-a-signed-out-example-session",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-start-from-a-signed-out-example-session-status",
+      "expectedText": "PASS:start-from-a-signed-out-example-session",
+      "assertion": "Replay requires an already signed-out example session"
+    },
+    {
+      "id": "smoke.capability-matrix",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "SmokeTestCard checks exact access-token and refresh capability values for every provider on the selected platform",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "statusPattern": "smoke-case",
+      "probeName": "Capabilities describe every provider on this platform",
+      "probeId": "capabilities-describe-every-provider-on-this-platform",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-capabilities-describe-every-provider-on-this-platform-status",
+      "expectedText": "PASS:capabilities-describe-every-provider-on-this-platform",
+      "assertion": "google.supportsAccessToken === (platform !== \"android\")"
+    },
+    {
+      "id": "smoke.session-snapshot",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Atomic snapshot revision, empty user and scopes, and legacy scope getter agree",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "statusPattern": "smoke-case",
+      "probeName": "Atomic snapshot agrees with legacy getters",
+      "probeId": "atomic-snapshot-agrees-with-legacy-getters",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-atomic-snapshot-agrees-with-legacy-getters-status",
+      "expectedText": "PASS:atomic-snapshot-agrees-with-legacy-getters",
+      "assertion": "Number.isSafeInteger(snapshot.revision)"
+    },
+    {
+      "id": "smoke.listener-delivery",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public session and user listeners both receive a signed-out local scope update while a throwing listener is isolated",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "statusPattern": "smoke-case",
+      "probeName": "Snapshot and user events survive a throwing listener",
+      "probeId": "snapshot-and-user-events-survive-a-throwing-listener",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-snapshot-and-user-events-survive-a-throwing-listener-status",
+      "expectedText": "PASS:snapshot-and-user-events-survive-a-throwing-listener",
+      "assertion": "states > initialStates && snapshots > initialSnapshots"
+    },
+    {
+      "id": "smoke.listener-unsubscribe",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "On native, unsubscribe is idempotent and prevents later local-update callbacks while an active control listener receives the update",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "statusPattern": "smoke-case",
+      "probeName": "Unsubscribe stops later callbacks and is idempotent",
+      "probeId": "unsubscribe-stops-later-callbacks-and-is-idempotent",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-unsubscribe-stops-later-callbacks-and-is-idempotent-status",
+      "expectedText": "PASS:unsubscribe-stops-later-callbacks-and-is-idempotent",
+      "assertion": "calls === atRemoval"
+    },
+    {
+      "id": "smoke.operation-event-correlation",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Signed-out refresh operation emits a correlated typed failure without provider credentials",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "statusPattern": "smoke-case",
+      "probeName": "Operation events correlate failure and omit provider details",
+      "probeId": "operation-events-correlate-failure-and-omit-provider-details",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-operation-events-correlate-failure-and-omit-provider-details-status",
+      "expectedText": "PASS:operation-events-correlate-failure-and-omit-provider-details",
+      "assertion": "start.operationId === end.operationId"
+    },
+    {
+      "id": "smoke.signed-out-scope-revoke",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Local scope revoke returns an empty result while revokeAccess rejects as not_signed_in",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "statusPattern": "smoke-case",
+      "probeName": "Signed-out scope revoke preserves local semantics",
+      "probeId": "signed-out-scope-revoke-preserves-local-semantics",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-signed-out-scope-revoke-preserves-local-semantics-status",
+      "expectedText": "PASS:signed-out-scope-revoke-preserves-local-semantics",
+      "assertion": "result.revokedAtProvider === false"
+    },
+    {
+      "id": "smoke.signed-out-token",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public access-token result is undefined without a signed-in package session",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "statusPattern": "smoke-case",
+      "probeName": "Signed-out access token is undefined",
+      "probeId": "signed-out-access-token-is-undefined",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-signed-out-access-token-is-undefined-status",
+      "expectedText": "PASS:signed-out-access-token-is-undefined",
+      "assertion": "(await AuthService.getAccessToken()) === undefined"
+    },
+    {
+      "id": "smoke.useauth-contract",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "useAuth exposes signed-out token, refresh, scope, revoke, and typed error behavior",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "statusPattern": "smoke-case",
+      "probeName": "useAuth exposes signed-out token and revoke behavior",
+      "probeId": "useauth-exposes-signed-out-token-and-revoke-behavior",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-useauth-exposes-signed-out-token-and-revoke-behavior-status",
+      "expectedText": "PASS:useauth-exposes-signed-out-token-and-revoke-behavior",
+      "assertion": "hookReturn.user === undefined"
+    },
+    {
+      "id": "smoke.error-code-contract",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public AuthError conversion recognizes every declared code and maps an unknown string to unknown",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "statusPattern": "smoke-case",
+      "probeName": "All public error codes map deterministically",
+      "probeId": "all-public-error-codes-map-deterministically",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-all-public-error-codes-map-deterministically-status",
+      "expectedText": "PASS:all-public-error-codes-map-deterministically",
+      "assertion": "AuthError.from(\"not_a_code\").code === \"unknown\""
+    },
+    {
+      "id": "smoke.logging-toggle",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public logging toggle accepts on and off while no credential data is present",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "statusPattern": "smoke-case",
+      "probeName": "Logging can be toggled",
+      "probeId": "logging-can-be-toggled",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-logging-can-be-toggled-status",
+      "expectedText": "PASS:logging-can-be-toggled",
+      "assertion": "AuthService.setLoggingEnabled(true)"
+    },
+    {
+      "id": "smoke.provider-probes-remain-pending",
+      "coverage": "replay-asserted",
+      "kind": "coverage-state",
+      "transport": "Default run reports provider probes as pending and does not call their provider-dependent APIs",
+      "claimLimit": "This assertion checks the pending classification only; it does not validate cancellation, restore, disposal, or authentication.",
+      "suite": "e2e/qa-full-features.ad",
+      "source": "apps/example/components/SmokeTestCard.tsx",
+      "controlId": "smoke-run-all",
+      "statusId": "smoke-summary",
+      "expectedText": "Deterministic checks: PASS; provider acceptance: PENDING",
+      "assertion": "item.requiresProvider && !includeProvider"
+    },
+    {
+      "id": "credentials.nonce-shape",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "On iOS and Android, public Auth.createNonce returns a 32-byte base64url raw nonce and SHA-256 hex digest; the values are never rendered",
+      "suite": "e2e/qa-credentials.ad",
+      "source": "apps/example/app/e2e-credentials.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-credentials-nonce",
+      "expectedText": "ok:nonce=raw-base64url-43:hashed-sha256-hex-64",
+      "assertion": "/^[A-Za-z0-9_-]{43}$/.test(nonceValue.raw)"
+    },
+    {
+      "id": "credentials.capability-matrix",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public provider capability matrix checked against the selected iOS or Android platform",
+      "suite": "e2e/qa-credentials.ad",
+      "source": "apps/example/app/e2e-credentials.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-credentials-capabilities",
+      "expectedText": "ok:provider-capability-matrix=match",
+      "assertion": "capabilityMatrixMatches(platform)"
+    },
+    {
+      "id": "credentials.empty-session-snapshot",
+      "coverage": "replay-asserted",
+      "kind": "public-api",
+      "transport": "Public snapshot, currentUser, and grantedScopes agree on an empty signed-out session",
+      "suite": "e2e/qa-credentials.ad",
+      "source": "apps/example/app/e2e-credentials.tsx",
+      "trigger": "screen-load",
+      "statusId": "e2e-credentials-snapshot",
+      "expectedText": "ok:session=user=none:scopes=0:revision=safe-integer",
+      "assertion": "session.user === undefined &&\n    AuthService.currentUser === undefined"
+    }
+  ],
+  "pending": [
+    {
+      "id": "auth.google-login-success",
+      "state": "pending-prerequisites",
+      "reason": "The default replay does not invoke Google login or use an account. Successful native provider authentication and returned identity remain unverified.",
+      "prerequisites": [
+        "Installed iOS or Android release example with the matching Google client configuration",
+        "Approved dedicated Google QA account and staging callback configuration",
+        "Provider token and returned AuthUser fields inspected without recording token values"
+      ],
+      "acceptance": "Complete one explicit Google sign-in on each requested platform, verify the returned public user belongs to Google, and confirm the backend accepts the signed identity before marking this row passed."
+    },
+    {
+      "id": "auth.apple-ios-login-success",
+      "state": "pending-prerequisites",
+      "reason": "No Apple sign-in or account flow runs in the default replay.",
+      "prerequisites": [
+        "Paid Apple Developer team and Sign in with Apple capability for the installed bundle",
+        "Dedicated Apple QA account and staging server verification route"
+      ],
+      "acceptance": "Complete Apple login on iOS, verify the nonce-bound identity server-side, and record only non-secret provider and user-field evidence."
+    },
+    {
+      "id": "auth.apple-android-broker",
+      "state": "pending-prerequisites",
+      "reason": "The default replay makes no Apple Android broker request and cannot prove broker or server behavior.",
+      "prerequisites": [
+        "Configured staging Apple broker and reachable server endpoint",
+        "Dedicated Apple QA account and Android release example configuration"
+      ],
+      "acceptance": "Complete the Android broker flow, validate the returned nonce-bound token at the server, and verify the final public AuthUser without storing credential values in artifacts."
+    },
+    {
+      "id": "auth.microsoft-login-success",
+      "state": "pending-prerequisites",
+      "reason": "The default replay does not invoke Microsoft login or use a tenant account.",
+      "prerequisites": [
+        "Registered staging application, redirect URI, and tenant policy for the installed target",
+        "Approved dedicated Microsoft QA account"
+      ],
+      "acceptance": "Complete Microsoft sign-in on each requested platform, validate public provider/user fields, and record the final signed-in snapshot without token values."
+    },
+    {
+      "id": "auth.login-and-get-user-success",
+      "state": "pending-prerequisites",
+      "reason": "No provider login is invoked, so loginAndGetUser success and atomic publication are not observed.",
+      "prerequisites": [
+        "Provider-specific staging setup and dedicated accounts for Google, Apple, and Microsoft",
+        "Signed-in snapshot and lifecycle event capture with secrets redacted"
+      ],
+      "acceptance": "For every configured provider, prove loginAndGetUser resolves the matching AuthUser and publishes the same user and scopes in one coherent session snapshot."
+    },
+    {
+      "id": "auth.refresh-and-deduplication",
+      "state": "pending-prerequisites",
+      "reason": "A signed-out token getter cannot validate real token refresh, rotation, expiry, or concurrent refresh behavior.",
+      "prerequisites": [
+        "Staging provider session with a refreshable token and controlled expiry",
+        "Native operation event evidence for concurrent callers"
+      ],
+      "acceptance": "Expire an approved test session, issue concurrent refresh requests, and prove one refresh produces a coherent replacement token/session before waiting requests continue; keep all token values out of artifacts."
+    },
+    {
+      "id": "auth.scope-consent",
+      "state": "pending-prerequisites",
+      "reason": "The default replay checks local empty revoke and signed-out revokeAccess only. requestScopes may interact with cached native provider state and is not called by the default replay.",
+      "prerequisites": [
+        "Provider test account and requested consent scopes approved for the staging application",
+        "Separate account able to grant and decline the requested consent",
+        "Explicit provider QA run on an isolated target with known native account state"
+      ],
+      "acceptance": "Prove granted and declined scope outcomes update the public session snapshot correctly, and never describe local revokeScopes as provider revocation."
+    },
+    {
+      "id": "auth.credential-server-verification",
+      "state": "pending-prerequisites",
+      "reason": "The replay checks nonce shape only; it never requests a Google or Apple credential or sends it to a server.",
+      "prerequisites": [
+        "Dedicated Google and Apple staging test accounts",
+        "Server-side signature, issuer, audience, expiry, and nonce verification evidence"
+      ],
+      "acceptance": "Acquire each provider credential in a separate explicit run, verify it at the staging server, and preserve only redacted outcome evidence; do not write ID tokens, authorization codes, or raw nonces to replay artifacts."
+    },
+    {
+      "id": "auth.silent-restore",
+      "state": "pending-prerequisites",
+      "reason": "silentRestore may recover a cached provider identity, so the default replay never calls it.",
+      "prerequisites": [
+        "Dedicated QA device or simulator with known provider account state",
+        "Explicit opt-in restore run and post-run account cleanup plan"
+      ],
+      "acceptance": "Run restore separately for signed-out, cached-valid, and revoked provider sessions; record the public outcome and final session state without claiming successful provider validation from the default suite."
+    },
+    {
+      "id": "auth.provider-cancellation-and-dispose",
+      "state": "pending-prerequisites",
+      "reason": "Provider cancellation, credential cancellation, and dispose cancellation probes can open native provider UI and are not run by default. Their cancellation helper also invokes the public logout path.",
+      "prerequisites": [
+        "Configured provider test app and dedicated test account or deterministic provider fixture",
+        "Explicit invocation of the Provider QA control on an isolated signed-out QA target",
+        "Dedicated provider state because native logout may sign out the provider SDK"
+      ],
+      "acceptance": "For login, loginAndGetUser, getCredential, and dispose, assert the typed cancellation/setup contract, no published user after cancellation, empty recreated snapshot, and no token or credential text in artifacts."
+    },
+    {
+      "id": "auth.provider-logout-cleanup",
+      "state": "pending-prerequisites",
+      "reason": "The default replay avoids public logout because the native adapter may sign out its provider SDK even when the package session is empty.",
+      "prerequisites": [
+        "Dedicated provider test account and an isolated target",
+        "Known provider and package session state before logout"
+      ],
+      "acceptance": "With a signed-in test package session, verify logout clears the public user and scopes, terminates pending work as documented, and does not alter another installation or account session."
+    },
+    {
+      "id": "credentials.nonce-web-native-bridge",
+      "state": "pending-prerequisites",
+      "reason": "The package does not expose createNonce through its web AuthService surface, so the credentials screen reports the native nonce check as pending on web.",
+      "prerequisites": [
+        "A supported public web nonce API, if browser nonce coverage is required"
+      ],
+      "acceptance": "Keep the web nonce row pending until a public web nonce API exists; do not call a native HybridObject or report web as a native nonce failure."
+    }
+  ]
+}

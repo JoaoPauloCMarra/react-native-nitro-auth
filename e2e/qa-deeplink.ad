@@ -1,5 +1,9 @@
 open "com.auth.example" "auth://e2e" --relaunch
 wait "stable"
 wait id="e2e-screen"
+wait id="e2e-ready"
 wait text "e2e-ready"
+wait id="e2e-deeplink"
+wait text "auth://e2e"
+wait text "signed-out"
 close

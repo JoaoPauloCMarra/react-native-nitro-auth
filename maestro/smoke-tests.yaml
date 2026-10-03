@@ -1,18 +1,23 @@
 appId: com.auth.example
 name: "Smoke Tests - Terminal State"
 ---
-
 - clearState
 - launchApp
 
 - scrollUntilVisible:
-    element: "Smoke Tests"
+    element:
+      id: "smoke-run-all"
     direction: DOWN
 
-- tapOn: "Run smoke tests"
+- tapOn:
+    id: "smoke-run-all"
 
 - extendedWaitUntil:
-    visible: "Complete: (PASS|FAIL).*"
+    visible:
+      id: "smoke-summary"
+      text: "(Deterministic checks|Smoke probes): (PASS|PARTIAL|FAIL).*"
     timeout: 60000
-- assertVisible: "Complete: PASS.*"
-- assertNotVisible: "Complete: FAIL.*"
+- assertVisible:
+    id: "smoke-summary"
+    text: "Deterministic checks: PASS; provider acceptance: PENDING.*"
+- assertNotVisible: "Smoke probes: FAIL.*"

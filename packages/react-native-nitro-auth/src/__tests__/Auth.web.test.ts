@@ -1092,6 +1092,274 @@ describe("AuthModule (web)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["resolve", "reject"] as const)(
+    "cancels a Microsoft refresh before Apple login when its response later %s",
+    async (refreshOutcome) => {
+      localStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({
+          provider: "microsoft",
+          email: "old@example.com",
+          refreshToken: "refresh-token",
+        }),
+      );
+      localStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
+
+      let resolveRefresh: ((response: Response) => void) | undefined;
+      let rejectRefresh: ((error: Error) => void) | undefined;
+      const fetchMock = jest.fn(
+        () =>
+          new Promise<Response>((resolve, reject) => {
+            resolveRefresh = resolve;
+            rejectRefresh = reject;
+          }),
+      );
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        writable: true,
+        value: fetchMock,
+      });
+
+      Object.defineProperty(window, "AppleID", {
+        configurable: true,
+        writable: true,
+        value: {
+          auth: {
+            init: jest.fn(),
+            signIn: jest.fn(async () => ({
+              authorization: {
+                id_token: createJwtWithPayload({
+                  email: "new@example.com",
+                  nonce: "switch-nonce",
+                }),
+                code: "apple-code",
+              },
+              user: { email: "new@example.com" },
+            })),
+          },
+        },
+      });
+
+      const auth = await loadAuthModule({
+        nitroAuthWebStorage: "local",
+        nitroAuthPersistTokensOnWeb: true,
+        microsoftClientId: "microsoft-client-id",
+        appleWebClientId: "apple-client-id",
+      });
+      const events: TestAuthEvent[] = [];
+      auth.onAuthEvent((event) => events.push(event));
+      const refreshing = auth.refreshToken().then(
+        () => "resolved",
+        (error: Error) => error.message,
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await auth.login("apple", { nonce: "switch-nonce" });
+
+      if (!resolveRefresh || !rejectRefresh) {
+        throw new Error("Microsoft refresh request did not start");
+      }
+      if (refreshOutcome === "resolve") {
+        resolveRefresh({
+          ok: true,
+          json: async () => ({
+            id_token: createJwtWithPayload({
+              preferred_username: "old@example.com",
+              exp: 4102444800,
+            }),
+            access_token: "old-access-token",
+            refresh_token: "rotated-refresh-token",
+            expires_in: 3600,
+          }),
+        } as Response);
+      } else {
+        rejectRefresh(new Error("late refresh network failure"));
+      }
+
+      expect(auth.currentUser).toMatchObject({
+        provider: "apple",
+        email: "new@example.com",
+      });
+      expect(auth.currentUser?.accessToken).not.toBe("old-access-token");
+      await expect(refreshing).resolves.toBe("cancelled");
+      expect(events.filter((event) => event.type === "refresh_failed")).toEqual(
+        [],
+      );
+    },
+  );
+
+  it("rejects refresh while an Apple login is in progress", async () => {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "microsoft",
+        email: "old@example.com",
+        refreshToken: "refresh-token",
+      }),
+    );
+    localStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
+
+    let signalAppleSignIn: (() => void) | undefined;
+    let finishAppleSignIn:
+      | ((response: {
+          authorization: { id_token: string; code: string };
+          user: { email: string };
+        }) => void)
+      | undefined;
+    const appleSignInStarted = new Promise<void>((resolve) => {
+      signalAppleSignIn = resolve;
+    });
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: {
+        auth: {
+          init: jest.fn(),
+          signIn: jest.fn(
+            () =>
+              new Promise<{
+                authorization: { id_token: string; code: string };
+                user: { email: string };
+              }>((resolve) => {
+                finishAppleSignIn = resolve;
+                signalAppleSignIn?.();
+              }),
+          ),
+        },
+      },
+    });
+
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: true,
+      microsoftClientId: "microsoft-client-id",
+      appleWebClientId: "apple-client-id",
+    });
+    const fetchMock = jest.fn(
+      async () =>
+        ({
+          ok: true,
+          json: async () => ({
+            id_token: createJwtWithPayload({
+              preferred_username: "old@example.com",
+              exp: 4102444800,
+            }),
+            access_token: "old-access-token",
+            refresh_token: "rotated-refresh-token",
+            expires_in: 3600,
+          }),
+        }) as Response,
+    );
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: fetchMock,
+    });
+
+    const loggingIn = auth.login("apple", { nonce: "switch-nonce" });
+    await appleSignInStarted;
+
+    const refreshOutcome = await auth.refreshToken().then(
+      () => ({ status: "resolved" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+
+    if (!finishAppleSignIn) {
+      throw new Error("Apple sign-in request did not start");
+    }
+    finishAppleSignIn({
+      authorization: {
+        id_token: createJwtWithPayload({
+          email: "new@example.com",
+          nonce: "switch-nonce",
+        }),
+        code: "apple-code",
+      },
+      user: { email: "new@example.com" },
+    });
+    await expect(loggingIn).resolves.toBeUndefined();
+    expect(refreshOutcome).toMatchObject({
+      status: "rejected",
+      error: { code: "operation_in_progress" },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("cancels an older Microsoft refresh when a scope request starts", async () => {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        provider: "microsoft",
+        idToken: "cached-id-token",
+        accessToken: "cached-access-token",
+        refreshToken: "refresh-token",
+      }),
+    );
+    localStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
+
+    let resolveOldRefresh: ((response: Response) => void) | undefined;
+    const fetchMock = jest.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveOldRefresh = resolve;
+        }),
+    );
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: fetchMock,
+    });
+    const openMock = jest.fn(() => null);
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      writable: true,
+      value: openMock,
+    });
+
+    const auth = await loadAuthModule({
+      nitroAuthWebStorage: "local",
+      nitroAuthPersistTokensOnWeb: true,
+      microsoftClientId: "microsoft-client-id",
+    });
+    const events: TestAuthEvent[] = [];
+    auth.onAuthEvent((event) => events.push(event));
+    const refreshing = auth.refreshToken().then(
+      () => "resolved",
+      (error: Error) => error.message,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await expect(auth.requestScopes(["User.Read"])).rejects.toMatchObject({
+      code: "popup_blocked",
+    });
+    expect(openMock).toHaveBeenCalledTimes(1);
+
+    if (!resolveOldRefresh) {
+      throw new Error("Microsoft refresh request did not start");
+    }
+    resolveOldRefresh({
+      ok: true,
+      json: async () => ({
+        id_token: createJwtWithPayload({
+          exp: 4102444800,
+          preferred_username: "old@example.com",
+        }),
+        access_token: "old-access-token",
+        refresh_token: "old-rotated-refresh-token",
+        expires_in: 3600,
+      }),
+    } as Response);
+
+    await expect(refreshing).resolves.toBe("cancelled");
+    expect(events.filter((event) => event.type === "refresh_failed")).toEqual(
+      [],
+    );
+    expect(auth.currentUser).toMatchObject({
+      provider: "microsoft",
+      accessToken: "cached-access-token",
+    });
+  });
+
   it("keeps token listener notifications stable while listeners unsubscribe", async () => {
     const expSoon = Date.now() + 60_000;
 
@@ -1958,7 +2226,17 @@ describe("AuthModule (web)", () => {
       ),
     });
 
+    const events: TestAuthEvent[] = [];
+    auth.onAuthEvent((event) => events.push(event));
+
     await expect(auth.refreshToken()).rejects.toThrow("refresh_failed");
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "refresh_failed",
+        provider: "microsoft",
+        errorCode: "refresh_failed",
+      }),
+    );
   });
 
   it("rejects Apple identity tokens with a mismatched nonce", async () => {
@@ -2882,6 +3160,43 @@ describe("AuthModule (web)", () => {
     ).resolves.toBeUndefined();
     expect(initMock).toHaveBeenCalledWith(
       expect.objectContaining({ scope: "name" }),
+    );
+  });
+
+  it("preserves empty Apple scopes while keeping defaults when scopes are omitted", async () => {
+    const initMock = jest.fn();
+    Object.defineProperty(window, "AppleID", {
+      configurable: true,
+      writable: true,
+      value: {
+        auth: {
+          init: initMock,
+          signIn: jest.fn(async () => ({
+            authorization: {
+              id_token: createJwtWithPayload({ nonce: "test-random-uuid" }),
+            },
+          })),
+        },
+      },
+    });
+
+    const auth = await loadAuthModule({
+      appleWebClientId: "apple-client-id",
+    });
+
+    await auth.login("apple", {
+      nonce: "test-random-uuid",
+      scopes: [],
+    });
+    await auth.login("apple", { nonce: "test-random-uuid" });
+
+    expect(initMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ scope: "" }),
+    );
+    expect(initMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ scope: "name email" }),
     );
   });
 

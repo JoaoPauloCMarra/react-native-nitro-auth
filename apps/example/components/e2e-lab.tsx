@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import {
-  AuthError,
-  AuthService,
-  getProviderTokenCapabilities,
-  type AuthPlatform,
-} from "react-native-nitro-auth";
+import { AuthService, type AuthPlatform } from "react-native-nitro-auth";
+import { authErrorCode, capabilityMatrixMatches } from "./e2e-auth-checks";
 
 function currentPlatform(): AuthPlatform {
   if (
@@ -18,11 +14,39 @@ function currentPlatform(): AuthPlatform {
   return "web";
 }
 
+async function signedOutScopeContract(): Promise<string> {
+  if (AuthService.currentUser !== undefined) {
+    return "fail:scope-contract=session-not-signed-out";
+  }
+
+  await AuthService.revokeScopes(["email"]);
+  const revocation = await AuthService.revokeScopesWithResult(["email"]);
+  if (
+    revocation.revokedScopes.length !== 0 ||
+    revocation.revokedAtProvider !== false
+  ) {
+    return "fail:scope-contract=unexpected-revocation";
+  }
+
+  let revokeAccessCode = "resolved";
+  try {
+    await AuthService.revokeAccess();
+  } catch (error) {
+    revokeAccessCode = authErrorCode(error);
+  }
+  if (revokeAccessCode !== "not_signed_in") {
+    return `fail:scope-contract=revoke-access-${revokeAccessCode}`;
+  }
+
+  return "ok:revokeScopes=resolved:revokedScopes=0:revokedAtProvider=false:revokeAccess=not_signed_in";
+}
+
 export function AuthE2eLab() {
   const [capabilities, setCapabilities] = useState("(idle)");
   const [events, setEvents] = useState("(idle)");
   const [apiStatus, setApiStatus] = useState("(idle)");
   const [sessionAction, setSessionAction] = useState("(idle)");
+  const [scopeStatus, setScopeStatus] = useState("(idle)");
   const [stressStatus, setStressStatus] = useState("(idle)");
   const [eventCount, setEventCount] = useState(0);
 
@@ -37,8 +61,9 @@ export function AuthE2eLab() {
     <View testID="e2e-lab" style={styles.lab} accessibilityLabel="E2E Lab">
       <Text style={styles.title}>E2E Lab</Text>
       <Text style={styles.subtitle}>
-        Signed-out public API checks. Real OAuth buttons are never tapped by
-        automation.
+        The default replay requires an already signed-out package session and
+        never starts provider login or restore. The manual restore control may
+        find an existing provider session.
       </Text>
       <Text testID="e2e-ready" style={styles.result}>
         e2e-ready
@@ -61,6 +86,9 @@ export function AuthE2eLab() {
       <Text testID="e2e-session-action" style={styles.result}>
         {sessionAction}
       </Text>
+      <Text testID="e2e-scopes-status" style={styles.result}>
+        {scopeStatus}
+      </Text>
       <Text testID="e2e-stress-result" style={styles.result}>
         {stressStatus}
       </Text>
@@ -71,14 +99,10 @@ export function AuthE2eLab() {
           label="Capabilities"
           onPress={() => {
             const platform = currentPlatform();
-            const google = getProviderTokenCapabilities("google", platform);
-            const apple = getProviderTokenCapabilities("apple", platform);
-            const microsoft = getProviderTokenCapabilities(
-              "microsoft",
-              platform,
-            );
             setCapabilities(
-              `ok:${platform}:g=${google.supportsAccessToken ? 1 : 0}:a=${apple.supportsAccessToken ? 1 : 0}:m=${microsoft.supportsAccessToken ? 1 : 0}`,
+              capabilityMatrixMatches(platform)
+                ? `ok:provider-capability-matrix=match:${platform}`
+                : `fail:provider-capability-matrix=mismatch:${platform}`,
             );
           }}
         />
@@ -88,86 +112,108 @@ export function AuthE2eLab() {
           onPress={() => {
             setEvents(
               eventCount > 0
-                ? `ok:count=${eventCount}`
-                : `fail:count=${eventCount}`,
+                ? `ok:auth-event-listener=received:${eventCount}`
+                : "fail:auth-event-listener=empty",
             );
           }}
         />
         <LabButton
           testID="e2e-api-run"
-          label="API surface"
+          label="Session snapshot"
           onPress={() => {
+            const snapshot = AuthService.getSessionSnapshot();
+            const currentUser = AuthService.currentUser;
+            const grantedScopes = AuthService.grantedScopes;
+            const consistent =
+              Number.isSafeInteger(snapshot.revision) &&
+              snapshot.revision >= 0 &&
+              snapshot.user === currentUser &&
+              JSON.stringify(snapshot.scopes) === JSON.stringify(grantedScopes);
+            if (!consistent) {
+              setApiStatus("fail:session-snapshot=legacy-getter-mismatch");
+              return;
+            }
             setApiStatus(
-              `ok:loginAndGetUser=${typeof AuthService.loginAndGetUser}:revokeResult=${typeof AuthService.revokeScopesWithResult}:play=${String(AuthService.hasPlayServices)}`,
+              `ok:session=user=${snapshot.user ? "present" : "none"}:scopes=${snapshot.scopes.length}:revision=${snapshot.revision}:play-services=${AuthService.hasPlayServices ? "available" : "unavailable"}`,
             );
           }}
         />
         <LabButton
           testID="e2e-silent-restore"
-          label="Silent restore"
+          label="Manual provider silent restore"
           onPress={() => {
             if (AuthService.currentUser) {
-              setSessionAction("fail:expected-signed-out");
+              setSessionAction("fail:silent-restore=requires-signed-out");
               return;
             }
             void AuthService.silentRestore()
               .then(() => {
                 setSessionAction(
                   AuthService.currentUser
-                    ? "fail:silent=unexpected-user"
-                    : "ok:silent=signed-out",
+                    ? "pending:silent-restore=provider-session-restored"
+                    : "ok:silent-restore=empty",
                 );
               })
               .catch((error: unknown) => {
-                const code =
-                  error instanceof AuthError ? error.code : "unknown";
+                const code = authErrorCode(error);
                 setSessionAction(
                   code === "not_signed_in"
-                    ? "ok:silent=signed-out"
-                    : `fail:silent=${code}`,
+                    ? "ok:silent-restore=not-signed-in"
+                    : `pending:silent-restore=provider-error:${code}`,
                 );
               });
           }}
         />
         <LabButton
           testID="e2e-get-token"
-          label="Get token"
+          label="Signed-out access token"
           onPress={() => {
             if (AuthService.currentUser) {
-              setSessionAction("fail:expected-signed-out");
+              setSessionAction("fail:access-token=requires-signed-out");
               return;
             }
             void AuthService.getAccessToken()
               .then((token) => {
                 setSessionAction(
-                  token ? "fail:token=unexpected" : "ok:token=none",
+                  token === undefined
+                    ? "ok:access-token=undefined"
+                    : "fail:access-token=returned",
                 );
               })
               .catch((error: unknown) => {
-                const code =
-                  error instanceof AuthError ? error.code : "unknown";
-                setSessionAction(
-                  code === "not_signed_in"
-                    ? "ok:token=none"
-                    : `fail:token=${code}`,
-                );
+                setSessionAction(`fail:access-token=${authErrorCode(error)}`);
+              });
+          }}
+        />
+        <LabButton
+          testID="e2e-scopes-run"
+          label="Signed-out revoke contract"
+          onPress={() => {
+            setScopeStatus("running");
+            void signedOutScopeContract()
+              .then(setScopeStatus)
+              .catch((error: unknown) => {
+                setScopeStatus(`fail:scope-contract=${authErrorCode(error)}`);
               });
           }}
         />
         <LabButton
           testID="e2e-run-stress"
-          label="Stress capabilities"
+          label="Repeat capability checks"
           onPress={() => {
             const platform = currentPlatform();
-            const started = globalThis.performance?.now?.() ?? Date.now();
+            let matches = true;
             for (let index = 0; index < 40; index += 1) {
-              getProviderTokenCapabilities("google", platform);
-              getProviderTokenCapabilities("apple", platform);
-              getProviderTokenCapabilities("microsoft", platform);
+              if (!capabilityMatrixMatches(platform)) {
+                matches = false;
+                break;
+              }
             }
-            const elapsed =
-              (globalThis.performance?.now?.() ?? Date.now()) - started;
-            setStressStatus(`ok:lookups=120:ms=${elapsed.toFixed(1)}`);
+            setStressStatus(
+              matches
+                ? "ok:provider-capability-matrix-repeat=40"
+                : "fail:provider-capability-matrix-repeat=mismatch",
+            );
           }}
         />
       </View>
