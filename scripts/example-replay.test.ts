@@ -317,6 +317,7 @@ test("coverage distinguishes visual-only assertions from provider acceptance", (
     const source = fs.readFileSync(path.join(projectRoot, suite.path), "utf8");
     assert.doesNotMatch(source, /press id="e2e-silent-restore"/);
     assert.doesNotMatch(source, /press id="smoke-run-provider-probes"/);
+    assert.doesNotMatch(source, /wait id="smoke-[^"]+-status"/);
     assert.doesNotMatch(source, /requestScopes/);
   }
 });
@@ -429,8 +430,6 @@ test("runner sends the selected manifest flow to official agent-device test", ()
     assert.deepEqual(calls[0]?.args, [
       "test",
       "e2e/qa-credentials.ad",
-      "--platform",
-      "ios",
       "--udid",
       "sim-123",
       "--session",
