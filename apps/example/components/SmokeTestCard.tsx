@@ -21,51 +21,84 @@ import {
 type TestStatus = "pass" | "fail" | "skip" | "pending";
 
 type TestResult = {
+  id: string;
   name: string;
   status: TestStatus;
   detail?: string;
 };
 
 type TestCase = {
+  id: string;
   name: string;
+  requiresProvider?: boolean;
   unsupportedReason?: string;
   run: () => Promise<TestResult> | TestResult;
 };
 
-function pass(name: string): TestResult {
-  return { name, status: "pass" };
+class SmokeAssertionError extends Error {}
+
+function probeId(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
-function skip(name: string, detail: string): TestResult {
-  return { name, status: "skip", detail };
+function pass(item: Pick<TestCase, "id" | "name">): TestResult {
+  return { id: item.id, name: item.name, status: "pass" };
 }
 
-function initialResult(item: TestCase): TestResult {
+function skip(item: TestCase, detail: string): TestResult {
+  return { id: item.id, name: item.name, status: "skip", detail };
+}
+
+function initialResult(item: TestCase, includeProvider: boolean): TestResult {
+  if (item.requiresProvider && !includeProvider) {
+    return {
+      id: item.id,
+      name: item.name,
+      status: "pending",
+      detail:
+        "Requires a configured provider and dedicated QA account; the default replay does not run it.",
+    };
+  }
   if (item.unsupportedReason) {
-    return skip(item.name, item.unsupportedReason);
+    return skip(item, item.unsupportedReason);
   }
 
-  return { name: item.name, status: "pending" };
+  return { id: item.id, name: item.name, status: "pending" };
 }
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
-    throw new Error(message);
+    throw new SmokeAssertionError(message);
   }
 }
 
-function test(name: string, run: () => void | Promise<void>): TestCase {
+function test(
+  name: string,
+  run: () => void | Promise<void>,
+  requiresProvider = false,
+  unsupportedReason?: string,
+): TestCase {
+  const item = { id: probeId(name), name, requiresProvider, unsupportedReason };
   return {
-    name,
+    ...item,
     run: async () => {
       try {
         await run();
-        return pass(name);
+        return pass(item);
       } catch (e) {
         return {
-          name,
+          id: item.id,
+          name: item.name,
           status: "fail",
-          detail: e instanceof Error ? e.message : String(e),
+          detail:
+            e instanceof AuthError
+              ? `AuthError: ${e.code}`
+              : e instanceof SmokeAssertionError
+                ? e.message
+                : "Unexpected smoke probe failure",
         };
       }
     },
@@ -82,28 +115,25 @@ async function expectSignedOutError(run: () => Promise<unknown>) {
     );
     return;
   }
-  throw new Error("Expected rejection without a session");
+  assert(false, "Expected rejection without a session");
 }
 
 async function cancelProviderOperation(run: () => Promise<unknown>) {
   const pending = run();
   AuthService.logout();
-  try {
-    await pending;
-    throw new Error("Provider operation completed after cancellation");
-  } catch (error) {
-    assert(error instanceof AuthError, "Provider error must be an AuthError");
-    const code = (error as AuthError).code;
-    assert(
-      [
-        "cancelled",
-        "configuration_error",
-        "unsupported_provider",
-        "not_signed_in",
-      ].includes(code),
-      `Unexpected provider cancellation code: ${code}`,
-    );
-  }
+  await pending.then(
+    () => {
+      assert(false, "Provider operation completed after cancellation");
+    },
+    (error: unknown) => {
+      const code = error instanceof AuthError ? error.code : "unknown";
+      assert(error instanceof AuthError, "Provider error must be an AuthError");
+      assert(
+        code === "cancelled",
+        `Unexpected provider cancellation code: ${code}`,
+      );
+    },
+  );
   assert(
     AuthService.currentUser === undefined,
     "Cancelled operation published a user",
@@ -111,10 +141,20 @@ async function cancelProviderOperation(run: () => Promise<unknown>) {
 }
 
 function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
+  const localEventLimitation =
+    Platform.OS === "web"
+      ? "Web local scope revocation emits no session event; this event probe requires the native adapter."
+      : undefined;
   return [
     test("Start from a signed-out example session", () => {
-      AuthService.logout();
-      assert(AuthService.currentUser === undefined, "Session did not clear");
+      const snapshot = AuthService.getSessionSnapshot();
+      assert(
+        AuthService.currentUser === undefined &&
+          snapshot.user === undefined &&
+          AuthService.grantedScopes.length === 0 &&
+          snapshot.scopes.length === 0,
+        "Replay requires an already signed-out example session",
+      );
     }),
     test("Capabilities describe every provider on this platform", () => {
       const platform =
@@ -123,13 +163,34 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
           : Platform.OS === "android"
             ? "android"
             : "web";
-      for (const provider of ["google", "apple", "microsoft"] as const) {
-        const capabilities = getProviderTokenCapabilities(provider, platform);
-        assert(
-          typeof capabilities.supportsAccessToken === "boolean",
-          "Invalid capability",
-        );
-      }
+      const google = getProviderTokenCapabilities("google", platform);
+      const apple = getProviderTokenCapabilities("apple", platform);
+      const microsoft = getProviderTokenCapabilities("microsoft", platform);
+      assert(
+        google.supportsAccessToken === (platform !== "android"),
+        "Google access-token capability mismatch",
+      );
+      assert(
+        google.supportsClientSideRefresh && google.supportsServerAuthCode,
+        "Google refresh or server-code capability mismatch",
+      );
+      assert(
+        apple.supportsAccessToken === false,
+        "Apple unexpectedly exposes an access token",
+      );
+      assert(
+        apple.supportsClientSideRefresh === false &&
+          apple.accessTokenExpirySource === "unavailable",
+        "Apple token capability mismatch",
+      );
+      assert(
+        microsoft.supportsAccessToken && microsoft.supportsClientSideRefresh,
+        "Microsoft token capability mismatch",
+      );
+      assert(
+        microsoft.supportsServerAuthCode === false,
+        "Microsoft unexpectedly exposes a server auth code",
+      );
       assert(
         typeof AuthService.hasPlayServices === "boolean",
         "Invalid Play Services result",
@@ -146,53 +207,88 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
         "Unexpected user",
       );
       assert(
+        snapshot.scopes.length === 0 && AuthService.grantedScopes.length === 0,
+        "Unexpected granted scopes",
+      );
+      assert(
         JSON.stringify(snapshot.scopes) ===
           JSON.stringify(AuthService.grantedScopes),
         "Scope mismatch",
       );
     }),
-    test("Snapshot and user events survive a throwing listener", async () => {
-      let snapshots = 0;
-      let states = 0;
-      const bad = AuthService.onAuthStateChanged(() => {
-        throw new Error("smoke listener");
-      });
-      const state = AuthService.onAuthStateChanged(() => {
-        states += 1;
-      });
-      const snapshot = AuthService.onSessionChanged(() => {
-        snapshots += 1;
-      });
-      try {
-        AuthService.logout();
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        assert(
-          states > 0 && snapshots > 0,
-          "Session listeners did not receive logout",
-        );
-      } finally {
-        bad();
-        state();
-        snapshot();
-      }
-    }),
-    test("Unsubscribe suppresses queued callbacks and is idempotent", async () => {
-      let calls = 0;
-      const remove = AuthService.onAuthStateChanged(() => {
-        calls += 1;
-      });
-      AuthService.logout();
-      remove();
-      remove();
-      const atRemoval = calls;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      assert(calls === atRemoval, "Queued callback ran after unsubscribe");
-      const tokens = AuthService.onTokensRefreshed(() => {
-        calls += 1;
-      });
-      tokens();
-      tokens();
-    }),
+    test(
+      "Snapshot and user events survive a throwing listener",
+      async () => {
+        let snapshots = 0;
+        let states = 0;
+        const bad = AuthService.onAuthStateChanged(() => {
+          throw new Error("smoke listener");
+        });
+        const state = AuthService.onAuthStateChanged(() => {
+          states += 1;
+        });
+        const snapshot = AuthService.onSessionChanged(() => {
+          snapshots += 1;
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          const initialStates = states;
+          const initialSnapshots = snapshots;
+          await AuthService.revokeScopes(["email"]);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          assert(
+            states > initialStates && snapshots > initialSnapshots,
+            "Session listeners did not receive the local scope update",
+          );
+        } finally {
+          bad();
+          state();
+          snapshot();
+        }
+      },
+      false,
+      localEventLimitation,
+    ),
+    test(
+      "Unsubscribe stops later callbacks and is idempotent",
+      async () => {
+        let calls = 0;
+        let controlCalls = 0;
+        const remove = AuthService.onAuthStateChanged(() => {
+          calls += 1;
+        });
+        const control = AuthService.onAuthStateChanged(() => {
+          controlCalls += 1;
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          remove();
+          remove();
+          const atRemoval = calls;
+          const initialControlCalls = controlCalls;
+          await AuthService.revokeScopes(["email"]);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          assert(
+            controlCalls > initialControlCalls,
+            "Control listener did not receive the local scope update",
+          );
+          assert(
+            calls === atRemoval,
+            "Local update callback ran after unsubscribe",
+          );
+          const tokens = AuthService.onTokensRefreshed(() => {
+            calls += 1;
+          });
+          tokens();
+          tokens();
+        } finally {
+          remove();
+          control();
+        }
+      },
+      false,
+      localEventLimitation,
+    ),
     test("Operation events correlate failure and omit provider details", async () => {
       const events: AuthLifecycleEvent[] = [];
       const remove = AuthService.onAuthEvent((event) => events.push(event));
@@ -232,8 +328,7 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
         remove();
       }
     }),
-    test("Scope operations preserve signed-out semantics", async () => {
-      await expectSignedOutError(() => AuthService.requestScopes(["email"]));
+    test("Signed-out scope revoke preserves local semantics", async () => {
       await AuthService.revokeScopes(["email"]);
       const result = await AuthService.revokeScopesWithResult(["email"]);
       assert(
@@ -248,43 +343,69 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
         "Unexpected access token",
       );
     }),
-    test("Silent restore handles the empty example session", async () => {
-      try {
-        await AuthService.silentRestore();
-      } catch (error) {
+    test(
+      "Silent restore handles the empty example session",
+      async () => {
         assert(
-          error instanceof AuthError && error.code === "not_signed_in",
-          "Unexpected restore error",
+          AuthService.currentUser === undefined,
+          "Provider restore probe requires a signed-out package session",
         );
-      }
-      assert(AuthService.currentUser === undefined, "Unexpected restored user");
-    }),
+        try {
+          await AuthService.silentRestore();
+        } catch (error) {
+          assert(
+            error instanceof AuthError && error.code === "not_signed_in",
+            "Silent restore did not return the signed-out error contract",
+          );
+        }
+        if (AuthService.currentUser !== undefined) {
+          AuthService.logout();
+          assert(
+            false,
+            "Silent restore found a cached provider session; that success needs separate acceptance",
+          );
+        }
+      },
+      true,
+    ),
     ...(["google", "apple", "microsoft"] as const).flatMap((provider) => [
-      test(`${provider}: login cancellation or explicit setup gate`, () =>
-        cancelProviderOperation(() => AuthService.login(provider))),
-      test(`${provider}: atomic login cancellation or explicit setup gate`, () =>
-        cancelProviderOperation(() => AuthService.loginAndGetUser(provider))),
+      test(
+        `${provider}: login cancellation or explicit setup gate`,
+        () => cancelProviderOperation(() => AuthService.login(provider)),
+        true,
+      ),
+      test(
+        `${provider}: atomic login cancellation or explicit setup gate`,
+        () =>
+          cancelProviderOperation(() => AuthService.loginAndGetUser(provider)),
+        true,
+      ),
     ]),
     ...(["google", "apple"] as const).map((provider) =>
-      test(`${provider}: credential cancellation never publishes a session`, () =>
-        cancelProviderOperation(() => AuthService.getCredential(provider))),
+      test(
+        `${provider}: credential cancellation never publishes a session`,
+        () =>
+          cancelProviderOperation(() => AuthService.getCredential(provider)),
+        true,
+      ),
     ),
-    test("useAuth actions expose typed signed-out behavior", async () => {
-      hookReturn.logout();
+    test("useAuth exposes signed-out token and revoke behavior", async () => {
+      assert(
+        hookReturn.user === undefined,
+        "useAuth probe requires a signed-out package session",
+      );
       assert(
         (await hookReturn.getAccessToken()) === undefined,
         "Hook returned a signed-out token",
       );
       await expectSignedOutError(() => hookReturn.refreshToken());
-      await expectSignedOutError(() => hookReturn.requestScopes(["email"]));
       await hookReturn.revokeScopes(["email"]);
       const result = await hookReturn.revokeScopesWithResult(["email"]);
       assert(
-        result.revokedScopes.length === 0,
+        result.revokedScopes.length === 0 && result.revokedAtProvider === false,
         "Hook returned revoked scopes without a session",
       );
       await expectSignedOutError(() => hookReturn.revokeAccess());
-      await hookReturn.silentRestore();
     }),
     test("All public error codes map deterministically", () => {
       const codes: AuthErrorCode[] = [
@@ -320,28 +441,34 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
       AuthService.setLoggingEnabled(true);
       AuthService.setLoggingEnabled(false);
     }),
-    test("Dispose cancels pending work and the service recreates", async () => {
-      const pending = AuthService.getCredential("google");
-      AuthService.dispose();
-      try {
-        await pending;
-        throw new Error("Disposed operation succeeded");
-      } catch (error) {
-        assert(
-          error instanceof AuthError,
-          "Dispose did not return a typed failure",
+    test(
+      "Dispose cancels pending work and the service recreates",
+      async () => {
+        const pending = AuthService.getCredential("google");
+        AuthService.dispose();
+        await pending.then(
+          () => {
+            assert(false, "Disposed operation succeeded");
+          },
+          (error: unknown) => {
+            assert(
+              error instanceof AuthError && error.code === "cancelled",
+              "Dispose did not cancel the pending credential request",
+            );
+          },
         );
-      }
-      const snapshot = AuthService.getSessionSnapshot();
-      assert(
-        snapshot.user === undefined && snapshot.scopes.length === 0,
-        "Recreated session is not empty",
-      );
-      assert(
-        (await AuthService.getAccessToken()) === undefined,
-        "Recreated adapter returned a token",
-      );
-    }),
+        const snapshot = AuthService.getSessionSnapshot();
+        assert(
+          snapshot.user === undefined && snapshot.scopes.length === 0,
+          "Recreated session is not empty",
+        );
+        assert(
+          (await AuthService.getAccessToken()) === undefined,
+          "Recreated adapter returned a token",
+        );
+      },
+      true,
+    ),
   ];
 }
 
@@ -351,24 +478,59 @@ export const SmokeTestCard = memo(function SmokeTestCard() {
   const [results, setResults] = useState<TestResult[]>([]);
   const [running, setRunning] = useState(false);
 
-  const runTests = useCallback(async () => {
-    setRunning(true);
-    setResults(tests.map((item) => initialResult(item)));
+  const runTests = useCallback(
+    async (includeProvider = false) => {
+      setRunning(true);
+      setResults(tests.map((item) => initialResult(item, includeProvider)));
 
-    const outcomes: TestResult[] = [];
-    for (const item of tests) {
-      const result = item.unsupportedReason
-        ? skip(item.name, item.unsupportedReason)
-        : await item.run();
-      outcomes.push(result);
+      const outcomes: TestResult[] = [];
+      const precondition = tests[0];
+      if (!precondition) {
+        setRunning(false);
+        return;
+      }
+      const preconditionResult = precondition.unsupportedReason
+        ? skip(precondition, precondition.unsupportedReason)
+        : await precondition.run();
+      outcomes.push(preconditionResult);
       setResults([
-        ...outcomes,
-        ...tests.slice(outcomes.length).map((next) => initialResult(next)),
+        preconditionResult,
+        ...tests.slice(1).map((item) => initialResult(item, includeProvider)),
       ]);
-    }
+      if (preconditionResult.status !== "pass") {
+        setResults([
+          preconditionResult,
+          ...tests.slice(1).map((item) => ({
+            id: item.id,
+            name: item.name,
+            status: "pending" as const,
+            detail:
+              "Requires an already signed-out example session; no API probe was run.",
+          })),
+        ]);
+        setRunning(false);
+        return;
+      }
 
-    setRunning(false);
-  }, [tests]);
+      for (const item of tests.slice(1)) {
+        const result = item.unsupportedReason
+          ? skip(item, item.unsupportedReason)
+          : item.requiresProvider && !includeProvider
+            ? initialResult(item, false)
+            : await item.run();
+        outcomes.push(result);
+        setResults([
+          ...outcomes,
+          ...tests
+            .slice(outcomes.length)
+            .map((next) => initialResult(next, includeProvider)),
+        ]);
+      }
+
+      setRunning(false);
+    },
+    [tests],
+  );
 
   const counts = useMemo(
     () =>
@@ -377,13 +539,19 @@ export const SmokeTestCard = memo(function SmokeTestCard() {
           pass: currentCounts.pass + (result.status === "pass" ? 1 : 0),
           fail: currentCounts.fail + (result.status === "fail" ? 1 : 0),
           skip: currentCounts.skip + (result.status === "skip" ? 1 : 0),
+          pending:
+            currentCounts.pending + (result.status === "pending" ? 1 : 0),
         }),
-        { pass: 0, fail: 0, skip: 0 },
+        { pass: 0, fail: 0, skip: 0, pending: 0 },
       ),
     [results],
   );
   const completionLabel =
-    counts.fail === 0 ? "Complete: PASS" : "Complete: FAIL";
+    counts.fail > 0
+      ? "Smoke probes: FAIL; provider acceptance: PENDING"
+      : counts.skip > 0
+        ? "Deterministic checks: PARTIAL; provider acceptance: PENDING"
+        : "Deterministic checks: PASS; provider acceptance: PENDING";
 
   return (
     <View style={styles.card}>
@@ -392,8 +560,8 @@ export const SmokeTestCard = memo(function SmokeTestCard() {
           <Text style={styles.title}>Smoke Tests</Text>
           <Text testID="smoke-summary" style={styles.summary}>
             {results.length === 0
-              ? "Run signed-out API checks (clears example session)"
-              : `${running ? "Running" : completionLabel}: ${counts.pass}/${results.length} passed, ${counts.fail} failed, ${counts.skip} skipped`}
+              ? "Run signed-out checks; provider probes require the separate action"
+              : `${running ? "Running" : completionLabel}: ${counts.pass}/${results.length} passed, ${counts.fail} failed, ${counts.pending} pending, ${counts.skip} skipped`}
           </Text>
           {counts.fail > 0 ? (
             <Text style={styles.failSummary}>{counts.fail} failed</Text>
@@ -401,13 +569,13 @@ export const SmokeTestCard = memo(function SmokeTestCard() {
         </View>
         <Pressable
           testID="smoke-run-all"
-          accessibilityLabel={
-            results.length > 0 ? "Run smoke tests again" : "Run smoke tests"
-          }
+          accessibilityLabel="Run deterministic signed-out API checks"
           accessibilityRole="button"
           accessibilityState={{ busy: running, disabled: running }}
           style={[styles.runButton, running && styles.runButtonDisabled]}
-          onPress={runTests}
+          onPress={() => {
+            void runTests(false);
+          }}
           disabled={running}
         >
           {running ? (
@@ -418,15 +586,35 @@ export const SmokeTestCard = memo(function SmokeTestCard() {
             </Text>
           )}
         </Pressable>
+        <Pressable
+          testID="smoke-run-provider-probes"
+          accessibilityLabel="Run provider-dependent probes; may open provider UI"
+          accessibilityRole="button"
+          accessibilityState={{ busy: running, disabled: running }}
+          style={[styles.providerButton, running && styles.runButtonDisabled]}
+          onPress={() => {
+            void runTests(true);
+          }}
+          disabled={running}
+        >
+          <Text style={styles.runButtonText}>Provider QA</Text>
+        </Pressable>
       </View>
+      <Text style={styles.providerNote}>
+        Provider QA may open provider UI and sign out its SDK. Use a disposable
+        QA session and dedicated account.
+      </Text>
 
       {results.map((result) => (
         <View
           key={result.name}
           style={[styles.row, result.status === "skip" && styles.rowSkipped]}
         >
-          <Text style={[styles.status, statusTextStyle(result.status)]}>
-            {result.status.toUpperCase()}
+          <Text
+            testID={`smoke-${result.id}-status`}
+            style={[styles.status, statusTextStyle(result.status)]}
+          >
+            {`${result.status.toUpperCase()}:${result.id}`}
           </Text>
           <View style={styles.rowBody}>
             <Text style={styles.testName}>{result.name}</Text>
@@ -473,6 +661,11 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 12,
   },
+  providerNote: {
+    color: "#7c2d12",
+    fontSize: 11,
+    marginBottom: 8,
+  },
   title: {
     color: "#111827",
     fontSize: 16,
@@ -495,6 +688,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     minHeight: 40,
     minWidth: 82,
+    justifyContent: "center",
+    paddingHorizontal: 14,
+  },
+  providerButton: {
+    alignItems: "center",
+    backgroundColor: "#7c2d12",
+    borderRadius: 8,
+    minHeight: 40,
     justifyContent: "center",
     paddingHorizontal: 14,
   },

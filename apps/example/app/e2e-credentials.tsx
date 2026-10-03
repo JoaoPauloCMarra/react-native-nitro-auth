@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import {
   AuthService,
-  getProviderTokenCapabilities,
   type Auth,
   type AuthPlatform,
 } from "react-native-nitro-auth";
 import { NitroModules } from "react-native-nitro-modules";
+import {
+  authErrorCode,
+  capabilityMatrixMatches,
+} from "../components/e2e-auth-checks";
 
 function currentPlatform(): AuthPlatform {
   if (
@@ -25,22 +28,46 @@ async function runCredentialsSweep(): Promise<{
   snapshot: string;
 }> {
   const platform = currentPlatform();
-  let nonce = "fail:nonce";
-  try {
-    const value =
-      await NitroModules.createHybridObject<Auth>("Auth").createNonce();
-    nonce = `ok:raw=${value.raw.length}:hashed=${value.hashed.length}`;
-  } catch (error) {
-    nonce = `fail:${error instanceof Error ? error.message : String(error)}`;
+  let nonce = "pending:nonce=native-platform-required";
+  if (platform !== "web") {
+    nonce = "fail:nonce-shape";
+    try {
+      const nonceValue =
+        await NitroModules.createHybridObject<Auth>("Auth").createNonce();
+      const rawNonceValid =
+        nonceValue.raw.length === 43 &&
+        /^[A-Za-z0-9_-]{43}$/.test(nonceValue.raw);
+      const hashedNonceValid =
+        nonceValue.hashed.length === 64 &&
+        /^[a-f0-9]{64}$/.test(nonceValue.hashed);
+      nonce =
+        rawNonceValid &&
+        hashedNonceValid &&
+        nonceValue.raw !== nonceValue.hashed
+          ? "ok:nonce=raw-base64url-43:hashed-sha256-hex-64"
+          : "fail:nonce-shape=invalid";
+    } catch (error) {
+      nonce = `fail:nonce=${authErrorCode(error)}`;
+    }
   }
 
-  const google = getProviderTokenCapabilities("google", platform);
-  const apple = getProviderTokenCapabilities("apple", platform);
-  const microsoft = getProviderTokenCapabilities("microsoft", platform);
-  const capabilities = `ok:${platform}:g=${google.supportsAccessToken ? 1 : 0}:a=${apple.supportsAccessToken ? 1 : 0}:m=${microsoft.supportsAccessToken ? 1 : 0}`;
+  const capabilities = capabilityMatrixMatches(platform)
+    ? `ok:provider-capability-matrix=match:${platform}`
+    : `fail:provider-capability-matrix=mismatch:${platform}`;
 
   const session = AuthService.getSessionSnapshot();
-  const snapshot = `ok:rev=${session.revision}:user=${session.user ? "present" : "none"}:scopes=${session.scopes.length}`;
+  const scopes = AuthService.grantedScopes;
+  const sessionMatches =
+    Number.isSafeInteger(session.revision) &&
+    session.revision >= 0 &&
+    session.user === undefined &&
+    AuthService.currentUser === undefined &&
+    session.scopes.length === 0 &&
+    scopes.length === 0 &&
+    JSON.stringify(session.scopes) === JSON.stringify(scopes);
+  const snapshot = sessionMatches
+    ? "ok:session=user=none:scopes=0:revision=safe-integer"
+    : "fail:session=requires-signed-out-coherent-snapshot";
 
   return { nonce, capabilities, snapshot };
 }
@@ -51,11 +78,18 @@ export default function CredentialsLabScreen() {
   const [snapshotStatus, setSnapshotStatus] = useState("running");
 
   useEffect(() => {
-    void runCredentialsSweep().then((results) => {
-      setNonceStatus(results.nonce);
-      setCapabilityStatus(results.capabilities);
-      setSnapshotStatus(results.snapshot);
-    });
+    void runCredentialsSweep()
+      .then((results) => {
+        setNonceStatus(results.nonce);
+        setCapabilityStatus(results.capabilities);
+        setSnapshotStatus(results.snapshot);
+      })
+      .catch((error: unknown) => {
+        const failure = `fail:sweep=${authErrorCode(error)}`;
+        setNonceStatus(failure);
+        setCapabilityStatus(failure);
+        setSnapshotStatus(failure);
+      });
   }, []);
 
   return (
@@ -66,8 +100,9 @@ export default function CredentialsLabScreen() {
     >
       <Text style={styles.title}>Credentials lab</Text>
       <Text style={styles.subtitle}>
-        Auto-runs on open. Snapshot-safe nonce, capability, and session APIs.
-        Live identity provider buttons are never shown here.
+        Auto-runs only nonce shape, provider capability, and signed-out snapshot
+        checks. The native nonce check remains pending on web. No provider
+        credentials or token values are rendered.
       </Text>
       <Text testID="e2e-credentials-ready" style={styles.result}>
         e2e-ready
@@ -93,11 +128,18 @@ export default function CredentialsLabScreen() {
             setNonceStatus("running");
             setCapabilityStatus("running");
             setSnapshotStatus("running");
-            void runCredentialsSweep().then((results) => {
-              setNonceStatus(results.nonce);
-              setCapabilityStatus(results.capabilities);
-              setSnapshotStatus(results.snapshot);
-            });
+            void runCredentialsSweep()
+              .then((results) => {
+                setNonceStatus(results.nonce);
+                setCapabilityStatus(results.capabilities);
+                setSnapshotStatus(results.snapshot);
+              })
+              .catch((error: unknown) => {
+                const failure = `fail:sweep=${authErrorCode(error)}`;
+                setNonceStatus(failure);
+                setCapabilityStatus(failure);
+                setSnapshotStatus(failure);
+              });
           }}
         />
       </View>
