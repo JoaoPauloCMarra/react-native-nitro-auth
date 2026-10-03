@@ -60,6 +60,7 @@ React Native Nitro module for authentication (Google, Apple, Microsoft). C++ cor
 ## Replay maintenance
 
 - Review `e2e/auth-replay-coverage.json` and the affected `.ad` assertions whenever package runtime or example behavior changes. Update them before refreshing the source lock with `bun run example:replay:refresh`.
+- Flows assert smoke rows through the on-screen `smoke-results` label because agent-device `.ad` waits only see on-screen elements.
 - Keep `example:replay:check` and `example:replay:test` in the normal quality gate. They are device-free; refreshing a digest does not prove runtime behavior.
 - Run `example:replay` only against an explicit platform and device identifier, using the matching installed example. Keep device execution out of CI and artifacts in OS temp.
 - Signed-out checks, cancellation, button rendering, and provider authentication are distinct evidence. Keep provider-dependent rows pending until their configured account, platform, and server prerequisites are verified.

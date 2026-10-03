@@ -59,7 +59,9 @@ The default full-features flow presses the Google and Apple controls in the
 visual gallery. Those handlers only update the “Last visual button pressed”
 label. The flow then exercises signed-out public APIs and the deterministic
 Smoke Tests action. It never calls provider `login`, `loginAndGetUser`,
-`getCredential`, `requestScopes`, or `silentRestore`. The credentials flow
+`getCredential`, `requestScopes`, or `silentRestore`. Flows assert smoke rows
+through the on-screen `smoke-results` label because agent-device `.ad` waits
+only see on-screen elements. The credentials flow
 checks native nonce shape, provider capability values, and an empty session
 snapshot without rendering nonce or token values. On web, native nonce coverage
 is shown as pending. Local scope revocation does not emit session events on web,

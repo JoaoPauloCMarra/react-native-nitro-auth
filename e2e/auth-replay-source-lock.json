@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "runtimeSourceSha256": "8936498886670f0b75bbb5a88127d6bcbf97c612ad98be3a22239bf51e421802",
+  "runtimeSourceSha256": "c16dbe74b1b00bc6e9f4be59e3c458cb22753428663f6c2b1861a84dde1ea5c5",
   "runtimeSourceFiles": [
     "apps/example/app.config.js",
     "apps/example/app/_layout.tsx",
@@ -264,7 +264,7 @@
     "packages/react-native-nitro-auth/src/utils/oauth-error.ts",
     "packages/react-native-nitro-auth/src/utils/oauth-token-client.ts"
   ],
-  "replayInputsSha256": "c96c65a3e276047d39580ac2a6f402eb14017d8e1d01fd131ffc4100a1157f62",
+  "replayInputsSha256": "80797921dba34e7ee3e0028e4b703d1984e0e0aec04ed254d062708bb2911799",
   "replayInputs": [
     "e2e/auth-replay-coverage.json",
     "e2e/qa-credentials.ad",

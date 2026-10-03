@@ -566,6 +566,16 @@ export const SmokeTestCard = memo(function SmokeTestCard() {
           {counts.fail > 0 ? (
             <Text style={styles.failSummary}>{counts.fail} failed</Text>
           ) : null}
+          {results.length > 0 ? (
+            <View
+              testID="smoke-results"
+              accessible
+              accessibilityLabel={results
+                .map((result) => `${result.status.toUpperCase()}:${result.id}`)
+                .join(" ")}
+              style={styles.resultsProbe}
+            />
+          ) : null}
         </View>
         <Pressable
           testID="smoke-run-all"
@@ -682,6 +692,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 3,
   },
+  resultsProbe: { height: 1 },
   runButton: {
     alignItems: "center",
     backgroundColor: "#1d4ed8",

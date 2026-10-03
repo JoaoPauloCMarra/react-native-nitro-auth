@@ -197,8 +197,6 @@ function runExampleReplay({
   }
   const session = `nitro-auth-replay-${runId}`;
   const targetArgs = [
-    "--platform",
-    options.platform,
     options.targetFlag,
     options.target,
   ];

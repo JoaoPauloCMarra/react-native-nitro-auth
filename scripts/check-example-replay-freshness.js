@@ -367,30 +367,7 @@ function readCoverageManifest(root, manifestPath = manifestRelativePath) {
       );
     }
     const statusSource = fs.readFileSync(absoluteStatusSource, "utf8");
-    if (feature.statusPattern === "smoke-case") {
-      const expectedProbeId =
-        typeof feature.probeName === "string"
-          ? feature.probeName
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, "-")
-              .replace(/^-|-$/g, "")
-          : "";
-      if (
-        expectedProbeId !== feature.probeId ||
-        !source
-          .replace(/\btest\(\s+/g, "test(")
-          .includes(`test("${feature.probeName}"`) ||
-        !statusSource.includes("testID={`smoke-${result.id}-status`}") ||
-        !statusSource.includes(
-          "`${result.status.toUpperCase()}:${result.id}`",
-        ) ||
-        feature.statusId !== `smoke-${feature.probeId}-status`
-      ) {
-        throw new Error(
-          `${feature.id} smoke result no longer exposes its stable assertion row`,
-        );
-      }
-    } else if (!statusSource.includes(`testID="${feature.statusId}"`)) {
+    if (!statusSource.includes(`testID="${feature.statusId}"`)) {
       throw new Error(
         `${feature.id} status id is missing from ${statusSourcePath}`,
       );
