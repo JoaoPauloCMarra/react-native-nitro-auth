@@ -5,5 +5,5 @@ wait id="e2e-ready"
 wait text "e2e-ready"
 wait id="e2e-deeplink"
 wait text "auth://e2e"
-wait text "signed-out"
+wait text "session=signed-out"
 close

@@ -72,7 +72,7 @@ export function AuthE2eLab() {
         auth://e2e
       </Text>
       <Text testID="e2e-session-state" style={styles.result}>
-        {AuthService.currentUser ? "signed-in" : "signed-out"}
+        {AuthService.currentUser ? "session=signed-in" : "session=signed-out"}
       </Text>
       <Text testID="e2e-capabilities" style={styles.result}>
         {capabilities}

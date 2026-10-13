@@ -51,8 +51,6 @@ They do not establish a measured provider sign-in speedup. Auth UI and network
 latency usually dominate those operations. Shared C++ SHA-256 and JWT payload
 decode are decode-only helpers; they do not verify signatures or persist tokens.
 
-Use the example E2E lookup measurement for a local diagnostic only. It measures
-120 in-process API lookups and reports elapsed milliseconds, not OAuth latency.
 A speed comparison requires the same release build, Hermes version, device,
 provider configuration, and repeated before/after samples. Follow
 [the benchmark policy](benchmarks.md).
@@ -65,12 +63,10 @@ JS tests cover the web implementation, service errors/events, shared hook store,
 and subscription lifecycle. Native example builds compile the generated
 adapter and production C++ bridge together; C++ mock tests alone do not do so.
 
-The example's deterministic smoke run clears its local session and tests
-signed-out operations, cancellation/setup errors, subscriptions, event
-correlation, hook actions, and disposal/recreation. It does not authenticate
-provider accounts. Successful Google, Apple, and Microsoft sign-in, consent,
-refresh of real credentials, and provider revocation require configured
-provider acceptance tests. See [example coverage](example-smoke-coverage.md).
+The example's deterministic smoke scope, and what it leaves pending, is described
+in [example coverage](example-smoke-coverage.md). Successful Google, Apple, and
+Microsoft sign-in, consent, refresh of real credentials, and provider revocation
+require configured provider acceptance tests.
 
 ## Upstream contracts
 
