@@ -1891,14 +1891,27 @@ object AuthAdapter {
         return nativeOnLoginSuccess(origin, user, generation)
     }
 
+    internal fun buildCredentialManagerRefreshRequest(clientId: String, hostedDomain: String?): GetCredentialRequest =
+        GetCredentialRequest.Builder()
+            .addCredentialOption(
+                GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(true)
+                    .setServerClientId(clientId)
+                    .setAutoSelectEnabled(true)
+                    .apply { hostedDomain?.let { setHostedDomainFilter(it) } }
+                    .build(),
+            )
+            .setPreferImmediatelyAvailableCredentials(true)
+            .build()
+
     private fun refreshCredentialManagerSession(context: Context, session: OneTapSession, generation: Long) {
-        val activity = currentActivity ?: context as? Activity
+        val activity = currentActivity
         val clientId = getClientIdFromResources(context)
         if (activity == null || clientId == null) {
             clearPendingRefreshGeneration(generation)
             nativeOnRefreshError(
                 AuthErrorCode.REFRESH_FAILED.code,
-                if (clientId == null) "Google Client ID not configured" else "An Activity is required to refresh a Credential Manager session",
+                if (clientId == null) "Google Client ID not configured" else "A foreground Activity is required to refresh a Credential Manager session",
                 generation,
             )
             return
@@ -1907,16 +1920,7 @@ object AuthAdapter {
             pendingGoogleRefresh.begin(generation, googleAuthStateEpoch)
             pendingMicrosoftRefresh.clear()
         }
-        val request = GetCredentialRequest.Builder()
-            .addCredentialOption(
-                GetGoogleIdOption.Builder()
-                    .setFilterByAuthorizedAccounts(true)
-                    .setServerClientId(clientId)
-                    .setAutoSelectEnabled(true)
-                    .apply { session.hostedDomain?.let { setHostedDomainFilter(it) } }
-                    .build(),
-            )
-            .build()
+        val request = buildCredentialManagerRefreshRequest(clientId, session.hostedDomain)
         moduleScope.launch(Dispatchers.Main) {
             val refreshed = try {
                 val credential = CredentialManager.create(activity)

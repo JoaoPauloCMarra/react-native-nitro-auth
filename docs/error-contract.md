@@ -217,6 +217,18 @@ or operation-event delivery. See [architecture](https://github.com/JoaoPauloCMar
   revocation succeeds. When no eligible Google session exists, every platform
   rejects with `not_signed_in`; providers without client-side revocation
   reject with `unsupported_provider`.
+- Android Credential Manager Google sessions refresh without UI: the request
+  asks for authorized accounts only, auto-select, and immediately available
+  credentials (`setPreferImmediatelyAvailableCredentials(true)`), and runs only
+  with a foreground Activity. A missing Activity, missing client id, no matching
+  credential, interruption, cancellation or any other failure rejects with
+  `refresh_failed` and keeps the session. `silentRestore()` in the same process
+  returns the in-memory session.
+- Android Google status codes (login, `requestScopes()`, legacy silent refresh)
+  map through one table: 12501 and 16 to `cancelled`, 12502 to
+  `operation_in_progress`, 15 to `timeout`, 4 to `not_signed_in`, 7 to
+  `network_error`, 8 and 10 to `configuration_error`, anything else to `unknown`.
+  A non-Google failure in the legacy silent refresh stays `network_error`.
 - Modern Android Google sessions created through Credential Manager/One-Tap are
   not eligible for client-side provider revocation and reject with
   `unsupported_provider`.
