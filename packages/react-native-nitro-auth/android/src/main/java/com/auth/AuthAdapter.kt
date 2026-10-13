@@ -127,18 +127,10 @@ object AuthAdapter {
     private var hasLegacyGoogleSession = false
     @Volatile
     private var googleSessionState = GoogleSessionState(null)
-    @Volatile
-    private var pendingGoogleLoginGeneration: Long? = null
-    private var pendingGoogleLoginStateEpoch: Long? = null
-    @Volatile
-    private var pendingGoogleScopesGeneration: Long? = null
-    private var pendingGoogleScopesStateEpoch: Long? = null
-    @Volatile
-    private var pendingGoogleRefreshGeneration: Long? = null
-    private var pendingGoogleRefreshStateEpoch: Long? = null
-    @Volatile
-    private var pendingGoogleSilentGeneration: Long? = null
-    private var pendingGoogleSilentStateEpoch: Long? = null
+    private val pendingGoogleLogin = PendingOperation()
+    private val pendingGoogleScopes = PendingOperation()
+    private val pendingGoogleRefresh = PendingOperation()
+    private val pendingGoogleSilent = PendingOperation()
     private var googleAuthStateEpoch = 1L
     private val googlePickerOperationState = GooglePickerOperationState()
     private val googlePickerRetryHandler by lazy { Handler(Looper.getMainLooper()) }
@@ -163,35 +155,19 @@ object AuthAdapter {
     @Volatile
     private var inMemoryMicrosoftScopes: List<String> =
         defaultMicrosoftScopes
-    @Volatile
-    private var pendingMicrosoftRefreshGeneration: Long? = null
-    private var pendingMicrosoftRefreshStateEpoch: Long? = null
-    @Volatile
-    private var pendingMicrosoftSilentGeneration: Long? = null
-    private var pendingMicrosoftSilentStateEpoch: Long? = null
+    private val pendingMicrosoftRefresh = PendingOperation()
+    private val pendingMicrosoftSilent = PendingOperation()
 
     private var moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 
     @JvmStatic
-    private fun nativeOnLoginSuccess(
-        origin: String,
-        provider: String,
-        email: String?,
-        name: String?,
-        firstName: String?,
-        lastName: String?,
-        photo: String?,
-        idToken: String?,
-        accessToken: String?,
-        serverAuthCode: String?,
-        userId: String?,
-        phoneNumber: String?,
-        hostedDomain: String?,
-        scopes: Array<String>?,
-        expirationTime: Long?,
-        generation: Long,
-    ): Boolean = ProviderRequestRegistry.loginSuccess(origin, provider, email, name, firstName, lastName, photo, idToken, accessToken, serverAuthCode, userId, phoneNumber, hostedDomain, scopes, expirationTime, generation)
+    private fun nativeOnLoginSuccess(origin: String, user: ProviderUserFields, generation: Long): Boolean =
+        ProviderRequestRegistry.loginSuccess(
+            origin, user.provider, user.email, user.name, user.firstName, user.lastName, user.photo,
+            user.idToken, user.accessToken, user.serverAuthCode, user.userId, user.phoneNumber,
+            user.hostedDomain, user.scopes, user.expirationTime, generation,
+        )
 
     @JvmStatic
     private fun nativeOnLoginError(origin: String, code: Int, underlyingError: String?, generation: Long): Boolean = ProviderRequestRegistry.loginError(origin, code, underlyingError, generation)
@@ -484,10 +460,21 @@ object AuthAdapter {
         }
         val expirationTime = getGoogleExpirationTimeMs(account.idToken)
         val claims = JwtClaims.decode(account.idToken.orEmpty())
-        if (!nativeOnLoginSuccess(origin, "google", account.email, account.displayName,
-            claims["given_name"], claims["family_name"], account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
-            account.id, null, hostedDomain, scopes.toTypedArray(), expirationTime, generation)
-        ) {
+        val user = ProviderUserFields(
+            provider = "google",
+            email = account.email,
+            name = account.displayName,
+            firstName = claims["given_name"],
+            lastName = claims["family_name"],
+            photo = account.photoUrl?.toString(),
+            idToken = account.idToken,
+            serverAuthCode = account.serverAuthCode,
+            userId = account.id,
+            hostedDomain = hostedDomain,
+            scopes = scopes.toTypedArray(),
+            expirationTime = expirationTime,
+        )
+        if (!nativeOnLoginSuccess(origin, user, generation)) {
             cleanupStaleGoogleAccount(context, account)
             return false
         }
@@ -557,8 +544,7 @@ object AuthAdapter {
         }
 
         val loginStateEpoch = synchronized(this) {
-            pendingGoogleLoginGeneration = generation
-            pendingGoogleLoginStateEpoch = googleAuthStateEpoch
+            pendingGoogleLogin.begin(generation, googleAuthStateEpoch)
             googleAuthStateEpoch
         }
 
@@ -788,20 +774,17 @@ object AuthAdapter {
                         ?: return@withContext
                     nativeOnLoginSuccess(
                         completed.origin,
-                        "apple",
-                        credential.email,
-                        credential.name,
-                        credential.firstName,
-                        credential.lastName,
-                        null,
-                        credential.idToken,
-                        null,
-                        credential.authorizationCode,
-                        credential.userId,
-                        null,
-                        null,
-                        completed.scopes.toTypedArray(),
-                        null,
+                        ProviderUserFields(
+                            provider = "apple",
+                            email = credential.email,
+                            name = credential.name,
+                            firstName = credential.firstName,
+                            lastName = credential.lastName,
+                            idToken = credential.idToken,
+                            serverAuthCode = credential.authorizationCode,
+                            userId = credential.userId,
+                            scopes = completed.scopes.toTypedArray(),
+                        ),
                         completed.generation,
                     )
                 }
@@ -1041,20 +1024,15 @@ object AuthAdapter {
                     if (completion.success) {
                         val nativeAccepted = nativeOnLoginSuccess(
                             completion.origin,
-                            "microsoft",
-                            completion.email,
-                            completion.name,
-                            null,
-                            null,
-                            null,
-                            completion.idToken,
-                            completion.accessToken,
-                            null,
-                            null,
-                            null,
-                            null,
-                            completion.scopes.toTypedArray(),
-                            completion.expirationTime,
+                            ProviderUserFields(
+                                provider = "microsoft",
+                                email = completion.email,
+                                name = completion.name,
+                                idToken = completion.idToken,
+                                accessToken = completion.accessToken,
+                                scopes = completion.scopes.toTypedArray(),
+                                expirationTime = completion.expirationTime,
+                            ),
                             completion.generation,
                         )
                         if (nativeAccepted && commitMicrosoftTokenSuccess(completion)) {
@@ -1359,8 +1337,8 @@ object AuthAdapter {
         val decision = synchronized(this) {
             if (!shouldCleanupStaleGooglePickerAccount(
                     needsRevalidation = googleLegacyAccountNeedsRevalidation,
-                    loginPending = pendingGoogleLoginGeneration != null,
-                    scopesPending = pendingGoogleScopesGeneration != null,
+                    loginPending = pendingGoogleLogin.isPending,
+                    scopesPending = pendingGoogleScopes.isPending,
                     sessionKind = googleSessionState.kind,
                     hasOneTapSession = inMemoryOneTapSession != null,
                     hasMicrosoftRefreshToken = inMemoryMicrosoftRefreshToken != null,
@@ -1384,8 +1362,8 @@ object AuthAdapter {
         val decision = synchronized(this) {
             if (!shouldCleanupStaleGooglePickerAccount(
                     needsRevalidation = googleLegacyAccountNeedsRevalidation,
-                    loginPending = pendingGoogleLoginGeneration != null,
-                    scopesPending = pendingGoogleScopesGeneration != null,
+                    loginPending = pendingGoogleLogin.isPending,
+                    scopesPending = pendingGoogleScopes.isPending,
                     sessionKind = googleSessionState.kind,
                     hasOneTapSession = inMemoryOneTapSession != null,
                     hasMicrosoftRefreshToken = inMemoryMicrosoftRefreshToken != null,
@@ -1540,67 +1518,30 @@ object AuthAdapter {
     }
 
     private fun consumeRefreshGeneration(generation: Long): Boolean = synchronized(this) {
-        val googleMatches = acceptsPendingRefreshGenerationLocked(
-            pendingGoogleRefreshGeneration,
-            pendingGoogleRefreshStateEpoch,
-            generation,
-        )
-        val microsoftMatches = acceptsPendingRefreshGenerationLocked(
-            pendingMicrosoftRefreshGeneration,
-            pendingMicrosoftRefreshStateEpoch,
-            generation,
-        )
+        val googleMatches = pendingGoogleRefresh.accepts(generation, googleAuthStateEpoch)
+        val microsoftMatches = pendingMicrosoftRefresh.accepts(generation, googleAuthStateEpoch)
         if (googleMatches || microsoftMatches) {
-            pendingGoogleRefreshGeneration = null
-            pendingGoogleRefreshStateEpoch = null
-            pendingMicrosoftRefreshGeneration = null
-            pendingMicrosoftRefreshStateEpoch = null
+            pendingGoogleRefresh.clear()
+            pendingMicrosoftRefresh.clear()
             return@synchronized true
         }
         false
     }
 
     private fun clearPendingRefreshGeneration(generation: Long) = synchronized(this) {
-        if (pendingGoogleRefreshGeneration == generation) {
-            pendingGoogleRefreshGeneration = null
-            pendingGoogleRefreshStateEpoch = null
-        }
-        if (pendingMicrosoftRefreshGeneration == generation) {
-            pendingMicrosoftRefreshGeneration = null
-            pendingMicrosoftRefreshStateEpoch = null
-        }
+        pendingGoogleRefresh.clearIf(generation)
+        pendingMicrosoftRefresh.clearIf(generation)
     }
 
     private fun consumeSilentGeneration(generation: Long): Boolean = synchronized(this) {
-        val googleMatches = acceptsPendingRefreshGenerationLocked(
-            pendingGoogleSilentGeneration,
-            pendingGoogleSilentStateEpoch,
-            generation,
-        )
-        val microsoftMatches = acceptsPendingRefreshGenerationLocked(
-            pendingMicrosoftSilentGeneration,
-            pendingMicrosoftSilentStateEpoch,
-            generation,
-        )
-        if (googleMatches || microsoftMatches) {
-            pendingGoogleSilentGeneration = null
-            pendingGoogleSilentStateEpoch = null
-            pendingMicrosoftSilentGeneration = null
-            pendingMicrosoftSilentStateEpoch = null
-            return@synchronized true
-        }
-        false
+        if (!acceptsSilentGenerationLocked(generation)) return@synchronized false
+        pendingGoogleSilent.clear()
+        pendingMicrosoftSilent.clear()
+        true
     }
 
     private fun clearPendingSilentGeneration(generation: Long) = synchronized(this) {
-        if (pendingGoogleSilentGeneration == generation) {
-            pendingGoogleSilentGeneration = null
-            pendingGoogleSilentStateEpoch = null
-        }
-        if (pendingMicrosoftSilentGeneration == generation) {
-            pendingMicrosoftSilentGeneration = null
-            pendingMicrosoftSilentStateEpoch = null
-        }
+        clearPendingSilentGenerationLocked(generation)
     }
 
     private fun isCurrentSilentGeneration(generation: Long): Boolean = synchronized(this) {
@@ -1608,45 +1549,22 @@ object AuthAdapter {
     }
 
     private fun acceptsSilentGenerationLocked(generation: Long): Boolean =
-        acceptsAuthStateCallback(
-            pendingGoogleSilentGeneration,
-            generation,
-            pendingGoogleSilentStateEpoch,
-            pendingGoogleSilentStateEpoch,
-            googleAuthStateEpoch,
-        ) || acceptsAuthStateCallback(
-            pendingMicrosoftSilentGeneration,
-            generation,
-            pendingMicrosoftSilentStateEpoch,
-            pendingMicrosoftSilentStateEpoch,
-            googleAuthStateEpoch,
-        )
+        pendingGoogleSilent.accepts(generation, googleAuthStateEpoch) ||
+            pendingMicrosoftSilent.accepts(generation, googleAuthStateEpoch)
 
     private fun clearPendingSilentGenerationLocked(generation: Long) {
-        if (pendingGoogleSilentGeneration == generation) {
-            pendingGoogleSilentGeneration = null
-            pendingGoogleSilentStateEpoch = null
-        }
-        if (pendingMicrosoftSilentGeneration == generation) {
-            pendingMicrosoftSilentGeneration = null
-            pendingMicrosoftSilentStateEpoch = null
-        }
+        pendingGoogleSilent.clearIf(generation)
+        pendingMicrosoftSilent.clearIf(generation)
     }
 
     private fun clearPendingCallbackGenerationsLocked() {
-        pendingGoogleLoginGeneration = null
-        pendingGoogleLoginStateEpoch = null
-        pendingGoogleScopesGeneration = null
-        pendingGoogleScopesStateEpoch = null
-        pendingGoogleRefreshGeneration = null
-        pendingGoogleRefreshStateEpoch = null
-        pendingGoogleSilentGeneration = null
-        pendingGoogleSilentStateEpoch = null
+        pendingGoogleLogin.clear()
+        pendingGoogleScopes.clear()
+        pendingGoogleRefresh.clear()
+        pendingGoogleSilent.clear()
         googleRevokeState.clear()
-        pendingMicrosoftRefreshGeneration = null
-        pendingMicrosoftRefreshStateEpoch = null
-        pendingMicrosoftSilentGeneration = null
-        pendingMicrosoftSilentStateEpoch = null
+        pendingMicrosoftRefresh.clear()
+        pendingMicrosoftSilent.clear()
     }
 
     private fun clearPkceStateIfCurrent(generation: Long): Boolean = synchronized(this) {
@@ -1676,62 +1594,23 @@ object AuthAdapter {
         microsoftResumeSuppressionGeneration = null
     }
 
-    private fun acceptsPendingGoogleGenerationLocked(origin: String, generation: Long): Boolean {
-        val activeGeneration: Long?
-        val activeEpoch: Long?
-        when (origin) {
-            "login" -> {
-                activeGeneration = pendingGoogleLoginGeneration
-                activeEpoch = pendingGoogleLoginStateEpoch
-            }
-            "scopes" -> {
-                activeGeneration = pendingGoogleScopesGeneration
-                activeEpoch = pendingGoogleScopesStateEpoch
-            }
-            else -> return false
-        }
-        return acceptsAuthStateCallback(
-            activeGeneration,
-            generation,
-            activeEpoch,
-            activeEpoch,
-            googleAuthStateEpoch,
-        )
+    private fun pendingGoogleOperation(origin: String): PendingOperation? = when (origin) {
+        "login" -> pendingGoogleLogin
+        "scopes" -> pendingGoogleScopes
+        else -> null
     }
+
+    private fun acceptsPendingGoogleGenerationLocked(origin: String, generation: Long): Boolean =
+        pendingGoogleOperation(origin)?.accepts(generation, googleAuthStateEpoch) ?: false
 
     private fun googlePickerStateEpochLocked(origin: String, generation: Long): Long? {
         if (!acceptsPendingGoogleGenerationLocked(origin, generation)) return null
-        return when (origin) {
-            "login" -> pendingGoogleLoginStateEpoch
-            "scopes" -> pendingGoogleScopesStateEpoch
-            else -> null
-        }
+        return pendingGoogleOperation(origin)?.stateEpoch
     }
 
     private fun clearPendingGoogleGenerationLocked(origin: String) {
-        when (origin) {
-            "login" -> {
-                pendingGoogleLoginGeneration = null
-                pendingGoogleLoginStateEpoch = null
-            }
-            "scopes" -> {
-                pendingGoogleScopesGeneration = null
-                pendingGoogleScopesStateEpoch = null
-            }
-        }
+        pendingGoogleOperation(origin)?.clear()
     }
-
-    private fun acceptsPendingRefreshGenerationLocked(
-        activeGeneration: Long?,
-        activeStateEpoch: Long?,
-        callbackGeneration: Long,
-    ): Boolean = acceptsAuthStateCallback(
-        activeGeneration,
-        callbackGeneration,
-        activeStateEpoch,
-        activeStateEpoch,
-        googleAuthStateEpoch,
-    )
 
     private fun isCurrentMicrosoftGenerationLocked(generation: Long): Boolean =
         acceptsAuthCallback(pendingMicrosoftGeneration, generation)
@@ -1919,22 +1798,21 @@ object AuthAdapter {
             }
             val claims = JwtClaims.decode(idToken)
             val expirationTime = getGoogleExpirationTimeMs(idToken)
-            if (!nativeOnLoginSuccess(
-                origin, "google",
-                googleIdTokenCredential.email,
-                googleIdTokenCredential.displayName,
-                claims["given_name"],
-                claims["family_name"],
-                googleIdTokenCredential.profilePictureUri?.toString(),
-                idToken,
-                null, null,
-                googleIdTokenCredential.id,
-                googleIdTokenCredential.phoneNumber,
-                claims["hd"] ?: hostedDomain,
-                scopes.toTypedArray(),
-                expirationTime,
-                generation,
-            )) return
+            val user = ProviderUserFields(
+                provider = "google",
+                email = googleIdTokenCredential.email,
+                name = googleIdTokenCredential.displayName,
+                firstName = claims["given_name"],
+                lastName = claims["family_name"],
+                photo = googleIdTokenCredential.profilePictureUri?.toString(),
+                idToken = idToken,
+                userId = googleIdTokenCredential.id,
+                phoneNumber = googleIdTokenCredential.phoneNumber,
+                hostedDomain = claims["hd"] ?: hostedDomain,
+                scopes = scopes.toTypedArray(),
+                expirationTime = expirationTime,
+            )
+            if (!nativeOnLoginSuccess(origin, user, generation)) return
             val committed = synchronized(this) {
                 if (!acceptsPendingGoogleGenerationLocked(origin, generation)) {
                     false
@@ -1970,8 +1848,7 @@ object AuthAdapter {
         val cleanupBarrier = beginGoogleAuthStateTransition(clearPendingCallbacks = true)
         val ctx = appContext ?: context.applicationContext
         val scopesStateEpoch = synchronized(this) {
-            pendingGoogleScopesGeneration = generation
-            pendingGoogleScopesStateEpoch = googleAuthStateEpoch
+            pendingGoogleScopes.begin(generation, googleAuthStateEpoch)
             googleAuthStateEpoch
         }
         val request = {
@@ -1997,22 +1874,21 @@ object AuthAdapter {
     ): Boolean {
         val credential = session.credential
         val claims = JwtClaims.decode(credential.idToken)
-        return nativeOnLoginSuccess(
-            origin, "google",
-            credential.email,
-            credential.displayName,
-            claims["given_name"],
-            claims["family_name"],
-            credential.profilePictureUri?.toString(),
-            credential.idToken,
-            null, null,
-            credential.id,
-            credential.phoneNumber,
-            claims["hd"] ?: session.hostedDomain,
-            scopes.toTypedArray(),
-            getGoogleExpirationTimeMs(credential.idToken),
-            generation,
+        val user = ProviderUserFields(
+            provider = "google",
+            email = credential.email,
+            name = credential.displayName,
+            firstName = claims["given_name"],
+            lastName = claims["family_name"],
+            photo = credential.profilePictureUri?.toString(),
+            idToken = credential.idToken,
+            userId = credential.id,
+            phoneNumber = credential.phoneNumber,
+            hostedDomain = claims["hd"] ?: session.hostedDomain,
+            scopes = scopes.toTypedArray(),
+            expirationTime = getGoogleExpirationTimeMs(credential.idToken),
         )
+        return nativeOnLoginSuccess(origin, user, generation)
     }
 
     private fun refreshCredentialManagerSession(context: Context, session: OneTapSession, generation: Long) {
@@ -2028,10 +1904,8 @@ object AuthAdapter {
             return
         }
         synchronized(this) {
-            pendingGoogleRefreshGeneration = generation
-            pendingGoogleRefreshStateEpoch = googleAuthStateEpoch
-            pendingMicrosoftRefreshGeneration = null
-            pendingMicrosoftRefreshStateEpoch = null
+            pendingGoogleRefresh.begin(generation, googleAuthStateEpoch)
+            pendingMicrosoftRefresh.clear()
         }
         val request = GetCredentialRequest.Builder()
             .addCredentialOption(
@@ -2171,10 +2045,8 @@ object AuthAdapter {
         }
         if (account != null) {
             synchronized(this) {
-                pendingGoogleRefreshGeneration = generation
-                pendingGoogleRefreshStateEpoch = googleAuthStateEpoch
-                pendingMicrosoftRefreshGeneration = null
-                pendingMicrosoftRefreshStateEpoch = null
+                pendingGoogleRefresh.begin(generation, googleAuthStateEpoch)
+                pendingMicrosoftRefresh.clear()
             }
             val client = googleSignInClient ?: run {
                 val clientId = getClientIdFromResources(ctx)
@@ -2218,10 +2090,8 @@ object AuthAdapter {
         }
         if (refreshToken != null) {
             synchronized(this) {
-                pendingGoogleRefreshGeneration = null
-                pendingGoogleRefreshStateEpoch = null
-                pendingMicrosoftRefreshGeneration = generation
-                pendingMicrosoftRefreshStateEpoch = googleAuthStateEpoch
+                pendingGoogleRefresh.clear()
+                pendingMicrosoftRefresh.begin(generation, googleAuthStateEpoch)
             }
             refreshMicrosoftTokenForRefresh(ctx, refreshToken, generation)
             return
@@ -2336,10 +2206,8 @@ object AuthAdapter {
         val cleanupBarrier = beginGoogleAuthStateTransition(clearPendingCallbacks = true)
         val ctx = appContext ?: context.applicationContext ?: return
         val silentStateEpoch = synchronized(this) {
-            pendingGoogleSilentGeneration = generation
-            pendingGoogleSilentStateEpoch = googleAuthStateEpoch
-            pendingMicrosoftSilentGeneration = null
-            pendingMicrosoftSilentStateEpoch = null
+            pendingGoogleSilent.begin(generation, googleAuthStateEpoch)
+            pendingMicrosoftSilent.clear()
             googleAuthStateEpoch
         }
         val restore = {
@@ -2375,10 +2243,21 @@ object AuthAdapter {
             if (!synchronized(this) { acceptsSilentGenerationLocked(generation) }) return
             val expirationTime = getGoogleExpirationTimeMs(account.idToken)
             val claims = JwtClaims.decode(account.idToken.orEmpty())
-            if (!nativeOnLoginSuccess("silent", "google", account.email, account.displayName,
-                claims["given_name"], claims["family_name"], account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
-                account.id, null, hostedDomain, account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), expirationTime, generation)
-            ) return
+            val user = ProviderUserFields(
+                provider = "google",
+                email = account.email,
+                name = account.displayName,
+                firstName = claims["given_name"],
+                lastName = claims["family_name"],
+                photo = account.photoUrl?.toString(),
+                idToken = account.idToken,
+                serverAuthCode = account.serverAuthCode,
+                userId = account.id,
+                hostedDomain = hostedDomain,
+                scopes = account.grantedScopes?.map { it.scopeUri }?.toTypedArray(),
+                expirationTime = expirationTime,
+            )
+            if (!nativeOnLoginSuccess("silent", user, generation)) return
             synchronized(this) {
                 if (!acceptsSilentGenerationLocked(generation)) return@synchronized
                 clearPendingSilentGenerationLocked(generation)
@@ -2394,10 +2273,8 @@ object AuthAdapter {
             val refreshToken = microsoftRefreshToken
             if (refreshToken != null) {
                 synchronized(this) {
-                    pendingGoogleSilentGeneration = null
-                    pendingGoogleSilentStateEpoch = null
-                    pendingMicrosoftSilentGeneration = generation
-                    pendingMicrosoftSilentStateEpoch = googleAuthStateEpoch
+                    pendingGoogleSilent.clear()
+                    pendingMicrosoftSilent.begin(generation, googleAuthStateEpoch)
                 }
                 refreshMicrosoftToken(context, refreshToken, generation)
             } else {
@@ -2461,20 +2338,15 @@ object AuthAdapter {
                     if (completion.success) {
                         val nativeAccepted = nativeOnLoginSuccess(
                             "silent",
-                            "microsoft",
-                            completion.email,
-                            completion.name,
-                            null,
-                            null,
-                            null,
-                            completion.idToken,
-                            completion.accessToken,
-                            null,
-                            null,
-                            null,
-                            null,
-                            completion.scopes.toTypedArray(),
-                            completion.expirationTime,
+                            ProviderUserFields(
+                                provider = "microsoft",
+                                email = completion.email,
+                                name = completion.name,
+                                idToken = completion.idToken,
+                                accessToken = completion.accessToken,
+                                scopes = completion.scopes.toTypedArray(),
+                                expirationTime = completion.expirationTime,
+                            ),
                             generation,
                         )
                         finishMicrosoftRefresh(completion, nativeAccepted)
@@ -2631,29 +2503,11 @@ object AuthAdapter {
         transportError: String? = null,
         cancelled: Boolean = false,
     ): MicrosoftRefreshCompletion? = synchronized(this) {
-        val activeGeneration: Long?
-        val activeStateEpoch: Long?
-        when (operation) {
-            MicrosoftRefreshOperation.SILENT -> {
-                activeGeneration = pendingMicrosoftSilentGeneration
-                activeStateEpoch = pendingMicrosoftSilentStateEpoch
-            }
-            MicrosoftRefreshOperation.REFRESH -> {
-                activeGeneration = pendingMicrosoftRefreshGeneration
-                activeStateEpoch = pendingMicrosoftRefreshStateEpoch
-            }
-        }
-        if (!acceptsAuthStateCallback(
-                activeGeneration,
-                generation,
-                activeStateEpoch,
-                activeStateEpoch,
-                googleAuthStateEpoch,
-            )
-        ) {
+        val pending = microsoftRefreshPending(operation)
+        if (!pending.accepts(generation, googleAuthStateEpoch)) {
             return@synchronized null
         }
-        val callbackStateEpoch = activeStateEpoch ?: return@synchronized null
+        val callbackStateEpoch = pending.stateEpoch ?: return@synchronized null
 
         if (transportError != null || responseCode == null) {
             return@synchronized MicrosoftRefreshCompletion(
@@ -2723,26 +2577,8 @@ object AuthAdapter {
     }
 
     private fun commitMicrosoftRefresh(completion: MicrosoftRefreshCompletion): Boolean = synchronized(this) {
-        val activeGeneration: Long?
-        val activeStateEpoch: Long?
-        when (completion.operation) {
-            MicrosoftRefreshOperation.SILENT -> {
-                activeGeneration = pendingMicrosoftSilentGeneration
-                activeStateEpoch = pendingMicrosoftSilentStateEpoch
-            }
-            MicrosoftRefreshOperation.REFRESH -> {
-                activeGeneration = pendingMicrosoftRefreshGeneration
-                activeStateEpoch = pendingMicrosoftRefreshStateEpoch
-            }
-        }
-        if (!acceptsAuthStateCallback(
-                activeGeneration,
-                completion.generation,
-                activeStateEpoch,
-                completion.stateEpoch,
-                googleAuthStateEpoch,
-            )
-        ) {
+        val pending = microsoftRefreshPending(completion.operation)
+        if (!pending.accepts(completion.generation, googleAuthStateEpoch, completion.stateEpoch)) {
             return@synchronized false
         }
         clearMicrosoftRefreshGenerationLocked(completion.operation)
@@ -2758,35 +2594,20 @@ object AuthAdapter {
     }
 
     private fun discardMicrosoftRefresh(completion: MicrosoftRefreshCompletion): Boolean = synchronized(this) {
-        val activeGeneration: Long?
-        val activeStateEpoch: Long?
-        when (completion.operation) {
-            MicrosoftRefreshOperation.SILENT -> {
-                activeGeneration = pendingMicrosoftSilentGeneration
-                activeStateEpoch = pendingMicrosoftSilentStateEpoch
-            }
-            MicrosoftRefreshOperation.REFRESH -> {
-                activeGeneration = pendingMicrosoftRefreshGeneration
-                activeStateEpoch = pendingMicrosoftRefreshStateEpoch
-            }
-        }
-        if (activeGeneration != completion.generation || activeStateEpoch != completion.stateEpoch) {
+        val pending = microsoftRefreshPending(completion.operation)
+        if (!pending.matches(completion.generation, completion.stateEpoch)) {
             return@synchronized false
         }
         clearMicrosoftRefreshGenerationLocked(completion.operation)
         true
     }
 
+    private fun microsoftRefreshPending(operation: MicrosoftRefreshOperation): PendingOperation = when (operation) {
+        MicrosoftRefreshOperation.SILENT -> pendingMicrosoftSilent
+        MicrosoftRefreshOperation.REFRESH -> pendingMicrosoftRefresh
+    }
+
     private fun clearMicrosoftRefreshGenerationLocked(operation: MicrosoftRefreshOperation) {
-        when (operation) {
-            MicrosoftRefreshOperation.SILENT -> {
-                pendingMicrosoftSilentGeneration = null
-                pendingMicrosoftSilentStateEpoch = null
-            }
-            MicrosoftRefreshOperation.REFRESH -> {
-                pendingMicrosoftRefreshGeneration = null
-                pendingMicrosoftRefreshStateEpoch = null
-            }
-        }
+        microsoftRefreshPending(operation).clear()
     }
 }

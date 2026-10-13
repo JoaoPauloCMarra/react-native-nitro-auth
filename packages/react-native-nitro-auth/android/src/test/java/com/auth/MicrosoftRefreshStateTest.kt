@@ -58,10 +58,11 @@ class MicrosoftRefreshStateTest {
             it.get(AuthAdapter)
         }
 
+        val pendingRefresh = getField("pendingMicrosoftRefresh") as PendingOperation
+
         try {
             setField("googleAuthStateEpoch", 4L)
-            setField("pendingMicrosoftRefreshGeneration", 11L)
-            setField("pendingMicrosoftRefreshStateEpoch", 4L)
+            pendingRefresh.begin(11L, 4L)
             setField("inMemoryMicrosoftRefreshToken", "token-a")
 
             val completionA = complete.invoke(
@@ -77,13 +78,12 @@ class MicrosoftRefreshStateTest {
             assertNotNull(completionA)
 
             setField("googleAuthStateEpoch", 5L)
-            setField("pendingMicrosoftRefreshGeneration", 12L)
-            setField("pendingMicrosoftRefreshStateEpoch", 5L)
+            pendingRefresh.begin(12L, 5L)
             setField("inMemoryMicrosoftRefreshToken", "token-b")
 
             assertFalse(commit.invoke(AuthAdapter, completionA) as Boolean)
             assertEquals("token-b", getField("inMemoryMicrosoftRefreshToken"))
-            assertEquals(12L, getField("pendingMicrosoftRefreshGeneration"))
+            assertEquals(12L, pendingRefresh.generation)
 
             val completionB = complete.invoke(
                 AuthAdapter,
@@ -97,10 +97,9 @@ class MicrosoftRefreshStateTest {
             )
             assertTrue(commit.invoke(AuthAdapter, completionB) as Boolean)
             assertEquals("token-b-new", getField("inMemoryMicrosoftRefreshToken"))
-            assertNull(getField("pendingMicrosoftRefreshGeneration"))
+            assertNull(pendingRefresh.generation)
         } finally {
-            setField("pendingMicrosoftRefreshGeneration", null)
-            setField("pendingMicrosoftRefreshStateEpoch", null)
+            pendingRefresh.clear()
             setField("inMemoryMicrosoftRefreshToken", null)
             setField("inMemoryMicrosoftScopes", listOf("openid", "email", "profile", "offline_access", "User.Read"))
             setField("googleAuthStateEpoch", 1L)
