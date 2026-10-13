@@ -113,6 +113,22 @@ public class AuthAdapter: NSObject {
     return isCurrent
   }
 
+  enum SessionProvider {
+    case google
+    case microsoft
+  }
+
+  static func activateSession(_ provider: SessionProvider) {
+    switch provider {
+    case .google:
+      inMemoryMicrosoftRefreshToken = nil
+      inMemoryMicrosoftScopes = defaultMicrosoftScopes
+    case .microsoft:
+      GIDSignIn.sharedInstance.signOut()
+      inMemoryGoogleServerAuthCode = nil
+    }
+  }
+
   static func commitCurrentOperation(_ operation: AuthOperationToken, _ mutation: () -> Void) -> Bool {
     tokenStoreLock.lock()
     defer { tokenStoreLock.unlock() }
@@ -348,18 +364,7 @@ public class AuthAdapter: NSObject {
           tokenStoreLock.lock()
           let cachedServerAuthCode = inMemoryGoogleServerAuthCode
           tokenStoreLock.unlock()
-          let data: [String: Any] = [
-            "provider": "google",
-            "email": user.profile?.email ?? "",
-            "name": user.profile?.name ?? "",
-            "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
-            "idToken": user.idToken?.tokenString ?? "",
-          "accessToken": user.accessToken.tokenString,
-          "serverAuthCode": cachedServerAuthCode ?? "",
-          "userId": user.userID ?? "",
-          "hostedDomain": user.configuration.hostedDomain ?? "",
-          "expirationTime": AuthCore.googleExpirationTime(user.accessToken.expirationDate)
-          ]
+          let data = googleUserData(user, idToken: user.idToken?.tokenString ?? "", serverAuthCode: cachedServerAuthCode ?? "")
           completion(data as NSDictionary, nil, nil)
           return
         }

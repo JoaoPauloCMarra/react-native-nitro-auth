@@ -25,6 +25,10 @@ None.
   id rejects with `configuration_error`.
 - Web: a failed Apple SDK script load rejects with `network_error` instead of `unknown`.
 - Web: the Microsoft authorization-code exchange maps network failures to `network_error`.
+- iOS: signing in with one provider after another in the same process clears the
+  previous provider's session, so `refreshToken()`, `requestScopes()` and
+  `silentRestore()` act on the provider that is signed in (Android already behaved this way).
+- iOS: `silentRestore()` for a Google user returns `firstName` and `lastName` like login.
 - Expo config plugin: re-running `expo prebuild` after removing or changing an iOS
   provider option now removes the stale `GIDClientID`, `GIDServerClientID`,
   `MSALClientID`, `MSALTenant` and `MSALB2cDomain` keys and the managed

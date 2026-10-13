@@ -210,6 +210,7 @@ extension AuthAdapter {
 
         let resultScopes = scopes.isEmpty ? defaultMicrosoftScopes : scopes
         guard self.commitCurrentOperation(operation, {
+          activateSession(.microsoft)
           if !refreshToken.isEmpty {
             inMemoryMicrosoftRefreshToken = refreshToken
           }
