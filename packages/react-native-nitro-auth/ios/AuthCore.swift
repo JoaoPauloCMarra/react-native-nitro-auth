@@ -232,6 +232,17 @@ enum AuthCore {
     return .unknown
   }
 
+  static let appleSignInSetupHint =
+    "Sign in with Apple failed with error 1000. This usually means the app lacks the com.apple.developer.applesignin entitlement: set the react-native-nitro-auth config plugin option ios.appleSignIn to true, rebuild with a paid Apple team, and make sure the device is signed in to an Apple ID."
+
+  static func appleErrorDetail(_ error: Error, appleErrorDomain: String, appleUnknownCode: Int) -> String {
+    let nsError = error as NSError
+    if nsError.domain == appleErrorDomain && nsError.code == appleUnknownCode {
+      return appleSignInSetupHint
+    }
+    return error.localizedDescription
+  }
+
   static let googleSignInErrorDomain = "com.google.GIDSignIn"
 
   static func isGoogleScopesAlreadyGranted(_ error: Error?) -> Bool {
@@ -243,7 +254,8 @@ enum AuthCore {
     _ error: Error,
     appleErrorDomain: String,
     appleCanceledCode: Int,
-    appleInvalidResponseCode: Int
+    appleInvalidResponseCode: Int,
+    appleUnknownCode: Int? = nil
   ) -> PlatformAuthErrorCode {
     let nsError = error as NSError
     if nsError.domain == NSURLErrorDomain {
@@ -261,6 +273,7 @@ enum AuthCore {
       switch nsError.code {
       case appleCanceledCode: return .cancelled
       case appleInvalidResponseCode: return .configurationError
+      case _ where appleUnknownCode != nil && nsError.code == appleUnknownCode: return .configurationError
       default: return .unknown
       }
     }

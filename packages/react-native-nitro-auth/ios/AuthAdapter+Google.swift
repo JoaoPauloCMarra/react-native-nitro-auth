@@ -139,7 +139,8 @@ extension AuthAdapter {
       error,
       appleErrorDomain: ASAuthorizationError.errorDomain,
       appleCanceledCode: ASAuthorizationError.canceled.rawValue,
-      appleInvalidResponseCode: ASAuthorizationError.invalidResponse.rawValue
+      appleInvalidResponseCode: ASAuthorizationError.invalidResponse.rawValue,
+      appleUnknownCode: ASAuthorizationError.unknown.rawValue
     )
   }
 }
