@@ -1,4 +1,13 @@
 import "dotenv/config";
+import { spawnSync } from "node:child_process";
+
+const hasCcache = () =>
+  spawnSync("which", ["ccache"], { stdio: "ignore" }).status === 0;
+
+const androidArchitectures = (process.env.NITRO_AUTH_ANDROID_ARCHS ?? "")
+  .split(",")
+  .map((arch) => arch.trim())
+  .filter(Boolean);
 
 const appConfig = {
   expo: {
@@ -11,7 +20,8 @@ const appConfig = {
     userInterfaceStyle: "automatic",
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.auth.example",
+      bundleIdentifier:
+        process.env.NITRO_AUTH_IOS_BUNDLE_ID || "com.auth.example",
     },
     android: {
       package: "com.auth.example",
@@ -22,6 +32,7 @@ const appConfig = {
     },
     plugins: [
       "expo-router",
+      "./plugins/with-gradle-build-speed",
       [
         "expo-build-properties",
         {
@@ -31,11 +42,16 @@ const appConfig = {
             minSdkVersion: 24,
             buildToolsVersion: "36.0.0",
             usePrecompiledHeaders: true,
+            ...(androidArchitectures.length > 0
+              ? { buildArchs: androidArchitectures }
+              : {}),
           },
           ios: {
             deploymentTarget: "16.4",
             usePrecompiledModules: false,
             enableSceneSupport: true,
+            ccacheEnabled:
+              process.env.NITRO_AUTH_IOS_CCACHE !== "0" && hasCcache(),
           },
         },
       ],
