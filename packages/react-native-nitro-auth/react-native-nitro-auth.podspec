@@ -44,7 +44,7 @@ Pod::Spec.new do |s|
   s.frameworks = ["Security"]
 
   s.dependency "React-Core"
-  s.dependency "GoogleSignIn", "~> 9.1"
+  s.dependency "GoogleSignIn", "~> 9.2"
   
   load 'nitrogen/generated/ios/NitroAuthPlatform+autolinking.rb'
   add_nitrogen_files(s)
