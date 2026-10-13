@@ -4,6 +4,7 @@ const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
+const { securitySupportsVersion } = require("./assert-security-support");
 
 const colors = {
   green: (text) => `\x1b[32m${text}\x1b[0m`,
@@ -196,9 +197,7 @@ function recordCurrentRegistryState(packageName) {
   }
   try {
     const tags = JSON.parse(result.stdout);
-    console.log(
-      `  ✓ Current registry dist-tags: ${JSON.stringify(tags)}`,
-    );
+    console.log(`  ✓ Current registry dist-tags: ${JSON.stringify(tags)}`);
   } catch {
     console.log(`  ✓ Current registry dist-tags: ${result.stdout}`);
   }
@@ -221,7 +220,10 @@ function checkPublishAuth() {
 function getExactReleaseTag(version) {
   const result = run(`git tag --points-at HEAD`, { capture: true });
   const tags = result.ok
-    ? result.stdout.split("\n").map((entry) => entry.trim()).filter(Boolean)
+    ? result.stdout
+        .split("\n")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
     : [];
   return tags.includes(`v${version}`) ? `v${version}` : null;
 }
@@ -250,10 +252,23 @@ function assertReleaseTag(version) {
   console.log(`  ✓ Release tag ${expected} exists at HEAD`);
 }
 
+function assertSecurityPolicySupports(version) {
+  const security = fs.readFileSync(
+    path.join(projectRoot, "SECURITY.md"),
+    "utf8",
+  );
+  if (!securitySupportsVersion(security, version)) {
+    throw new Error(`SECURITY.md does not list ${version} as supported.`);
+  }
+  console.log(`  ✓ SECURITY.md supports ${version}`);
+}
+
 function assertChangelogCovers(version) {
   const changelogPath = path.join(packageDir, "CHANGELOG.md");
   const changelog = fs.readFileSync(changelogPath, "utf8");
-  const topEntry = changelog.match(/^##\s+([^\s]+)/m)?.[1]?.replace(/^[[]|]$/g, "");
+  const topEntry = changelog
+    .match(/^##\s+([^\s]+)/m)?.[1]
+    ?.replace(/^[[]|]$/g, "");
 
   if (topEntry === version) {
     console.log(`  ✓ CHANGELOG.md top entry covers ${version}`);
@@ -361,6 +376,7 @@ async function main() {
   requireCleanGitStatus();
   assertReleaseTag(packageJson.version);
   assertChangelogCovers(packageJson.version);
+  assertSecurityPolicySupports(packageJson.version);
   checkRegistryVersion(packageJson.name, packageJson.version);
   recordCurrentRegistryState(packageJson.name);
   checkPublishAuth();
@@ -377,9 +393,7 @@ async function main() {
   // Preflight must never write tracked files (X5): dry runs compare the
   // package docs, the real publish flow syncs them.
   log(
-    dryRun
-      ? "Checking package docs are in sync..."
-      : "Syncing package docs...",
+    dryRun ? "Checking package docs are in sync..." : "Syncing package docs...",
     "cyan",
   );
   must(

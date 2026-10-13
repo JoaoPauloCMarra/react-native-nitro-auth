@@ -6,48 +6,68 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
-## [Next]
+## [0.14.0] - 2026-10-13
 
 ### Breaking changes
 
-None for correctly configured apps. The config plugin now rejects unknown or mistyped options at `expo prebuild`
-(see Fixed); remove or correct any misspelled option it reports.
+- The Expo config plugin now rejects unknown or mistyped options at `expo prebuild`
+  instead of ignoring them. Migration: remove or correct the option named in the
+  error (`ios` and `android` accept only the keys in the README table, and provider
+  values must be strings; `ios.appleSignIn` and `googleButtonFont` must be booleans).
+  `null` and `undefined` are accepted for any option.
+- Several failures now carry a specific `AuthError.code` where they used to report
+  `unknown` or `network_error`. Migration: switch on the new codes, and stop treating
+  the old fallback as the only signal.
+  - Web `getCredential()` and `login()` report `configuration_error` for a missing
+    client id, `popup_blocked`, `cancelled` and `timeout` instead of `unknown`.
+  - Web Apple SDK script load failure reports `network_error` instead of `unknown`.
+  - Web `refreshToken()` for an Apple session reports `unsupported_provider`; a
+    missing Microsoft client id reports `configuration_error`; every concurrent
+    caller gets the same code.
+  - Android legacy Google silent refresh reports the Google status code
+    (`not_signed_in` for a revoked grant, `network_error`, `configuration_error`,
+    `timeout`, `cancelled`) instead of always `network_error`. Apps that retry on
+    `network_error` must now send `not_signed_in` users through `login("google")`.
+  - Android Credential Manager Google sessions no longer reject `refreshToken()`
+    with `not_signed_in`; refresh returns a fresh ID token or rejects `refresh_failed`.
+- Web: a default `login("microsoft")` now requests `offline_access`, so it receives
+  a refresh token (and consent screens may mention offline access). A Microsoft login
+  that returns no refresh token now drops the previous one; a scope request keeps it.
 
 ### Added
 
 - `AuthService.createNonce()` returns the raw and SHA-256 hex nonce pair on iOS,
   Android and web, with the `createNonce` operation on typed errors and lifecycle events.
 
+### Changed
+
+- Android: Credential Manager Google sessions (the default `login("google")`) refresh
+  with a non-interactive request (authorized accounts, auto-select, immediately
+  available credentials only) and need a foreground Activity. Anything that would need
+  UI rejects with `refresh_failed` and keeps the session. `silentRestore()` in the
+  same process returns the in-memory session.
+- Android Google status codes map through one table for login, `requestScopes()` and
+  the legacy silent refresh: 12501 and 16 to `cancelled`, 15 to `timeout`, 4 to
+  `not_signed_in`, 7 to `network_error`, 8 and 10 to `configuration_error`.
+- iOS: signing in with Google or Microsoft after the other in the same process clears
+  the other provider's session, so `refreshToken()`, `requestScopes()` and
+  `silentRestore()` act on the provider that is signed in (Android already behaved
+  this way). Apple sign-in does not clear Google or Microsoft state.
+- iOS: a Microsoft login that returns no refresh token drops the previous one; a scope
+  request keeps it. Google is signed out on the main queue after the Microsoft commit.
+
 ### Fixed
 
-- Web: `getCredential()` rejects with the same typed codes as `login()`
-  (`configuration_error`, `popup_blocked`, `cancelled`, `timeout`) instead of `unknown`.
-- Web: the default Microsoft scopes include `offline_access`, so a default
-  `login("microsoft")` receives a refresh token like iOS and Android.
 - Web: Apple login no longer produces a name such as "undefined Doe" when Apple
   returns only one name part.
-- Web: every concurrent `refreshToken()` caller receives the same typed error;
-  Apple sessions reject with `unsupported_provider` and a missing Microsoft client
-  id rejects with `configuration_error`.
-- Web: a failed Apple SDK script load rejects with `network_error` instead of `unknown`.
+- Web: logout clears the in-memory Microsoft refresh token in the default
+  (non-persisted) mode.
 - Web: the Microsoft authorization-code exchange maps network failures to `network_error`.
-- iOS: signing in with one provider after another in the same process clears the
-  previous provider's session, so `refreshToken()`, `requestScopes()` and
-  `silentRestore()` act on the provider that is signed in (Android already behaved this way).
 - iOS: `silentRestore()` for a Google user returns `firstName` and `lastName` like login.
-- Android: a Credential Manager Google session (the default `login("google")`)
-  now answers `refreshToken()` with a fresh ID token from a silent Credential
-  Manager request (`refresh_failed` when it fails) and `silentRestore()` returns the
-  in-memory session; both previously reported `not_signed_in` for a signed-in user.
-- Android: a failed legacy Google silent refresh reports the Google status code
-  (`not_signed_in` for a revoked grant, `network_error`, `configuration_error`,
-  `timeout`, `cancelled`) instead of always `network_error`.
-- Expo config plugin: unknown top-level, `ios` or `android` options and non-string
-  provider values now fail `expo prebuild` with a clear message instead of being ignored.
-- Expo config plugin: re-running `expo prebuild` after removing or changing an iOS
-  provider option now removes the stale `GIDClientID`, `GIDServerClientID`,
-  `MSALClientID`, `MSALTenant` and `MSALB2cDomain` keys and the managed
-  `com.googleusercontent.apps.*` / `msauth.*` URL schemes, matching the Android strings.
+- Expo config plugin: removing or changing an iOS provider option on a later
+  `expo prebuild` now removes only the `Info.plist` keys and URL schemes the plugin
+  wrote (tracked in a `NitroAuthManaged` entry). Keys and schemes owned by the app,
+  `expo.scheme`, Firebase, `expo-auth-session` or another plugin are never removed.
 
 ## [0.13.2] - 2026-10-03
 

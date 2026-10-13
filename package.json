@@ -53,7 +53,7 @@
     "typecheck:rn087": "bun scripts/verify-rn087-types.ts",
     "test": "bun run --cwd packages/react-native-nitro-auth test",
     "test:types": "bun run typecheck",
-    "test:lifecycle": "node scripts/package-doc-lifecycle.test.js && bun scripts/assert-publish-workflow.js && bun test ./scripts/assert-publish-workflow.test.js",
+    "test:lifecycle": "node scripts/package-doc-lifecycle.test.js && node scripts/assert-security-support.test.js && node scripts/assert-security-support.js && bun scripts/assert-publish-workflow.js && bun test ./scripts/assert-publish-workflow.test.js",
     "test:coverage": "bun run --cwd packages/react-native-nitro-auth test -- --coverage",
     "test:cpp": "bun run --cwd packages/react-native-nitro-auth test:cpp",
     "test:cpp:sanitize": "bun run --cwd packages/react-native-nitro-auth test:cpp:sanitize",
