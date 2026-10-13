@@ -2736,7 +2736,7 @@ describe("AuthModule (web)", () => {
       appleWebClientId: "apple-client-id",
     });
 
-    await expect(auth.login("apple")).rejects.toThrow("unknown");
+    await expect(auth.login("apple")).rejects.toThrow("network_error");
     appendSpy.mockRestore();
   });
 
@@ -2755,7 +2755,7 @@ describe("AuthModule (web)", () => {
     const login = auth.login("apple", { nonce: "external-script-nonce" });
     setTimeout(() => externalScript.dispatchEvent(new Event("error")), 0);
     await Promise.all([
-      expect(login).rejects.toThrow("unknown"),
+      expect(login).rejects.toThrow("network_error"),
       jest.advanceTimersByTimeAsync(0),
     ]);
 
@@ -2806,7 +2806,7 @@ describe("AuthModule (web)", () => {
     const auth = await loadAuthModule({ appleWebClientId: "apple-client-id" });
     const failedLogin = auth.login("apple", { nonce: "retry-nonce" });
     await Promise.all([
-      expect(failedLogin).rejects.toThrow("unknown"),
+      expect(failedLogin).rejects.toThrow("network_error"),
       jest.advanceTimersByTimeAsync(0),
     ]);
 
@@ -3551,5 +3551,111 @@ describe("AuthModule (web)", () => {
     expect(appendSpy).not.toHaveBeenCalled();
     appendSpy.mockRestore();
     existingScript.remove();
+  });
+
+  describe("typed web errors and defaults (audit 36-46)", () => {
+    it("types getCredential configuration failures like login", async () => {
+      const auth = await loadAuthService({});
+      await expect(auth.getCredential("google")).rejects.toMatchObject({
+        code: "configuration_error",
+      });
+      await expect(auth.getCredential("apple")).rejects.toMatchObject({
+        code: "configuration_error",
+      });
+    });
+
+    it("types getCredential popup blocking", async () => {
+      Object.defineProperty(window, "open", {
+        configurable: true,
+        writable: true,
+        value: jest.fn(() => null),
+      });
+      const auth = await loadAuthService({
+        googleWebClientId: "test-client-id.apps.googleusercontent.com",
+      });
+      await expect(auth.getCredential("google")).rejects.toMatchObject({
+        code: "popup_blocked",
+      });
+    });
+
+    it("requests offline_access in the default Microsoft web scopes", async () => {
+      const open = jest.fn(() => null);
+      Object.defineProperty(window, "open", {
+        configurable: true,
+        writable: true,
+        value: open,
+      });
+      const auth = await loadAuthModule({ microsoftClientId: "ms-client" });
+      await expect(auth.login("microsoft")).rejects.toThrow("popup_blocked");
+      const authorizeUrl = new URL(
+        String((open.mock.calls[0] as unknown[])[0]),
+      );
+      expect(authorizeUrl.searchParams.get("scope")).toBe(
+        "openid email profile offline_access User.Read",
+      );
+    });
+
+    it("omits a missing Apple name part instead of printing undefined", async () => {
+      Object.defineProperty(window, "AppleID", {
+        configurable: true,
+        writable: true,
+        value: {
+          auth: {
+            init: jest.fn(),
+            signIn: jest.fn(async () => ({
+              authorization: {
+                id_token: createJwtWithPayload({ nonce: "apple-name-nonce" }),
+              },
+              user: { name: { lastName: "Doe" } },
+            })),
+          },
+        },
+      });
+      const auth = await loadAuthModule({
+        appleWebClientId: "apple-client-id",
+      });
+      await auth.login("apple", { nonce: "apple-name-nonce" });
+      expect(auth.currentUser?.name).toBe("Doe");
+      expect(auth.currentUser?.firstName).toBeUndefined();
+    });
+
+    it("gives every concurrent refreshToken caller the same typed error", async () => {
+      const auth = await loadAuthModule();
+      const [first, second] = await Promise.all([
+        auth.refreshToken().catch((e: unknown) => e),
+        auth.refreshToken().catch((e: unknown) => e),
+      ]);
+      expect(first).toMatchObject({ code: "not_signed_in" });
+      expect(second).toMatchObject({ code: "not_signed_in" });
+    });
+
+    it("rejects Apple refresh with unsupported_provider for every caller", async () => {
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ provider: "apple", idToken: "apple-id-token" }),
+      );
+      const auth = await loadAuthModule();
+      const [first, second] = await Promise.all([
+        auth.refreshToken().catch((e: unknown) => e),
+        auth.refreshToken().catch((e: unknown) => e),
+      ]);
+      expect(first).toMatchObject({ code: "unsupported_provider" });
+      expect(second).toMatchObject({ code: "unsupported_provider" });
+    });
+
+    it("types a Microsoft refresh without a client id as configuration_error for every caller", async () => {
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ provider: "microsoft", idToken: "ms-id-token" }),
+      );
+      sessionStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh");
+      const auth = await loadAuthModule({ nitroAuthPersistTokensOnWeb: true });
+      const [first, second] = await Promise.all([
+        auth.refreshToken().catch((e: unknown) => e),
+        auth.refreshToken().catch((e: unknown) => e),
+      ]);
+      expect(first).toMatchObject({ code: "configuration_error" });
+      expect(second).toMatchObject({ code: "configuration_error" });
+    });
   });
 });

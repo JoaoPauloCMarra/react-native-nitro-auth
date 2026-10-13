@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [Next]
+
+### Breaking changes
+
+None.
+
+### Fixed
+
+- Web: `getCredential()` rejects with the same typed codes as `login()`
+  (`configuration_error`, `popup_blocked`, `cancelled`, `timeout`) instead of `unknown`.
+- Web: the default Microsoft scopes include `offline_access`, so a default
+  `login("microsoft")` receives a refresh token like iOS and Android.
+- Web: Apple login no longer produces a name such as "undefined Doe" when Apple
+  returns only one name part.
+- Web: every concurrent `refreshToken()` caller receives the same typed error;
+  Apple sessions reject with `unsupported_provider` and a missing Microsoft client
+  id rejects with `configuration_error`.
+- Web: a failed Apple SDK script load rejects with `network_error` instead of `unknown`.
+- Web: the Microsoft authorization-code exchange maps network failures to `network_error`.
+
 ## [0.13.2] - 2026-10-03
 
 ### Breaking changes

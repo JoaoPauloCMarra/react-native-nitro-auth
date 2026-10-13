@@ -242,6 +242,9 @@ empty, non-string required credentials, or a response above 64 KiB rejects with
 `APPLE_AUTHORIZATION_CANCELLED` response and browser dismissal map to `cancelled`.
 Raw server error messages never reach the public error detail.
 
+On web, an Apple SDK script that fails to load rejects with `network_error`
+(`timeout` when the load deadline passes).
+
 Only the current attempt's exact callback scheme, host `apple`, path `/callback`,
 and single UUID `attemptId` are accepted. Unexpected, duplicate, and stale
 callbacks cannot consume credentials. Logout, disposal, and replacement requests

@@ -47,6 +47,48 @@ export function buildRefreshTokenBody(
 }
 
 /**
+ * POSTs a token-endpoint request and parses the response. Transport failures
+ * map to `network_error` and unreadable bodies to `parse_error`, so callers
+ * receive one `TokenResponseParseResult` for every outcome.
+ */
+export async function postTokenRequest(
+  request: AuthorizationCodeRequest | RefreshTokenRequest,
+  context: OAuthErrorContext,
+): Promise<TokenResponseParseResult> {
+  const body =
+    "code" in request
+      ? buildAuthorizationCodeBody(request)
+      : buildRefreshTokenBody(request);
+
+  let response: Response;
+  try {
+    response = await fetch(request.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: "network_error",
+      underlyingMessage: String(error),
+    };
+  }
+
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch (error) {
+    return {
+      ok: false,
+      errorCode: "parse_error",
+      underlyingMessage: String(error),
+    };
+  }
+  return parseTokenResponse(json, context);
+}
+
+/**
  * Converts an `expires_in` seconds value to an epoch-milliseconds expiry.
  * The result is always the access-token expiry (see `docs/error-contract.md`).
  */

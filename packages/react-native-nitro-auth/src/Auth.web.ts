@@ -18,17 +18,21 @@ import { logger } from "./utils/logger";
 import { mapOAuthErrorCode } from "./utils/oauth-error";
 import type { OAuthErrorContext } from "./utils/oauth-error";
 import {
-  buildAuthorizationCodeBody,
-  buildRefreshTokenBody,
   parseExpiresInMilliseconds,
-  parseTokenResponse,
+  postTokenRequest,
 } from "./utils/oauth-token-client";
 
 const CACHE_KEY = "nitro_auth_user";
 const SCOPES_KEY = "nitro_auth_scopes";
 const MS_REFRESH_TOKEN_KEY = "nitro_auth_microsoft_refresh_token";
 const DEFAULT_SCOPES = ["openid", "email", "profile"];
-const MS_DEFAULT_SCOPES = ["openid", "email", "profile", "User.Read"];
+const MS_DEFAULT_SCOPES = [
+  "openid",
+  "email",
+  "profile",
+  "offline_access",
+  "User.Read",
+];
 const STORAGE_MODE_SESSION = "session";
 const STORAGE_MODE_LOCAL = "local";
 const STORAGE_MODE_MEMORY = "memory";
@@ -153,6 +157,12 @@ const getSafeErrorCategory = (error: unknown): string => {
 
 const isJsonObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null;
+
+const formatDisplayName = (
+  firstName?: string,
+  lastName?: string,
+): string | undefined =>
+  [firstName, lastName].filter(Boolean).join(" ") || undefined;
 
 const isAuthProvider = (value: unknown): value is AuthProvider =>
   value === "google" || value === "apple" || value === "microsoft";
@@ -815,6 +825,7 @@ class AuthWeb implements Auth {
   private async runLoginOperation(
     operation: () => Promise<void>,
     onStart?: () => void,
+    errorContext: OAuthErrorContext = "authorize",
   ): Promise<AuthUser | undefined> {
     if (this._disposed) {
       throw new AuthWebError("cancelled", "Auth module disposed");
@@ -846,6 +857,8 @@ class AuthWeb implements Auth {
     try {
       await cancellable;
       return completedUser;
+    } catch (e: unknown) {
+      throw this.mapError(e, errorContext);
     } finally {
       if (this._captureLoginUser === capture)
         this._captureLoginUser = undefined;
@@ -1134,7 +1147,11 @@ class AuthWeb implements Auth {
     let rejectRefresh: ((error: unknown) => void) | undefined;
     const refreshPromise = new Promise<AuthTokens>((resolve, reject) => {
       rejectRefresh = reject;
-      void this.performRefreshToken(generation).then(resolve).catch(reject);
+      void this.performRefreshToken(generation)
+        .then(resolve)
+        .catch((e: unknown) => {
+          reject(this.mapError(e, "refresh"));
+        });
     });
     this._refreshPromise = refreshPromise;
     this._refreshReject = rejectRefresh;
@@ -1160,7 +1177,7 @@ class AuthWeb implements Auth {
 
   private async performRefreshToken(generation: number): Promise<AuthTokens> {
     if (!this._currentUser) {
-      throw new Error("No user logged in");
+      throw new AuthWebError("not_signed_in", "No user logged in");
     }
 
     if (this._currentUser.provider === "microsoft") {
@@ -1173,7 +1190,8 @@ class AuthWeb implements Auth {
 
       const clientId = this._config.microsoftClientId;
       if (!clientId) {
-        throw new Error(
+        throw new AuthWebError(
+          "configuration_error",
           "Microsoft Client ID not configured. Add 'microsoftClientId' to expo.extra in your app.config.js",
         );
       }
@@ -1182,28 +1200,11 @@ class AuthWeb implements Auth {
 
       const authBaseUrl = this.getMicrosoftAuthBaseUrl(tenant, b2cDomain);
       const tokenUrl = `${authBaseUrl}oauth2/v2.0/token`;
-      const body = buildRefreshTokenBody({
-        tokenUrl,
-        clientId,
-        refreshToken,
-      });
-
-      let response: Response;
-      try {
-        response = await fetch(tokenUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: body.toString(),
-        });
-      } catch (error) {
-        throw new AuthWebError("network_error", String(error));
-      }
-
-      const json = await this.parseResponseObject(response);
+      const parsed = await postTokenRequest(
+        { tokenUrl, clientId, refreshToken },
+        "refresh",
+      );
       this.assertActiveGeneration(generation);
-      const parsed = parseTokenResponse(json, "refresh");
       if (!parsed.ok) {
         throw new AuthWebError(
           parsed.errorCode,
@@ -1258,19 +1259,23 @@ class AuthWeb implements Auth {
     }
 
     if (this._currentUser.provider !== "google") {
-      throw new Error(
+      throw new AuthWebError(
+        "unsupported_provider",
         `Token refresh not supported for ${this._currentUser.provider}`,
       );
     }
 
     logger.log("Refreshing tokens...");
-    await this.runLoginOperation(() =>
-      this.loginGoogle(
-        this._grantedScopes.length > 0 ? this._grantedScopes : DEFAULT_SCOPES,
-        undefined,
-        undefined,
-        generation,
-      ),
+    await this.runLoginOperation(
+      () =>
+        this.loginGoogle(
+          this._grantedScopes.length > 0 ? this._grantedScopes : DEFAULT_SCOPES,
+          undefined,
+          undefined,
+          generation,
+        ),
+      undefined,
+      "refresh",
     );
     this.assertActiveGeneration(generation);
     const tokens: AuthTokens = {};
@@ -1302,23 +1307,6 @@ class AuthWeb implements Auth {
       return new AuthWebError(providerCode, rawMessage);
     }
     return new AuthWebError(mapInternalErrorMessage(rawMessage), rawMessage);
-  }
-
-  private async parseResponseObject(response: Response): Promise<JsonObject> {
-    let parsed: unknown;
-    try {
-      parsed = await response.json();
-    } catch (error) {
-      throw new AuthWebError("parse_error", String(error));
-    }
-
-    if (!isJsonObject(parsed)) {
-      throw new AuthWebError(
-        "parse_error",
-        "Expected JSON object response from auth provider",
-      );
-    }
-    return parsed;
   }
 
   private parseJwtPayload(token: string): JsonObject {
@@ -1404,19 +1392,21 @@ class AuthWeb implements Auth {
 
       const cancel = () => {
         cleanup(timeoutId, true);
-        reject(new Error("cancelled"));
+        reject(new AuthWebError("cancelled"));
       };
 
       const timeoutId = window.setTimeout(() => {
         cleanup(timeoutId, true);
-        reject(new Error(`${provider.toLowerCase()}_auth_timeout`));
+        reject(
+          new AuthWebError("timeout", `${provider.toLowerCase()}_auth_timeout`),
+        );
       }, POPUP_TIMEOUT_MS);
 
       const poll = () => {
         pollId = undefined;
         if (popup.closed) {
           cleanup(timeoutId, false);
-          reject(new Error("cancelled"));
+          reject(new AuthWebError("cancelled"));
           return;
         }
 
@@ -1468,7 +1458,8 @@ class AuthWeb implements Auth {
     const clientId = this._config.googleWebClientId;
 
     if (!clientId) {
-      throw new Error(
+      throw new AuthWebError(
+        "configuration_error",
         "Google Web Client ID not configured. Add 'GOOGLE_WEB_CLIENT_ID' to your .env file.",
       );
     }
@@ -1513,7 +1504,12 @@ class AuthWeb implements Auth {
       );
 
       if (!popup) {
-        reject(new Error("Popup blocked. Please allow popups for this site."));
+        reject(
+          new AuthWebError(
+            "popup_blocked",
+            "Popup blocked. Please allow popups for this site.",
+          ),
+        );
         return;
       }
 
@@ -1618,7 +1614,8 @@ class AuthWeb implements Auth {
     const clientId = this._config.microsoftClientId;
 
     if (!clientId) {
-      throw new Error(
+      throw new AuthWebError(
+        "configuration_error",
         "Microsoft Client ID not configured. Add 'microsoftClientId' to expo.extra in your app.config.js",
       );
     }
@@ -1630,9 +1627,7 @@ class AuthWeb implements Auth {
       b2cDomain,
     );
 
-    const effectiveScopes = scopes.length
-      ? scopes
-      : ["openid", "email", "profile", "offline_access", "User.Read"];
+    const effectiveScopes = scopes.length ? scopes : MS_DEFAULT_SCOPES;
 
     const codeVerifier = this.generateCodeVerifier();
     const codeChallenge = await this.generateCodeChallenge(codeVerifier);
@@ -1669,7 +1664,12 @@ class AuthWeb implements Auth {
       );
 
       if (!popup) {
-        reject(new Error("Popup blocked. Please allow popups for this site."));
+        reject(
+          new AuthWebError(
+            "popup_blocked",
+            "Popup blocked. Please allow popups for this site.",
+          ),
+        );
         return;
       }
 
@@ -1760,28 +1760,13 @@ class AuthWeb implements Auth {
     );
     const tokenUrl = `${authBaseUrl}oauth2/v2.0/token`;
 
-    const body = buildAuthorizationCodeBody({
-      tokenUrl,
-      clientId,
-      code,
-      redirectUri,
-      codeVerifier,
-    });
-
-    const response = await fetch(tokenUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: body.toString(),
-    });
-
-    const json = await this.parseResponseObject(response);
+    const parsed = await postTokenRequest(
+      { tokenUrl, clientId, code, redirectUri, codeVerifier },
+      "token",
+    );
     if (generation !== undefined) {
       this.assertActiveGeneration(generation);
     }
-
-    const parsed = parseTokenResponse(json, "token");
     if (!parsed.ok) {
       throw new AuthWebError(
         parsed.errorCode,
@@ -1973,11 +1958,11 @@ class AuthWeb implements Auth {
       if (window.AppleID) {
         settle();
       } else {
-        settle(new Error("Failed to load Apple SDK"));
+        settle(new AuthWebError("network_error", "Failed to load Apple SDK"));
       }
     };
     state.onError = () => {
-      settle(new Error("Failed to load Apple SDK"));
+      settle(new AuthWebError("network_error", "Failed to load Apple SDK"));
     };
 
     try {
@@ -2024,7 +2009,8 @@ class AuthWeb implements Auth {
     const clientId = this._config.appleWebClientId;
 
     if (!clientId) {
-      throw new Error(
+      throw new AuthWebError(
+        "configuration_error",
         "Apple Web Client ID not configured. Add 'APPLE_WEB_CLIENT_ID' to your .env file.",
       );
     }
@@ -2034,7 +2020,7 @@ class AuthWeb implements Auth {
       this.assertActiveGeneration(generation);
     }
     if (!window.AppleID) {
-      throw new Error("Apple SDK not loaded");
+      throw new AuthWebError("network_error", "Apple SDK not loaded");
     }
 
     const nonce = options?.nonce ?? crypto.randomUUID();
@@ -2073,9 +2059,10 @@ class AuthWeb implements Auth {
       setIfDefined(
         user,
         "name",
-        response.user?.name
-          ? `${response.user.name.firstName} ${response.user.name.lastName}`.trim()
-          : undefined,
+        formatDisplayName(
+          response.user?.name?.firstName,
+          response.user?.name?.lastName,
+        ),
       );
       this.updateUser(user);
     } catch (error) {
