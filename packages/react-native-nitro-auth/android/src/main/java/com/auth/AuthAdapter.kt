@@ -29,6 +29,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
+import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
@@ -527,14 +528,7 @@ object AuthAdapter {
 
     fun onSignInError(errorCode: Int, message: String?, origin: String = "login", generation: Long) {
         if (!consumeGoogleGeneration(origin, generation)) return
-        val mappedError = when (errorCode) {
-            12501 -> AuthErrorCode.CANCELLED
-            12502 -> AuthErrorCode.OPERATION_IN_PROGRESS
-            4 -> AuthErrorCode.NOT_SIGNED_IN
-            7 -> AuthErrorCode.NETWORK_ERROR
-            8, 10 -> AuthErrorCode.CONFIGURATION_ERROR
-            else -> AuthErrorCode.UNKNOWN
-        }
+        val mappedError = mapGoogleStatusCode(errorCode)
         nativeOnLoginError(origin, mappedError.code, message, generation)
     }
 
@@ -2005,6 +1999,100 @@ object AuthAdapter {
         }
     }
 
+    private fun reportOneTapSession(
+        origin: String,
+        session: OneTapSession,
+        scopes: List<String>,
+        generation: Long,
+    ): Boolean {
+        val credential = session.credential
+        val claims = MicrosoftAuthConfig.decodeJwt(credential.idToken)
+        return nativeOnLoginSuccess(
+            origin, "google",
+            credential.email,
+            credential.displayName,
+            claims["given_name"],
+            claims["family_name"],
+            credential.profilePictureUri?.toString(),
+            credential.idToken,
+            null, null,
+            credential.id,
+            credential.phoneNumber,
+            claims["hd"] ?: session.hostedDomain,
+            scopes.toTypedArray(),
+            getGoogleExpirationTimeMs(credential.idToken),
+            generation,
+        )
+    }
+
+    private fun refreshCredentialManagerSession(context: Context, session: OneTapSession, generation: Long) {
+        val activity = currentActivity ?: context as? Activity
+        val clientId = getClientIdFromResources(context)
+        if (activity == null || clientId == null) {
+            clearPendingRefreshGeneration(generation)
+            nativeOnRefreshError(
+                AuthErrorCode.REFRESH_FAILED.code,
+                if (clientId == null) "Google Client ID not configured" else "An Activity is required to refresh a Credential Manager session",
+                generation,
+            )
+            return
+        }
+        synchronized(this) {
+            pendingGoogleRefreshGeneration = generation
+            pendingGoogleRefreshStateEpoch = googleAuthStateEpoch
+            pendingMicrosoftRefreshGeneration = null
+            pendingMicrosoftRefreshStateEpoch = null
+        }
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(
+                GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(true)
+                    .setServerClientId(clientId)
+                    .setAutoSelectEnabled(true)
+                    .apply { session.hostedDomain?.let { setHostedDomainFilter(it) } }
+                    .build(),
+            )
+            .build()
+        moduleScope.launch(Dispatchers.Main) {
+            val refreshed = try {
+                val credential = CredentialManager.create(activity)
+                    .getCredential(context = activity, request = request)
+                    .credential
+                if (credential is GoogleIdTokenCredential) {
+                    credential
+                } else if (credential.type == "com.google.android.libraries.identity.googleid.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL") {
+                    GoogleIdTokenCredential.createFrom(credential.data)
+                } else {
+                    null
+                }
+            } catch (e: CancellationException) {
+                if (consumeRefreshGeneration(generation)) {
+                    nativeOnRefreshError(AuthErrorCode.REFRESH_FAILED.code, e.message, generation)
+                }
+                return@launch
+            } catch (e: Exception) {
+                Log.w(TAG, "Credential Manager refresh failed (${e.javaClass.simpleName})")
+                if (consumeRefreshGeneration(generation)) {
+                    nativeOnRefreshError(AuthErrorCode.REFRESH_FAILED.code, e.message, generation)
+                }
+                return@launch
+            }
+            if (refreshed == null || refreshed.id != session.credential.id || refreshed.idToken.isBlank()) {
+                if (consumeRefreshGeneration(generation)) {
+                    nativeOnRefreshError(AuthErrorCode.REFRESH_FAILED.code, "Credential Manager returned no matching Google credential", generation)
+                }
+                return@launch
+            }
+            if (!consumeRefreshGeneration(generation)) return@launch
+            synchronized(this@AuthAdapter) {
+                if (inMemoryOneTapSession === session) {
+                    inMemoryOneTapSession = OneTapSession(refreshed, session.scopes, session.hostedDomain)
+                }
+            }
+            nativeOnRefreshSuccess(refreshed.idToken, null, getGoogleExpirationTimeMs(refreshed.idToken), generation)
+        }
+    }
+
     private fun requestScopesAfterTransition(context: Context, scopes: Array<String>, generation: Long) {
         val sessionKind = synchronized(this) { googleSessionState.kind }
         val microsoftSessionActive = synchronized(this) {
@@ -2051,23 +2139,7 @@ object AuthAdapter {
             val mergedScopes = (oneTapSession.scopes + scopes.toList()).distinct()
             if (!synchronized(this) { acceptsPendingGoogleGenerationLocked("scopes", generation) }) return
             val credential = oneTapSession.credential
-            val claims = MicrosoftAuthConfig.decodeJwt(credential.idToken)
-            if (!nativeOnLoginSuccess(
-                "scopes", "google",
-                credential.email,
-                credential.displayName,
-                claims["given_name"],
-                claims["family_name"],
-                credential.profilePictureUri?.toString(),
-                credential.idToken,
-                null, null,
-                credential.id,
-                credential.phoneNumber,
-                claims["hd"] ?: oneTapSession.hostedDomain,
-                mergedScopes.toTypedArray(),
-                getGoogleExpirationTimeMs(credential.idToken),
-                generation,
-            )) return
+            if (!reportOneTapSession("scopes", oneTapSession, mergedScopes, generation)) return
             synchronized(this) {
                 if (!acceptsPendingGoogleGenerationLocked("scopes", generation)) return@synchronized
                 clearPendingGoogleGenerationLocked("scopes")
@@ -2136,9 +2208,19 @@ object AuthAdapter {
                     val acc = task.result
                     nativeOnRefreshSuccess(acc?.idToken, null, getGoogleExpirationTimeMs(acc?.idToken), generation)
                 } else {
-                    nativeOnRefreshError(AuthErrorCode.NETWORK_ERROR.code, task.exception?.message ?: "Silent sign-in failed", generation)
+                    val exception = task.exception
+                    val mappedError = (exception as? ApiException)?.let { mapGoogleStatusCode(it.statusCode) }
+                        ?: AuthErrorCode.NETWORK_ERROR
+                    nativeOnRefreshError(mappedError.code, exception?.message ?: "Silent sign-in failed", generation)
                 }
             }
+            return
+        }
+        val oneTapSession = synchronized(this) {
+            if (googleSessionState.kind == GoogleSessionKind.MODERN) inMemoryOneTapSession else null
+        }
+        if (oneTapSession != null) {
+            refreshCredentialManagerSession(ctx, oneTapSession, generation)
             return
         }
         val refreshToken = synchronized(this) {
@@ -2329,6 +2411,17 @@ object AuthAdapter {
                 }
                 refreshMicrosoftToken(context, refreshToken, generation)
             } else {
+                val oneTapSession = synchronized(this) {
+                    if (sessionKind == GoogleSessionKind.MODERN) inMemoryOneTapSession else null
+                }
+                if (oneTapSession != null) {
+                    if (!synchronized(this) { acceptsSilentGenerationLocked(generation) }) return
+                    if (!reportOneTapSession("silent", oneTapSession, oneTapSession.scopes, generation)) return
+                    synchronized(this) {
+                        if (acceptsSilentGenerationLocked(generation)) clearPendingSilentGenerationLocked(generation)
+                    }
+                    return
+                }
                 if (sessionKind != GoogleSessionKind.MODERN) {
                     signOutUnownedGoogleAccount(context)
                 }

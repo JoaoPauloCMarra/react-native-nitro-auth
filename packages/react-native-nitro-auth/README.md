@@ -488,6 +488,10 @@ Supported login options:
 - `refreshToken()` supports Google and Microsoft. Apple token exchange and
   refresh belong on your backend. Native Apple sessions reject `refreshToken()`
   and `requestScopes()` with `unsupported_provider` while preserving the session.
+- On Android, a Credential Manager Google session (the default `login("google")`)
+  refreshes by re-running a silent Credential Manager request for the same
+  account and rejects with `refresh_failed` when that request fails. In the same
+  process `silentRestore()` returns that session instead of reporting no session.
 - `revokeAccess()` clears local state only after provider revocation succeeds.
   Client-side revocation supports Google web and iOS sessions, plus Android
   sessions created through legacy Google Sign-In. Unsupported providers reject

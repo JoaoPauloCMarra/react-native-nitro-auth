@@ -29,6 +29,13 @@ None.
   previous provider's session, so `refreshToken()`, `requestScopes()` and
   `silentRestore()` act on the provider that is signed in (Android already behaved this way).
 - iOS: `silentRestore()` for a Google user returns `firstName` and `lastName` like login.
+- Android: a Credential Manager Google session (the default `login("google")`)
+  now answers `refreshToken()` with a fresh ID token from a silent Credential
+  Manager request (`refresh_failed` when it fails) and `silentRestore()` returns the
+  in-memory session; both previously reported `not_signed_in` for a signed-in user.
+- Android: a failed legacy Google silent refresh reports the Google status code
+  (`not_signed_in` for a revoked grant, `network_error`, `configuration_error`,
+  `timeout`, `cancelled`) instead of always `network_error`.
 - Expo config plugin: re-running `expo prebuild` after removing or changing an iOS
   provider option now removes the stale `GIDClientID`, `GIDServerClientID`,
   `MSALClientID`, `MSALTenant` and `MSALB2cDomain` keys and the managed
