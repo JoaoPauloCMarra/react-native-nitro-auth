@@ -10,7 +10,13 @@ Breaking changes are always listed first in each release section.
 
 ### Breaking changes
 
-None.
+None for correctly configured apps. The config plugin now rejects unknown or mistyped options at `expo prebuild`
+(see Fixed); remove or correct any misspelled option it reports.
+
+### Added
+
+- `AuthService.createNonce()` returns the raw and SHA-256 hex nonce pair on iOS,
+  Android and web, with the `createNonce` operation on typed errors and lifecycle events.
 
 ### Fixed
 
@@ -36,6 +42,8 @@ None.
 - Android: a failed legacy Google silent refresh reports the Google status code
   (`not_signed_in` for a revoked grant, `network_error`, `configuration_error`,
   `timeout`, `cancelled`) instead of always `network_error`.
+- Expo config plugin: unknown top-level, `ios` or `android` options and non-string
+  provider values now fail `expo prebuild` with a clear message instead of being ignored.
 - Expo config plugin: re-running `expo prebuild` after removing or changing an iOS
   provider option now removes the stale `GIDClientID`, `GIDServerClientID`,
   `MSALClientID`, `MSALTenant` and `MSALB2cDomain` keys and the managed

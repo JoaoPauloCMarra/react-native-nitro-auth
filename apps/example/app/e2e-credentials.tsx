@@ -1,26 +1,12 @@
 import { useEffect, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import {
-  AuthService,
-  type Auth,
-  type AuthPlatform,
-} from "react-native-nitro-auth";
-import { NitroModules } from "react-native-nitro-modules";
+import { StyleSheet, Text, View } from "react-native";
+import { AuthService } from "react-native-nitro-auth";
 import {
   authErrorCode,
   capabilityMatrixMatches,
+  currentPlatform,
 } from "../components/e2e-auth-checks";
-
-function currentPlatform(): AuthPlatform {
-  if (
-    Platform.OS === "ios" ||
-    Platform.OS === "android" ||
-    Platform.OS === "web"
-  ) {
-    return Platform.OS;
-  }
-  return "web";
-}
+import { LabButton, labStyles } from "../components/e2e-lab-ui";
 
 async function runCredentialsSweep(): Promise<{
   nonce: string;
@@ -28,27 +14,21 @@ async function runCredentialsSweep(): Promise<{
   snapshot: string;
 }> {
   const platform = currentPlatform();
-  let nonce = "pending:nonce=native-platform-required";
-  if (platform !== "web") {
-    nonce = "fail:nonce-shape";
-    try {
-      const nonceValue =
-        await NitroModules.createHybridObject<Auth>("Auth").createNonce();
-      const rawNonceValid =
-        nonceValue.raw.length === 43 &&
-        /^[A-Za-z0-9_-]{43}$/.test(nonceValue.raw);
-      const hashedNonceValid =
-        nonceValue.hashed.length === 64 &&
-        /^[a-f0-9]{64}$/.test(nonceValue.hashed);
-      nonce =
-        rawNonceValid &&
-        hashedNonceValid &&
-        nonceValue.raw !== nonceValue.hashed
-          ? "ok:nonce=raw-base64url-43:hashed-sha256-hex-64"
-          : "fail:nonce-shape=invalid";
-    } catch (error) {
-      nonce = `fail:nonce=${authErrorCode(error)}`;
-    }
+  let nonce = "fail:nonce-shape";
+  try {
+    const nonceValue = await AuthService.createNonce();
+    const rawNonceValid =
+      nonceValue.raw.length === 43 &&
+      /^[A-Za-z0-9_-]{43}$/.test(nonceValue.raw);
+    const hashedNonceValid =
+      nonceValue.hashed.length === 64 &&
+      /^[a-f0-9]{64}$/.test(nonceValue.hashed);
+    nonce =
+      rawNonceValid && hashedNonceValid && nonceValue.raw !== nonceValue.hashed
+        ? "ok:nonce=raw-base64url-43:hashed-sha256-hex-64"
+        : "fail:nonce-shape=invalid";
+  } catch (error) {
+    nonce = `fail:nonce=${authErrorCode(error)}`;
   }
 
   const capabilities = capabilityMatrixMatches(platform)
@@ -77,7 +57,7 @@ export default function CredentialsLabScreen() {
   const [capabilityStatus, setCapabilityStatus] = useState("running");
   const [snapshotStatus, setSnapshotStatus] = useState("running");
 
-  useEffect(() => {
+  const applySweep = () => {
     void runCredentialsSweep()
       .then((results) => {
         setNonceStatus(results.nonce);
@@ -90,7 +70,9 @@ export default function CredentialsLabScreen() {
         setCapabilityStatus(failure);
         setSnapshotStatus(failure);
       });
-  }, []);
+  };
+
+  useEffect(applySweep, []);
 
   return (
     <View
@@ -98,29 +80,28 @@ export default function CredentialsLabScreen() {
       style={styles.screen}
       accessibilityLabel="Credentials lab"
     >
-      <Text style={styles.title}>Credentials lab</Text>
-      <Text style={styles.subtitle}>
+      <Text style={labStyles.title}>Credentials lab</Text>
+      <Text style={labStyles.subtitle}>
         Auto-runs only nonce shape, provider capability, and signed-out snapshot
-        checks. The native nonce check remains pending on web. No provider
-        credentials or token values are rendered.
+        checks. No provider credentials or token values are rendered.
       </Text>
-      <Text testID="e2e-credentials-ready" style={styles.result}>
+      <Text testID="e2e-credentials-ready" style={labStyles.result}>
         e2e-ready
       </Text>
-      <Text testID="e2e-credentials-deeplink" style={styles.result}>
+      <Text testID="e2e-credentials-deeplink" style={labStyles.result}>
         auth://e2e-credentials
       </Text>
-      <Text testID="e2e-credentials-nonce" style={styles.result}>
+      <Text testID="e2e-credentials-nonce" style={labStyles.result}>
         {nonceStatus}
       </Text>
-      <Text testID="e2e-credentials-capabilities" style={styles.result}>
+      <Text testID="e2e-credentials-capabilities" style={labStyles.result}>
         {capabilityStatus}
       </Text>
-      <Text testID="e2e-credentials-snapshot" style={styles.result}>
+      <Text testID="e2e-credentials-snapshot" style={labStyles.result}>
         {snapshotStatus}
       </Text>
 
-      <View style={styles.row}>
+      <View style={labStyles.row}>
         <LabButton
           testID="e2e-credentials-nonce-run"
           label="Re-run all"
@@ -128,44 +109,11 @@ export default function CredentialsLabScreen() {
             setNonceStatus("running");
             setCapabilityStatus("running");
             setSnapshotStatus("running");
-            void runCredentialsSweep()
-              .then((results) => {
-                setNonceStatus(results.nonce);
-                setCapabilityStatus(results.capabilities);
-                setSnapshotStatus(results.snapshot);
-              })
-              .catch((error: unknown) => {
-                const failure = `fail:sweep=${authErrorCode(error)}`;
-                setNonceStatus(failure);
-                setCapabilityStatus(failure);
-                setSnapshotStatus(failure);
-              });
+            applySweep();
           }}
         />
       </View>
     </View>
-  );
-}
-
-function LabButton({
-  testID,
-  label,
-  onPress,
-}: {
-  testID: string;
-  label: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={styles.button}
-    >
-      <Text style={styles.buttonText}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -177,35 +125,5 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     paddingHorizontal: 16,
     paddingTop: 48,
-  },
-  title: {
-    color: "#0f172a",
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  subtitle: {
-    color: "#475569",
-    fontSize: 13,
-  },
-  row: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  button: {
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  buttonText: {
-    color: "#f8fafc",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  result: {
-    color: "#0f172a",
-    fontFamily: "Menlo",
-    fontSize: 11,
   },
 });

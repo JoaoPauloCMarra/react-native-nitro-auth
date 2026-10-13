@@ -13,7 +13,7 @@ agree with it. Fixture tests that enforce parts of it live in
 Every public failure is an `AuthError` with:
 
 - `code` — a stable `AuthErrorCode`, safe to switch on;
-- `operation` — the phase that failed (`login`, `getCredential`, `requestScopes`, `revokeScopes`,
+- `operation` — the phase that failed (`login`, `createNonce`, `getCredential`, `requestScopes`, `revokeScopes`,
   `revokeAccess`, `getAccessToken`, `refreshToken`, `silentRestore`, `logout`,
   `dispose`), attached by the service boundary;
 - `underlyingMessage` — the raw platform/provider detail when it differs from
@@ -118,7 +118,8 @@ service boundary, and the C++ coordinator:
 
 SC-09 divergence (documented, not a parity defect): native cancels the first
 login (generation advance); the replacement settles with the platform result,
-which may include `operation_in_progress` while provider UI is still active.
+which on Android may include `operation_in_progress` while provider UI is still active
+(iOS cancels the first login and never reports it).
 Web keeps the first request active and rejects the second with
 `operation_in_progress`. C++ mock tests prove coordinator settlement, not actual
 provider UI teardown timing.

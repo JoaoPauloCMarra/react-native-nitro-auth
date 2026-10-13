@@ -30,28 +30,6 @@ inline const char* authErrorCodeName(AuthErrorCode code) {
   return "unknown";
 }
 
-inline AuthErrorCode authErrorCodeFromInt(int value) {
-  switch (value) {
-    case static_cast<int>(AuthErrorCode::REFRESH_FAILED): return AuthErrorCode::REFRESH_FAILED;
-    case static_cast<int>(AuthErrorCode::CANCELLED): return AuthErrorCode::CANCELLED;
-    case static_cast<int>(AuthErrorCode::INTERACTION_REQUIRED): return AuthErrorCode::INTERACTION_REQUIRED;
-    case static_cast<int>(AuthErrorCode::TIMEOUT): return AuthErrorCode::TIMEOUT;
-    case static_cast<int>(AuthErrorCode::POPUP_BLOCKED): return AuthErrorCode::POPUP_BLOCKED;
-    case static_cast<int>(AuthErrorCode::NETWORK_ERROR): return AuthErrorCode::NETWORK_ERROR;
-    case static_cast<int>(AuthErrorCode::CONFIGURATION_ERROR): return AuthErrorCode::CONFIGURATION_ERROR;
-    case static_cast<int>(AuthErrorCode::NOT_SIGNED_IN): return AuthErrorCode::NOT_SIGNED_IN;
-    case static_cast<int>(AuthErrorCode::OPERATION_IN_PROGRESS): return AuthErrorCode::OPERATION_IN_PROGRESS;
-    case static_cast<int>(AuthErrorCode::UNSUPPORTED_PROVIDER): return AuthErrorCode::UNSUPPORTED_PROVIDER;
-    case static_cast<int>(AuthErrorCode::INVALID_STATE): return AuthErrorCode::INVALID_STATE;
-    case static_cast<int>(AuthErrorCode::INVALID_NONCE): return AuthErrorCode::INVALID_NONCE;
-    case static_cast<int>(AuthErrorCode::TOKEN_ERROR): return AuthErrorCode::TOKEN_ERROR;
-    case static_cast<int>(AuthErrorCode::NO_ID_TOKEN): return AuthErrorCode::NO_ID_TOKEN;
-    case static_cast<int>(AuthErrorCode::PARSE_ERROR): return AuthErrorCode::PARSE_ERROR;
-    case static_cast<int>(AuthErrorCode::UNKNOWN): return AuthErrorCode::UNKNOWN;
-    default: return AuthErrorCode::UNKNOWN;
-  }
-}
-
 /**
  * The single formatter for the JS-visible error message: the stable code
  * string, plus the raw platform detail after `": "` when present. Byte-identical

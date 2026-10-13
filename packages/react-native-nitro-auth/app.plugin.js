@@ -330,7 +330,61 @@ function withGoogleButtonFont(config, enabled) {
   return config;
 }
 
+const PLUGIN_OPTION_KEYS = {
+  ios: {
+    googleClientId: "string",
+    googleServerClientId: "string",
+    googleUrlScheme: "string",
+    appleSignIn: "boolean",
+    microsoftClientId: "string",
+    microsoftTenant: "string",
+    microsoftB2cDomain: "string",
+  },
+  android: {
+    googleClientId: "string",
+    appleAndroidBrokerUrl: "string",
+    appleAndroidCallbackScheme: "string",
+    microsoftClientId: "string",
+    microsoftTenant: "string",
+    microsoftB2cDomain: "string",
+  },
+};
+
+function assertPluginOptions(props) {
+  const topLevelKeys = [...Object.keys(PLUGIN_OPTION_KEYS), "googleButtonFont"];
+  for (const key of Object.keys(props)) {
+    if (!topLevelKeys.includes(key)) {
+      throw new Error(
+        `Unknown react-native-nitro-auth plugin option "${key}". Expected one of: ${topLevelKeys.join(", ")}.`,
+      );
+    }
+  }
+  for (const [group, allowed] of Object.entries(PLUGIN_OPTION_KEYS)) {
+    const options = props[group];
+    if (options === undefined) continue;
+    if (typeof options !== "object" || options === null) {
+      throw new Error(
+        `react-native-nitro-auth option "${group}" must be an object.`,
+      );
+    }
+    for (const [key, value] of Object.entries(options)) {
+      const expectedType = allowed[key];
+      if (!expectedType) {
+        throw new Error(
+          `Unknown react-native-nitro-auth plugin option "${group}.${key}". Expected one of: ${Object.keys(allowed).join(", ")}.`,
+        );
+      }
+      if (value !== undefined && typeof value !== expectedType) {
+        throw new Error(
+          `react-native-nitro-auth option "${group}.${key}" must be a ${expectedType}.`,
+        );
+      }
+    }
+  }
+}
+
 const withNitroAuth = (config, props = {}) => {
+  assertPluginOptions(props);
   const { ios = {}, android = {} } = props;
   const appleAndroid = resolveAppleAndroid(android);
   const googleButtonFont = resolveGoogleButtonFont(props.googleButtonFont);

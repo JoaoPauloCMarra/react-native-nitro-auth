@@ -1,18 +1,12 @@
 import { useEffect, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { AuthService, type AuthPlatform } from "react-native-nitro-auth";
-import { authErrorCode, capabilityMatrixMatches } from "./e2e-auth-checks";
-
-function currentPlatform(): AuthPlatform {
-  if (
-    Platform.OS === "ios" ||
-    Platform.OS === "android" ||
-    Platform.OS === "web"
-  ) {
-    return Platform.OS;
-  }
-  return "web";
-}
+import { Platform, StyleSheet, Text, View } from "react-native";
+import { AuthService } from "react-native-nitro-auth";
+import {
+  authErrorCode,
+  capabilityMatrixMatches,
+  currentPlatform,
+} from "./e2e-auth-checks";
+import { LabButton, labStyles } from "./e2e-lab-ui";
 
 async function signedOutScopeContract(): Promise<string> {
   if (AuthService.currentUser !== undefined) {
@@ -59,41 +53,41 @@ export function AuthE2eLab() {
 
   return (
     <View testID="e2e-lab" style={styles.lab} accessibilityLabel="E2E Lab">
-      <Text style={styles.title}>E2E Lab</Text>
-      <Text style={styles.subtitle}>
+      <Text style={labStyles.title}>E2E Lab</Text>
+      <Text style={labStyles.subtitle}>
         This lab requires an already signed-out package session and its replay
         never starts provider login or restore. The manual restore control may
         find an existing provider session.
       </Text>
-      <Text testID="e2e-ready" style={styles.result}>
+      <Text testID="e2e-ready" style={labStyles.result}>
         e2e-ready
       </Text>
-      <Text testID="e2e-deeplink" style={styles.result}>
+      <Text testID="e2e-deeplink" style={labStyles.result}>
         auth://e2e
       </Text>
-      <Text testID="e2e-session-state" style={styles.result}>
+      <Text testID="e2e-session-state" style={labStyles.result}>
         {AuthService.currentUser ? "session=signed-in" : "session=signed-out"}
       </Text>
-      <Text testID="e2e-capabilities" style={styles.result}>
+      <Text testID="e2e-capabilities" style={labStyles.result}>
         {capabilities}
       </Text>
-      <Text testID="e2e-events" style={styles.result}>
+      <Text testID="e2e-events" style={labStyles.result}>
         {events}
       </Text>
-      <Text testID="e2e-api-status" style={styles.result}>
+      <Text testID="e2e-api-status" style={labStyles.result}>
         {apiStatus}
       </Text>
-      <Text testID="e2e-session-action" style={styles.result}>
+      <Text testID="e2e-session-action" style={labStyles.result}>
         {sessionAction}
       </Text>
-      <Text testID="e2e-scopes-status" style={styles.result}>
+      <Text testID="e2e-scopes-status" style={labStyles.result}>
         {scopeStatus}
       </Text>
-      <Text testID="e2e-stress-result" style={styles.result}>
+      <Text testID="e2e-stress-result" style={labStyles.result}>
         {stressStatus}
       </Text>
 
-      <View style={styles.row}>
+      <View style={labStyles.row}>
         <LabButton
           testID="e2e-capabilities-run"
           label="Capabilities"
@@ -231,28 +225,6 @@ export function AuthE2eLab() {
   );
 }
 
-function LabButton({
-  testID,
-  label,
-  onPress,
-}: {
-  testID: string;
-  label: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={styles.button}
-    >
-      <Text style={styles.buttonText}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   lab: {
     backgroundColor: "#f8fafc",
@@ -262,35 +234,5 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 16,
     padding: 16,
-  },
-  title: {
-    color: "#0f172a",
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  subtitle: {
-    color: "#475569",
-    fontSize: 13,
-  },
-  row: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  button: {
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  buttonText: {
-    color: "#f8fafc",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  result: {
-    color: "#0f172a",
-    fontFamily: "Menlo",
-    fontSize: 11,
   },
 });

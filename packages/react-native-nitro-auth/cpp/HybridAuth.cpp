@@ -294,6 +294,24 @@ void HybridAuth::log(const std::string& message) {
   }
 }
 
+uint64_t HybridAuth::supersedeSession(const std::shared_ptr<Promise<void>>& promise) {
+  PlatformAuth::invalidatePendingOperations();
+  uint64_t generation;
+  std::shared_ptr<Promise<AuthTokens>> refreshInFlight;
+  std::vector<std::shared_ptr<Promise<void>>> sessionPromises;
+  {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    sessionPromises = takePendingSessionPromisesLocked();
+    refreshInFlight = advanceSessionGenerationLocked();
+    generation = _sessionGeneration;
+    trackSessionPromiseLocked(promise);
+  }
+  rejectIfPending(refreshInFlight, AuthErrorCode::CANCELLED);
+  rejectPendingSessionPromises(sessionPromises, AuthErrorCode::CANCELLED);
+  PlatformAuth::cancelPendingOperations();
+  return generation;
+}
+
 void HybridAuth::logout() {
   cancelCredential();
   log("logout");
@@ -313,7 +331,7 @@ void HybridAuth::logout() {
   }
   rejectIfPending(refreshInFlight, AuthErrorCode::NOT_SIGNED_IN);
   rejectPendingSessionPromises(sessionPromises, AuthErrorCode::CANCELLED);
-  PlatformAuth::cancelPendingOperations(AuthErrorCode::CANCELLED);
+  PlatformAuth::cancelPendingOperations();
   PlatformAuth::logout();
   notifyAuthStateChanged();
   emitAuthEvent(AuthEventType::LOGOUT, provider);
@@ -334,7 +352,7 @@ void HybridAuth::dispose() {
   }
   rejectIfPending(refreshInFlight, AuthErrorCode::CANCELLED);
   rejectPendingSessionPromises(sessionPromises, AuthErrorCode::CANCELLED);
-  PlatformAuth::cancelPendingOperations(AuthErrorCode::CANCELLED);
+  PlatformAuth::cancelPendingOperations();
   PlatformAuth::logout();
   emitAuthEvent(AuthEventType::DISPOSE);
   {
@@ -350,20 +368,7 @@ std::shared_ptr<Promise<void>> HybridAuth::silentRestore() {
   if (credentialInProgress()) return rejected<void>(AuthErrorCode::OPERATION_IN_PROGRESS);
   log("silentRestore start");
   auto promise = Promise<void>::create();
-  PlatformAuth::invalidatePendingOperations();
-  uint64_t generation;
-  std::shared_ptr<Promise<AuthTokens>> refreshInFlight;
-  std::vector<std::shared_ptr<Promise<void>>> sessionPromises;
-  {
-    std::lock_guard<std::recursive_mutex> lock(_mutex);
-    sessionPromises = takePendingSessionPromisesLocked();
-    refreshInFlight = advanceSessionGenerationLocked();
-    generation = _sessionGeneration;
-    trackSessionPromiseLocked(promise);
-  }
-  rejectIfPending(refreshInFlight, AuthErrorCode::CANCELLED);
-  rejectPendingSessionPromises(sessionPromises, AuthErrorCode::CANCELLED);
-  PlatformAuth::cancelPendingOperations(AuthErrorCode::CANCELLED);
+  const uint64_t generation = supersedeSession(promise);
   auto silentPromise = PlatformAuth::silentRestore();
   auto self = shared_from_this();
   silentPromise->addOnResolvedListener([self, promise, generation](const std::optional<AuthUser>& user) {
@@ -427,20 +432,7 @@ std::shared_ptr<Promise<void>> HybridAuth::loginImpl(AuthProvider provider, cons
   if (credentialInProgress()) return rejected<void>(AuthErrorCode::OPERATION_IN_PROGRESS);
   log("login start");
   auto promise = Promise<void>::create();
-  PlatformAuth::invalidatePendingOperations();
-  uint64_t generation;
-  std::shared_ptr<Promise<AuthTokens>> refreshInFlight;
-  std::vector<std::shared_ptr<Promise<void>>> sessionPromises;
-  {
-    std::lock_guard<std::recursive_mutex> lock(_mutex);
-    sessionPromises = takePendingSessionPromisesLocked();
-    refreshInFlight = advanceSessionGenerationLocked();
-    generation = _sessionGeneration;
-    trackSessionPromiseLocked(promise);
-  }
-  rejectIfPending(refreshInFlight, AuthErrorCode::CANCELLED);
-  rejectPendingSessionPromises(sessionPromises, AuthErrorCode::CANCELLED);
-  PlatformAuth::cancelPendingOperations(AuthErrorCode::CANCELLED);
+  const uint64_t generation = supersedeSession(promise);
   emitAuthEvent(AuthEventType::LOGIN_STARTED, provider);
   
   auto self = shared_from_this();
@@ -511,20 +503,7 @@ std::shared_ptr<Promise<void>> HybridAuth::requestScopes(const std::vector<std::
       return promise;
     }
   }
-  PlatformAuth::invalidatePendingOperations();
-  uint64_t generation;
-  std::shared_ptr<Promise<AuthTokens>> refreshInFlight;
-  std::vector<std::shared_ptr<Promise<void>>> sessionPromises;
-  {
-    std::lock_guard<std::recursive_mutex> lock(_mutex);
-    sessionPromises = takePendingSessionPromisesLocked();
-    refreshInFlight = advanceSessionGenerationLocked();
-    generation = _sessionGeneration;
-    trackSessionPromiseLocked(promise);
-  }
-  rejectIfPending(refreshInFlight, AuthErrorCode::CANCELLED);
-  rejectPendingSessionPromises(sessionPromises, AuthErrorCode::CANCELLED);
-  PlatformAuth::cancelPendingOperations(AuthErrorCode::CANCELLED);
+  const uint64_t generation = supersedeSession(promise);
   auto self = shared_from_this();
   auto requestPromise = PlatformAuth::requestScopes(scopes);
   requestPromise->addOnResolvedListener([self, promise, scopes, generation](const AuthUser& user) {
@@ -615,14 +594,14 @@ std::shared_ptr<Promise<void>> HybridAuth::revokeAccess() {
     }
   }
   if (!sessionStillActive) {
-    PlatformAuth::cancelPendingOperations(AuthErrorCode::CANCELLED);
+    PlatformAuth::cancelPendingOperations();
     promise->reject(makeAuthError(AuthErrorCode::NOT_SIGNED_IN));
     return promise;
   }
 
   rejectIfPending(refreshInFlight, AuthErrorCode::CANCELLED);
   rejectPendingSessionPromises(sessionPromises, AuthErrorCode::CANCELLED);
-  PlatformAuth::cancelPendingOperations(AuthErrorCode::CANCELLED);
+  PlatformAuth::cancelPendingOperations();
   auto platformPromise = PlatformAuth::revokeAccess(provider);
   auto self = shared_from_this();
   platformPromise->addOnResolvedListener([self, promise, generation]() {

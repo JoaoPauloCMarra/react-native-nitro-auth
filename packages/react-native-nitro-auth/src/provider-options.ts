@@ -96,7 +96,7 @@ export type AuthGetCredential = <Provider extends CredentialProvider>(
 
 export type TypedAuth = Omit<
   Auth,
-  "login" | "createNonce" | "loginAndGetUser" | "getCredential" | "onAuthEvent"
+  "login" | "loginAndGetUser" | "getCredential" | "onAuthEvent"
 > & {
   onAuthEvent(callback: (event: AuthLifecycleEvent) => void): () => void;
   login: AuthLogin;

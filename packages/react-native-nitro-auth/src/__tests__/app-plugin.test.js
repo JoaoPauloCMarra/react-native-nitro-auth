@@ -870,4 +870,46 @@ describe("Microsoft Expo configuration", () => {
     expect(plist).not.toHaveProperty("GIDClientID");
     expect(plist.CFBundleURLTypes).toEqual([ownScheme]);
   });
+
+  it.each([
+    [{ googleClientId: "id" }, /Unknown .*"googleClientId"/],
+    [{ ios: { googleClientID: "id" } }, /"ios\.googleClientID"/],
+    [{ android: { microsoftClientID: "id" } }, /"android\.microsoftClientID"/],
+    [
+      { ios: { microsoftClientId: 42 } },
+      /"ios\.microsoftClientId" must be a string/,
+    ],
+    [{ ios: { appleSignIn: "yes" } }, /"ios\.appleSignIn" must be a boolean/],
+    [{ ios: "id" }, /"ios" must be an object/],
+  ])("rejects misplaced or mistyped options %j", (props, message) => {
+    expect(() =>
+      withNitroAuth({ name: "Example", slug: "example" }, props),
+    ).toThrow(message);
+  });
+
+  it("accepts every documented option and undefined environment values", () => {
+    expect(() =>
+      withNitroAuth(
+        { name: "Example", slug: "example" },
+        {
+          googleButtonFont: true,
+          ios: {
+            googleClientId: undefined,
+            googleServerClientId: "server",
+            googleUrlScheme: "scheme",
+            appleSignIn: true,
+            microsoftClientId: "ms",
+            microsoftTenant: "common",
+            microsoftB2cDomain: "tenant.b2clogin.com",
+          },
+          android: {
+            googleClientId: "web",
+            microsoftClientId: "ms",
+            microsoftTenant: "common",
+            microsoftB2cDomain: "tenant.b2clogin.com",
+          },
+        },
+      ),
+    ).not.toThrow();
+  });
 });

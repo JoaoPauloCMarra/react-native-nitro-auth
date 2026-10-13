@@ -156,10 +156,10 @@ void PlatformAuth::invalidatePendingOperations() {
   }
 }
 
-void PlatformAuth::cancelPendingOperations(AuthErrorCode reason) {
+void PlatformAuth::cancelPendingOperations() {
   platformCancellationCount++;
   if (keepCancelledPlatformPending) return;
-  const auto cancellation = makeAuthError(reason);
+  const auto cancellation = makeAuthError(AuthErrorCode::CANCELLED);
   if (!keepCancelledLoginPending && lastLoginPromise && lastLoginPromise->isPending()) lastLoginPromise->reject(cancellation);
   if (lastRequestScopesPromise && lastRequestScopesPromise->isPending()) lastRequestScopesPromise->reject(cancellation);
   if (lastRefreshPromise && lastRefreshPromise->isPending()) lastRefreshPromise->reject(cancellation);
@@ -821,6 +821,11 @@ void testRevokeScopesPreservesVoidContract() {
   assert(revokePromise->isResolved());
   const std::vector<std::string> remaining{"email"};
   assert(auth->getGrantedScopes() == remaining);
+}
+
+AuthErrorCode authErrorCodeFromInt(int value) {
+  const bool inRange = value >= static_cast<int>(AuthErrorCode::REFRESH_FAILED) && value <= static_cast<int>(AuthErrorCode::UNKNOWN);
+  return inRange ? static_cast<AuthErrorCode>(value) : AuthErrorCode::UNKNOWN;
 }
 
 void testAuthErrorEnvelopeIsByteIdentical() {

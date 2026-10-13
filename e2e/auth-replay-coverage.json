@@ -296,7 +296,7 @@
       "id": "credentials.nonce-shape",
       "coverage": "replay-asserted",
       "kind": "public-api",
-      "transport": "On iOS and Android, public Auth.createNonce returns a 32-byte base64url raw nonce and SHA-256 hex digest; the values are never rendered",
+      "transport": "Public AuthService.createNonce returns a 32-byte base64url raw nonce and SHA-256 hex digest on every platform; the values are never rendered",
       "suite": "e2e/qa-credentials.ad",
       "source": "apps/example/app/e2e-credentials.tsx",
       "trigger": "screen-load",
@@ -634,15 +634,6 @@
         "Known provider and package session state before logout"
       ],
       "acceptance": "With a signed-in test package session, verify logout clears the public user and scopes, terminates pending work as documented, and does not alter another installation or account session."
-    },
-    {
-      "id": "credentials.nonce-web-native-bridge",
-      "state": "pending-prerequisites",
-      "reason": "The package does not expose createNonce through its web AuthService surface, so the credentials screen reports the native nonce check as pending on web.",
-      "prerequisites": [
-        "A supported public web nonce API, if browser nonce coverage is required"
-      ],
-      "acceptance": "Keep the web nonce row pending until a public web nonce API exists; do not call a native HybridObject or report web as a native nonce failure."
     }
   ]
 }

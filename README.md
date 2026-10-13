@@ -375,6 +375,9 @@ await fetch(yourAuthEndpoint, {
 });
 ```
 
+`AuthService.createNonce()` returns a `{ raw, hashed }` pair (base64url raw nonce and
+its SHA-256 hex digest) on every platform when you need to build the nonce yourself.
+
 `getCredential()` supports Google and Apple. It creates a random nonce, sends
 its SHA-256 hex value to the provider, returns the raw nonce for backend
 verification, and clears provider state before resolving without publishing a
