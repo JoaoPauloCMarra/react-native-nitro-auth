@@ -117,6 +117,18 @@ final class ErrorMappingTests: XCTestCase {
     )
   }
 
+  func testGoogleScopesAlreadyGrantedIsRecognisedOnlyForTheGoogleDomain() {
+    XCTAssertTrue(AuthCore.isGoogleScopesAlreadyGranted(NSError(domain: "com.google.GIDSignIn", code: -8)))
+    XCTAssertFalse(AuthCore.isGoogleScopesAlreadyGranted(NSError(domain: "com.google.GIDSignIn", code: -5)))
+    XCTAssertFalse(AuthCore.isGoogleScopesAlreadyGranted(NSError(domain: "Other", code: -8)))
+    XCTAssertFalse(AuthCore.isGoogleScopesAlreadyGranted(nil))
+  }
+
+  func testExpiredGoogleRefreshTokenRequiresInteraction() {
+    XCTAssertEqual(mapProvider(NSError(domain: "com.google.GIDSignIn", code: -11)), .interactionRequired)
+    XCTAssertEqual(mapProvider(NSError(domain: "Other", code: -11)), .unknown)
+  }
+
   func testProviderErrorMessageHeuristicsAreTheLastResort() {
     func described(_ message: String, domain: String = "com.google.GIDSignIn", code: Int = -1) -> NSError {
       NSError(domain: domain, code: code, userInfo: [NSLocalizedDescriptionKey: message])

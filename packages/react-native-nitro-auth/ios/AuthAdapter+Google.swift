@@ -83,6 +83,23 @@ extension AuthAdapter {
     completion(data as NSDictionary, nil, nil)
   }
 
+  static func completeGoogleScopesAlreadyGranted(
+    _ user: GIDGoogleUser,
+    operation: AuthAdapter.AuthOperationToken,
+    completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void
+  ) {
+    var serverAuthCode = ""
+    guard commitCurrentOperation(operation, {
+      activateSession(.google)
+      serverAuthCode = inMemoryGoogleServerAuthCode ?? ""
+    }) else {
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+      return
+    }
+    let data = googleUserData(user, idToken: user.idToken?.tokenString ?? "", serverAuthCode: serverAuthCode)
+    completion(data as NSDictionary, nil, nil)
+  }
+
   @objc
   public static func revokeAccess(
     provider: String,

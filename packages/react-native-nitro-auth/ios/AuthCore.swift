@@ -232,6 +232,13 @@ enum AuthCore {
     return .unknown
   }
 
+  static let googleSignInErrorDomain = "com.google.GIDSignIn"
+
+  static func isGoogleScopesAlreadyGranted(_ error: Error?) -> Bool {
+    guard let nsError = error as NSError? else { return false }
+    return nsError.domain == googleSignInErrorDomain && nsError.code == -8
+  }
+
   static func mapProviderError(
     _ error: Error,
     appleErrorDomain: String,
@@ -242,10 +249,11 @@ enum AuthCore {
     if nsError.domain == NSURLErrorDomain {
       return .networkError
     }
-    if nsError.domain == "com.google.GIDSignIn" {
+    if nsError.domain == googleSignInErrorDomain {
       switch nsError.code {
       case -5: return .cancelled
       case -4: return .notSignedIn
+      case -11: return .interactionRequired
       default: break
       }
     }

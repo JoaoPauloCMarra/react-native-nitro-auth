@@ -279,6 +279,10 @@ public class AuthAdapter: NSObject {
           presenting: rootVC,
           operation: operation,
           completion: { result, error in
+            if AuthCore.isGoogleScopesAlreadyGranted(error) {
+              self.completeGoogleScopesAlreadyGranted(currentUser, operation: operation, completion: complete)
+              return
+            }
             self.handleGoogleResult(result, error: error, operation: operation, completion: complete)
           }
         ) else {
