@@ -49,9 +49,7 @@
     "test:swift": "node scripts/test-swift.js",
     "prepublishOnly": "bun run clean && bun run codegen && bun run build && bun run typecheck && bun run lint && bun run test && bun run test:cpp",
     "prepack": "bun ../../scripts/sync-package-docs.ts prepare",
-    "postpack": "bun ../../scripts/sync-package-docs.ts cleanup",
-    "pack:dry-run": "node scripts/package-dry-run.js pack",
-    "publish:dry-run": "node scripts/package-dry-run.js publish"
+    "postpack": "bun ../../scripts/sync-package-docs.ts cleanup"
   },
   "keywords": [
     "react-native",

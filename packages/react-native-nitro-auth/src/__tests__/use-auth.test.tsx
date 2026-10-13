@@ -7,7 +7,9 @@ import type {
   AuthTokens,
   AuthUser,
   LoginOptions,
+  ScopeRevocationResult,
 } from "../Auth.nitro";
+import type { TypedAuth } from "../provider-options";
 
 // Import after mock
 
@@ -22,14 +24,14 @@ type LoginFn = (
 ) => Promise<void>;
 type RequestScopesFn = (scopes: string[]) => Promise<void>;
 type RevokeScopesFn = (scopes: string[]) => Promise<void>;
+type RevokeScopesWithResultFn = (
+  scopes: string[],
+) => Promise<ScopeRevocationResult>;
 type RevokeAccessFn = () => Promise<void>;
 type GetAccessTokenFn = () => Promise<string | undefined>;
 type RefreshTokenFn = () => Promise<AuthTokens>;
 type OnAuthStateChangedFn = (
   callback: (user: AuthUser | undefined) => void,
-) => () => void;
-type OnTokensRefreshedFn = (
-  callback: (tokens: AuthTokens) => void,
 ) => () => void;
 
 const mockLogin = jest.fn<ReturnType<LoginFn>, Parameters<LoginFn>>();
@@ -41,6 +43,10 @@ const mockRequestScopes = jest.fn<
 const mockRevokeScopes = jest.fn<
   ReturnType<RevokeScopesFn>,
   Parameters<RevokeScopesFn>
+>();
+const mockRevokeScopesWithResult = jest.fn<
+  ReturnType<RevokeScopesWithResultFn>,
+  Parameters<RevokeScopesWithResultFn>
 >();
 const mockRevokeAccess = jest.fn<
   ReturnType<RevokeAccessFn>,
@@ -58,10 +64,6 @@ const mockOnAuthStateChanged = jest.fn<
   ReturnType<OnAuthStateChangedFn>,
   Parameters<OnAuthStateChangedFn>
 >();
-const mockOnTokensRefreshed = jest.fn<
-  ReturnType<OnTokensRefreshedFn>,
-  Parameters<OnTokensRefreshedFn>
->();
 const mockSilentRestore = jest.fn<Promise<void>, []>();
 
 // Mock the service module
@@ -69,8 +71,8 @@ jest.mock("../service", () => ({
   AuthService: {
     getSessionSnapshot: () => ({
       revision: ++mockSnapshotRevision,
-      user: mockCurrentUser,
       scopes: mockScopes,
+      ...(mockCurrentUser ? { user: mockCurrentUser } : {}),
     }),
     onSessionChanged: (callback: (snapshot: AuthSessionSnapshot) => void) =>
       mockOnAuthStateChanged((user) => {
@@ -96,6 +98,8 @@ jest.mock("../service", () => ({
       mockRequestScopes(...args),
     revokeScopes: (...args: Parameters<RevokeScopesFn>) =>
       mockRevokeScopes(...args),
+    revokeScopesWithResult: (...args: Parameters<RevokeScopesWithResultFn>) =>
+      mockRevokeScopesWithResult(...args),
     revokeAccess: (...args: Parameters<RevokeAccessFn>) =>
       mockRevokeAccess(...args),
     getAccessToken: (...args: Parameters<GetAccessTokenFn>) =>
@@ -104,10 +108,8 @@ jest.mock("../service", () => ({
       mockRefreshToken(...args),
     onAuthStateChanged: (...args: Parameters<OnAuthStateChangedFn>) =>
       mockOnAuthStateChanged(...args),
-    onTokensRefreshed: (...args: Parameters<OnTokensRefreshedFn>) =>
-      mockOnTokensRefreshed(...args),
     silentRestore: (...args: []) => mockSilentRestore(...args),
-  },
+  } satisfies Partial<TypedAuth>,
 }));
 
 describe("useAuth", () => {
@@ -123,8 +125,7 @@ describe("useAuth", () => {
     mockRefreshToken.mockReset();
     mockOnAuthStateChanged.mockReset();
     mockOnAuthStateChanged.mockReturnValue(() => {});
-    mockOnTokensRefreshed.mockReset();
-    mockOnTokensRefreshed.mockReturnValue(() => {});
+    mockRevokeScopesWithResult.mockReset();
     mockSilentRestore.mockReset();
   });
 
@@ -411,6 +412,42 @@ describe("useAuth", () => {
     });
   });
 
+  describe("revokeScopesWithResult", () => {
+    it("resolves with the provider revocation result", async () => {
+      const revocation: ScopeRevocationResult = {
+        revokedAtProvider: false,
+        revokedScopes: ["calendar"],
+      };
+      mockRevokeScopesWithResult.mockResolvedValue(revocation);
+
+      const { result } = renderHook(() => useAuth());
+
+      let revoked: ScopeRevocationResult | undefined;
+      await act(async () => {
+        revoked = await result.current.revokeScopesWithResult(["calendar"]);
+      });
+
+      expect(mockRevokeScopesWithResult).toHaveBeenCalledWith(["calendar"]);
+      expect(revoked).toEqual(revocation);
+      expect(result.current.loading).toBe(false);
+    });
+
+    it("exposes a typed error when revocation fails", async () => {
+      mockRevokeScopesWithResult.mockRejectedValue(new Error("unknown"));
+
+      const { result } = renderHook(() => useAuth());
+
+      await act(async () => {
+        try {
+          await result.current.revokeScopesWithResult(["calendar"]);
+        } catch {}
+      });
+
+      expect(result.current.error).toBeInstanceOf(AuthError);
+      expect((result.current.error as AuthError).code).toBe("unknown");
+    });
+  });
+
   describe("revokeAccess", () => {
     it("should revoke access successfully", async () => {
       mockRevokeAccess.mockResolvedValue(undefined);
@@ -532,11 +569,11 @@ describe("useAuth", () => {
 
   describe("session change callback", () => {
     it("syncs user and scopes from the session snapshot", () => {
-      let tokensCallback: ((user: AuthUser | undefined) => void) | null = null;
+      let sessionCallback: ((user: AuthUser | undefined) => void) | null = null;
       mockOnAuthStateChanged.mockImplementation((cb) => {
-        tokensCallback = cb;
+        sessionCallback = cb;
         return () => {
-          tokensCallback = null;
+          sessionCallback = null;
         };
       });
 
@@ -550,7 +587,7 @@ describe("useAuth", () => {
       mockScopes = ["email", "profile"];
 
       act(() => {
-        tokensCallback?.(updatedUser);
+        sessionCallback?.(updatedUser);
       });
 
       expect(result.current.user).toEqual(updatedUser);
