@@ -583,6 +583,7 @@ class AuthWeb implements Auth {
             undefined,
             undefined,
             generation,
+            true,
           );
         },
         () => {
@@ -1150,6 +1151,7 @@ class AuthWeb implements Auth {
     tenant?: string,
     prompt?: string,
     generation?: number,
+    keepRefreshToken = false,
   ): Promise<void> {
     const clientId = this._config.microsoftClientId;
 
@@ -1253,6 +1255,7 @@ class AuthWeb implements Auth {
             effectiveTenant,
             nonce,
             effectiveScopes,
+            keepRefreshToken,
             generation,
           );
         },
@@ -1292,6 +1295,7 @@ class AuthWeb implements Auth {
     tenant: string,
     expectedNonce: string,
     scopes: string[],
+    keepRefreshToken: boolean,
     generation?: number,
   ): Promise<void> {
     const authBaseUrl = this.getMicrosoftAuthBaseUrl(
@@ -1333,6 +1337,8 @@ class AuthWeb implements Auth {
 
     if (refreshToken) {
       this._storage.saveRefreshToken(refreshToken);
+    } else if (!keepRefreshToken) {
+      this._storage.clearRefreshToken();
     }
 
     this._grantedScopes = scopes;

@@ -3166,4 +3166,122 @@ describe("AuthModule (web)", () => {
       expect(second).toMatchObject({ code: "configuration_error" });
     });
   });
+
+  describe("in-memory Microsoft refresh token (default mode)", () => {
+    const installMicrosoftLogin = (
+      tokenResponses: Record<string, unknown>[],
+    ) => {
+      const popup = createPopupWindow();
+      installWindowOpen(
+        jest.fn((url: string) => {
+          const state = new URL(url).searchParams.get("state");
+          popup.location.href = `${window.location.origin}?code=auth-code&state=${state}`;
+          return popup;
+        }),
+      );
+      const responses = [...tokenResponses];
+      installFetch(
+        jest.fn(
+          async () =>
+            ({
+              ok: true,
+              json: async () => responses.shift(),
+            }) as unknown as Response,
+        ),
+      );
+    };
+    const idToken = () => createJwtWithPayload({ nonce: "test-random-uuid" });
+
+    it("drops the refresh token on logout", async () => {
+      jest.useFakeTimers();
+      installMicrosoftLogin([
+        {
+          id_token: idToken(),
+          access_token: "a",
+          refresh_token: "r1",
+          expires_in: 3600,
+        },
+        { id_token: idToken(), access_token: "b", expires_in: 3600 },
+      ]);
+      const auth = await loadAuthModule({
+        microsoftClientId: "test-client-id",
+      });
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      auth.logout();
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      await expect(auth.refreshToken()).rejects.toMatchObject({
+        code: "refresh_failed",
+      });
+    });
+
+    it("does not keep the previous account's refresh token after a login without one", async () => {
+      jest.useFakeTimers();
+      installMicrosoftLogin([
+        {
+          id_token: idToken(),
+          access_token: "a",
+          refresh_token: "r-account-a",
+          expires_in: 3600,
+        },
+        { id_token: idToken(), access_token: "b", expires_in: 3600 },
+      ]);
+      const auth = await loadAuthModule({
+        microsoftClientId: "test-client-id",
+      });
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      await expect(auth.refreshToken()).rejects.toMatchObject({
+        code: "refresh_failed",
+      });
+    });
+
+    it("keeps the refresh token when a scope request returns none", async () => {
+      jest.useFakeTimers();
+      installMicrosoftLogin([
+        {
+          id_token: idToken(),
+          access_token: "a",
+          refresh_token: "r1",
+          expires_in: 3600,
+        },
+        { id_token: idToken(), access_token: "b", expires_in: 3600 },
+        {
+          id_token: idToken(),
+          access_token: "c",
+          refresh_token: "r2",
+          expires_in: 3600,
+        },
+      ]);
+      const auth = await loadAuthModule({
+        microsoftClientId: "test-client-id",
+      });
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+      await Promise.all([
+        auth.requestScopes(["Mail.Read"]),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      await expect(auth.refreshToken()).resolves.toMatchObject({
+        accessToken: "c",
+      });
+    });
+  });
 });

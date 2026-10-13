@@ -360,10 +360,15 @@ export class WebSessionStorage {
     this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
   }
 
+  clearRefreshToken(): void {
+    this.removeValue(MS_REFRESH_TOKEN_KEY);
+    inMemoryWebStorage.delete(MS_REFRESH_TOKEN_KEY);
+  }
+
   clearSession(): void {
     this.removeValue(CACHE_KEY);
     this.removeValue(SCOPES_KEY);
-    this.removeValue(MS_REFRESH_TOKEN_KEY);
+    this.clearRefreshToken();
   }
 
   restore(): { user?: AuthUser; scopes?: string[] } {
