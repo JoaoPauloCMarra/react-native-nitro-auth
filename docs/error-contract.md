@@ -256,6 +256,11 @@ empty, non-string required credentials, or a response above 64 KiB rejects with
 `APPLE_AUTHORIZATION_CANCELLED` response and browser dismissal map to `cancelled`.
 Raw server error messages never reach the public error detail.
 
+On iOS, `ASAuthorizationError.unknown` (`1000`) from Sign in with Apple maps to
+`configuration_error`. iOS returns it when the app lacks the
+`com.apple.developer.applesignin` entitlement; it can also mean the device has no
+Apple ID. The detail names the entitlement and the `ios.appleSignIn` plugin option.
+
 On web, an Apple SDK script that fails to load rejects with `network_error`
 (`timeout` when the load deadline passes).
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "runtimeSourceSha256": "4b135826eefe2646da791657841633e487187a001b297e1ffb392a6303f62311",
+  "runtimeSourceSha256": "44546694882075f445e8971cb8ca4af4cea1c5f1af5502a157a389bd704ee38f",
   "runtimeSourceFiles": [
     "apps/example/app.config.js",
     "apps/example/app/_layout.tsx",
@@ -24,6 +24,7 @@
     "apps/example/eslint.config.js",
     "apps/example/metro.config.js",
     "apps/example/package.json",
+    "apps/example/plugins/with-gradle-build-speed.js",
     "apps/example/tsconfig.json",
     "bun.lock",
     "package.json",

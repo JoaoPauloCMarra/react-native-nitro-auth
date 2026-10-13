@@ -28,6 +28,10 @@ Breaking changes are always listed first in each release section.
     (`not_signed_in` for a revoked grant, `network_error`, `configuration_error`,
     `timeout`, `cancelled`) instead of always `network_error`. Apps that retry on
     `network_error` must now send `not_signed_in` users through `login("google")`.
+  - iOS Sign in with Apple error `1000` (`ASAuthorizationError.unknown`, returned
+    when the app lacks the `com.apple.developer.applesignin` entitlement) reports
+    `configuration_error` with a message naming the entitlement and the
+    `ios.appleSignIn` plugin option instead of `unknown`.
   - Android Credential Manager Google sessions no longer reject `refreshToken()`
     with `not_signed_in`; refresh returns a fresh ID token or rejects `refresh_failed`.
 - Web: a default `login("microsoft")` now requests `offline_access`, so it receives
@@ -58,6 +62,13 @@ Breaking changes are always listed first in each release section.
 
 ### Fixed
 
+- iOS: `requestScopes()` for a Google user whose scopes are already granted resolves
+  with the current user (as on Android) instead of rejecting `unknown`.
+- iOS: an expired Google refresh token (`GIDSignInErrorCode.refreshTokenExpired`)
+  reports `interaction_required`.
+- Dependencies: `GoogleSignIn` requires `~> 9.2` (CocoaPods trunk has no `10.x`
+  yet), Android `play-services-auth` is `21.6.0` (`22.0.0` removes the legacy Google
+  Sign-In API this package uses for scope requests) and `googleid` is `1.2.1`.
 - Web: Apple login no longer produces a name such as "undefined Doe" when Apple
   returns only one name part.
 - Web: logout clears the in-memory Microsoft refresh token in the default
