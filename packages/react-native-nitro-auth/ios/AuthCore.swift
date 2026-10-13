@@ -123,6 +123,11 @@ enum AuthCore {
     return code
   }
 
+  static func microsoftRefreshTokenAfterCommit(current: String?, received: String, keepExisting: Bool) -> String? {
+    if !received.isEmpty { return received }
+    return keepExisting ? current : nil
+  }
+
   static func shouldClearMicrosoftRefreshToken(statusCode: Int) -> Bool {
     (400...499).contains(statusCode) && statusCode != 408 && statusCode != 429
   }

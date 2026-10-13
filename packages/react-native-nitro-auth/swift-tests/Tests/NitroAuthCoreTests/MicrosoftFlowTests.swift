@@ -398,4 +398,15 @@ final class MicrosoftFlowTests: XCTestCase {
     XCTAssertEqual(AuthCore.expirationTime(-1), -1)
     XCTAssertTrue(AuthCore.expirationTime(Double.nan)?.isNaN ?? false)
   }
+
+  func testLoginWithoutARefreshTokenDropsThePreviousOne() {
+    XCTAssertEqual(AuthCore.microsoftRefreshTokenAfterCommit(current: "old", received: "new", keepExisting: false), "new")
+    XCTAssertNil(AuthCore.microsoftRefreshTokenAfterCommit(current: "old", received: "", keepExisting: false))
+    XCTAssertNil(AuthCore.microsoftRefreshTokenAfterCommit(current: nil, received: "", keepExisting: false))
+  }
+
+  func testScopeRequestWithoutARefreshTokenKeepsTheCurrentOne() {
+    XCTAssertEqual(AuthCore.microsoftRefreshTokenAfterCommit(current: "old", received: "", keepExisting: true), "old")
+    XCTAssertEqual(AuthCore.microsoftRefreshTokenAfterCommit(current: "old", received: "new", keepExisting: true), "new")
+  }
 }

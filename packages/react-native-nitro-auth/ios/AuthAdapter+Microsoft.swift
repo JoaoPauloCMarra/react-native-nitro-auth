@@ -3,7 +3,7 @@ import AuthenticationServices
 import Security
 
 extension AuthAdapter {
-  static func loginMicrosoft(scopes: [String], loginHint: String?, tenant: String?, prompt: String?, operation: AuthAdapter.AuthOperationToken, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
+  static func loginMicrosoft(scopes: [String], loginHint: String?, tenant: String?, prompt: String?, keepRefreshToken: Bool = false, operation: AuthAdapter.AuthOperationToken, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
     guard let clientId = Bundle.main.object(forInfoDictionaryKey: "MSALClientID") as? String, !clientId.isEmpty else {
       completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
       return
@@ -104,6 +104,7 @@ extension AuthAdapter {
           b2cDomain: b2cDomain,
           expectedNonce: nonce,
           scopes: effectiveScopes,
+          keepRefreshToken: keepRefreshToken,
           operation: operation,
           completion: completion
         )
@@ -148,6 +149,7 @@ extension AuthAdapter {
     b2cDomain: String?,
     expectedNonce: String,
     scopes: [String],
+    keepRefreshToken: Bool,
     operation: AuthAdapter.AuthOperationToken,
     completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void
   ) {
@@ -211,14 +213,17 @@ extension AuthAdapter {
         let resultScopes = scopes.isEmpty ? defaultMicrosoftScopes : scopes
         guard self.commitCurrentOperation(operation, {
           activateSession(.microsoft)
-          if !refreshToken.isEmpty {
-            inMemoryMicrosoftRefreshToken = refreshToken
-          }
+          inMemoryMicrosoftRefreshToken = AuthCore.microsoftRefreshTokenAfterCommit(
+            current: inMemoryMicrosoftRefreshToken,
+            received: refreshToken,
+            keepExisting: keepRefreshToken
+          )
           inMemoryMicrosoftScopes = resultScopes
         }) else {
           completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return
         }
+        signOutGoogleOnMainQueue()
         guard self.isCurrentOperation(operation) else {
           completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
           return

@@ -123,8 +123,13 @@ public class AuthAdapter: NSObject {
       inMemoryMicrosoftRefreshToken = nil
       inMemoryMicrosoftScopes = defaultMicrosoftScopes
     case .microsoft:
-      GIDSignIn.sharedInstance.signOut()
       inMemoryGoogleServerAuthCode = nil
+    }
+  }
+
+  static func signOutGoogleOnMainQueue() {
+    DispatchQueue.main.async {
+      GIDSignIn.sharedInstance.signOut()
     }
   }
 
@@ -292,7 +297,7 @@ public class AuthAdapter: NSObject {
       return
     }
     let mergedScopes = AuthCore.mergedScopes(currentScopes, adding: scopes)
-    loginMicrosoft(scopes: mergedScopes, loginHint: nil, tenant: nil, prompt: nil, operation: operation, completion: completion)
+    loginMicrosoft(scopes: mergedScopes, loginHint: nil, tenant: nil, prompt: nil, keepRefreshToken: true, operation: operation, completion: completion)
   }
 
   @objc
