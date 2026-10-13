@@ -912,4 +912,95 @@ describe("Microsoft Expo configuration", () => {
       ),
     ).not.toThrow();
   });
+
+  describe("iOS Info.plist ownership", () => {
+    const config = {
+      name: "Example",
+      slug: "example",
+      ios: { bundleIdentifier: "com.example" },
+    };
+    const modOptions = {
+      projectRoot: "/tmp/example",
+      platformProjectRoot: "/tmp/example/ios",
+    };
+    const run = (props, plist) =>
+      applyExpoMod(
+        withNitroAuth(cloneConfig(config), props),
+        "ios",
+        "infoPlist",
+        plist,
+        modOptions,
+      );
+
+    it("never removes keys or schemes the plugin did not write", async () => {
+      const owned = {
+        GIDClientID: "user-owned.apps.googleusercontent.com",
+        MSALClientID: "user-msal",
+        CFBundleURLTypes: [
+          {
+            CFBundleURLSchemes: [
+              "myapp",
+              "com.googleusercontent.apps.firebase-reversed",
+            ],
+          },
+          { CFBundleURLSchemes: ["msauth.com.other.library"] },
+        ],
+      };
+      const plist = await run({}, cloneConfig(owned));
+      expect(plist).toEqual(owned);
+    });
+
+    it("keeps an identical app-owned value when the option matches it", async () => {
+      const owned = { GIDClientID: "same.apps.googleusercontent.com" };
+      let plist = await run(
+        { ios: { googleClientId: "same.apps.googleusercontent.com" } },
+        cloneConfig(owned),
+      );
+      plist = await run({}, plist);
+      expect(plist).toEqual(owned);
+    });
+
+    it("keeps an app value that replaced a managed one between runs", async () => {
+      let plist = await run(
+        { ios: { googleClientId: "plugin.apps.googleusercontent.com" } },
+        {},
+      );
+      plist.GIDClientID = "app.apps.googleusercontent.com";
+      plist = await run({}, plist);
+      expect(plist.GIDClientID).toBe("app.apps.googleusercontent.com");
+    });
+
+    it("removes only what it wrote when options change", async () => {
+      const ownScheme = { CFBundleURLSchemes: ["myapp"] };
+      let plist = await run(
+        {
+          ios: {
+            googleClientId: "111-old.apps.googleusercontent.com",
+            microsoftClientId: "MS",
+          },
+        },
+        { CFBundleURLTypes: [ownScheme] },
+      );
+      plist = await run({}, plist);
+      expect(plist).toEqual({ CFBundleURLTypes: [ownScheme] });
+    });
+  });
+
+  it("treats null options like undefined", async () => {
+    expect(() =>
+      withNitroAuth({ name: "Example", slug: "example" }, null),
+    ).not.toThrow();
+    expect(() =>
+      withNitroAuth(
+        { name: "Example", slug: "example" },
+        { ios: null, android: null, googleButtonFont: undefined },
+      ),
+    ).not.toThrow();
+    expect(() =>
+      withNitroAuth(
+        { name: "Example", slug: "example" },
+        { ios: { googleClientId: null } },
+      ),
+    ).not.toThrow();
+  });
 });

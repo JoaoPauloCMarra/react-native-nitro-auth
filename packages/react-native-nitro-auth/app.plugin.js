@@ -100,17 +100,7 @@ const MANAGED_ANDROID_STRINGS = [
   "nitro_auth_microsoft_tenant",
   "nitro_auth_microsoft_b2c_domain",
 ];
-const MANAGED_IOS_PLIST_KEYS = [
-  "GIDClientID",
-  "GIDServerClientID",
-  "MSALClientID",
-  "MSALTenant",
-  "MSALB2cDomain",
-];
-const MANAGED_IOS_URL_SCHEME_PREFIXES = [
-  "com.googleusercontent.apps.",
-  "msauth.",
-];
+const MANAGED_IOS_MARKER_KEY = "NitroAuthManaged";
 const MICROSOFT_AUTH_ACTIVITY = "com.auth.MicrosoftAuthActivity";
 // Manifest merge replaces the placeholder with the final applicationId, so
 // applicationIdSuffix and product flavors keep a matching redirect host.
@@ -330,6 +320,41 @@ function withGoogleButtonFont(config, enabled) {
   return config;
 }
 
+function readManagedInfoPlist(plist) {
+  const marker = plist[MANAGED_IOS_MARKER_KEY];
+  const keys =
+    marker && typeof marker.keys === "object" && marker.keys !== null
+      ? marker.keys
+      : {};
+  const schemes = Array.isArray(marker?.schemes) ? marker.schemes : [];
+  return { keys, schemes };
+}
+
+function removeManagedInfoPlist(plist, managed) {
+  delete plist[MANAGED_IOS_MARKER_KEY];
+  for (const [key, value] of Object.entries(managed.keys)) {
+    if (plist[key] === value) delete plist[key];
+  }
+  if (managed.schemes.length === 0 || !Array.isArray(plist.CFBundleURLTypes)) {
+    return;
+  }
+  const remainingUrlTypes = plist.CFBundleURLTypes.flatMap((urlType) => {
+    const schemes = urlType.CFBundleURLSchemes ?? [];
+    const keptSchemes = schemes.filter(
+      (scheme) => !managed.schemes.includes(scheme),
+    );
+    if (keptSchemes.length === schemes.length) return [urlType];
+    return keptSchemes.length > 0
+      ? [{ ...urlType, CFBundleURLSchemes: keptSchemes }]
+      : [];
+  });
+  if (remainingUrlTypes.length > 0) {
+    plist.CFBundleURLTypes = remainingUrlTypes;
+  } else {
+    delete plist.CFBundleURLTypes;
+  }
+}
+
 const PLUGIN_OPTION_KEYS = {
   ios: {
     googleClientId: "string",
@@ -361,7 +386,7 @@ function assertPluginOptions(props) {
   }
   for (const [group, allowed] of Object.entries(PLUGIN_OPTION_KEYS)) {
     const options = props[group];
-    if (options === undefined) continue;
+    if (options == null) continue;
     if (typeof options !== "object" || options === null) {
       throw new Error(
         `react-native-nitro-auth option "${group}" must be an object.`,
@@ -374,7 +399,7 @@ function assertPluginOptions(props) {
           `Unknown react-native-nitro-auth plugin option "${group}.${key}". Expected one of: ${Object.keys(allowed).join(", ")}.`,
         );
       }
-      if (value !== undefined && typeof value !== expectedType) {
+      if (value != null && typeof value !== expectedType) {
         throw new Error(
           `react-native-nitro-auth option "${group}.${key}" must be a ${expectedType}.`,
         );
@@ -383,9 +408,11 @@ function assertPluginOptions(props) {
   }
 }
 
-const withNitroAuth = (config, props = {}) => {
+const withNitroAuth = (config, props) => {
+  props ??= {};
   assertPluginOptions(props);
-  const { ios = {}, android = {} } = props;
+  const ios = props.ios ?? {};
+  const android = props.android ?? {};
   const appleAndroid = resolveAppleAndroid(android);
   const googleButtonFont = resolveGoogleButtonFont(props.googleButtonFont);
 
@@ -394,52 +421,38 @@ const withNitroAuth = (config, props = {}) => {
   config = withGoogleSignInIosPods(config);
 
   config = withInfoPlist(config, (config) => {
-    for (const key of MANAGED_IOS_PLIST_KEYS) {
-      delete config.modResults[key];
-    }
-    if (Array.isArray(config.modResults.CFBundleURLTypes)) {
-      const remainingUrlTypes = config.modResults.CFBundleURLTypes.flatMap(
-        (urlType) => {
-          const schemes = urlType.CFBundleURLSchemes ?? [];
-          const keptSchemes = schemes.filter(
-            (scheme) =>
-              !MANAGED_IOS_URL_SCHEME_PREFIXES.some((prefix) =>
-                scheme.startsWith(prefix),
-              ),
-          );
-          if (keptSchemes.length === schemes.length) return [urlType];
-          return keptSchemes.length > 0
-            ? [{ ...urlType, CFBundleURLSchemes: keptSchemes }]
-            : [];
-        },
-      );
-      if (remainingUrlTypes.length > 0) {
-        config.modResults.CFBundleURLTypes = remainingUrlTypes;
-      } else {
-        delete config.modResults.CFBundleURLTypes;
+    const plist = config.modResults;
+    const previous = readManagedInfoPlist(plist);
+    removeManagedInfoPlist(plist, previous);
+    const written = { keys: {}, schemes: [] };
+    const setKey = (key, value) => {
+      if (plist[key] !== value) written.keys[key] = value;
+      plist[key] = value;
+    };
+    const addScheme = (scheme) => {
+      const existingSchemes = plist.CFBundleURLTypes || [];
+      if (
+        existingSchemes.some((urlType) =>
+          (urlType.CFBundleURLSchemes ?? []).includes(scheme),
+        )
+      ) {
+        return;
       }
-    }
+      plist.CFBundleURLTypes = [
+        ...existingSchemes,
+        { CFBundleURLSchemes: [scheme] },
+      ];
+      written.schemes.push(scheme);
+    };
     if (ios.googleClientId) {
-      config.modResults.GIDClientID = ios.googleClientId;
+      setKey("GIDClientID", ios.googleClientId);
     }
     if (ios.googleServerClientId) {
-      config.modResults.GIDServerClientID = ios.googleServerClientId;
+      setKey("GIDServerClientID", ios.googleServerClientId);
     }
     const googleUrlScheme = resolveGoogleUrlScheme(ios);
     if (googleUrlScheme) {
-      const existingSchemes = config.modResults.CFBundleURLTypes || [];
-      if (
-        !existingSchemes.some((scheme) =>
-          scheme.CFBundleURLSchemes.includes(googleUrlScheme),
-        )
-      ) {
-        config.modResults.CFBundleURLTypes = [
-          ...existingSchemes,
-          {
-            CFBundleURLSchemes: [googleUrlScheme],
-          },
-        ];
-      }
+      addScheme(googleUrlScheme);
     }
     const bundleIdentifier = config.ios?.bundleIdentifier;
     if (ios.microsoftClientId && !bundleIdentifier) {
@@ -449,29 +462,19 @@ const withNitroAuth = (config, props = {}) => {
       );
     }
     if (ios.microsoftClientId) {
-      config.modResults.MSALClientID = ios.microsoftClientId;
+      setKey("MSALClientID", ios.microsoftClientId);
     }
     if (ios.microsoftClientId && bundleIdentifier) {
-      const msalScheme = `msauth.${bundleIdentifier}`;
-      const existingSchemes = config.modResults.CFBundleURLTypes || [];
-      if (
-        !existingSchemes.some((scheme) =>
-          scheme.CFBundleURLSchemes.includes(msalScheme),
-        )
-      ) {
-        config.modResults.CFBundleURLTypes = [
-          ...existingSchemes,
-          {
-            CFBundleURLSchemes: [msalScheme],
-          },
-        ];
-      }
+      addScheme(`msauth.${bundleIdentifier}`);
     }
     if (ios.microsoftTenant) {
-      config.modResults.MSALTenant = ios.microsoftTenant;
+      setKey("MSALTenant", ios.microsoftTenant);
     }
     if (ios.microsoftB2cDomain) {
-      config.modResults.MSALB2cDomain = ios.microsoftB2cDomain;
+      setKey("MSALB2cDomain", ios.microsoftB2cDomain);
+    }
+    if (Object.keys(written.keys).length > 0 || written.schemes.length > 0) {
+      plist[MANAGED_IOS_MARKER_KEY] = written;
     }
     return config;
   });
