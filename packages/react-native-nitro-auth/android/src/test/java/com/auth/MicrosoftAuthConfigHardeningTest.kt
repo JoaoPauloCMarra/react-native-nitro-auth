@@ -83,14 +83,14 @@ class MicrosoftAuthConfigHardeningTest {
             "header.${encode("{}")}.signature",
         )
         for (token in malformed) {
-            assertTrue(token, MicrosoftAuthConfig.decodeJwt(token).isEmpty())
+            assertTrue(token, JwtClaims.decode(token).isEmpty())
         }
     }
 
     @Test
     fun wellFormedClaimsSurviveHugeAndNumericPayloads() {
         val largeName = "n".repeat(512 * 1024)
-        val claims = MicrosoftAuthConfig.decodeJwt(
+        val claims = JwtClaims.decode(
             "header.${encode("{\"name\":\"$largeName\",\"exp\":1789500000,\"nonce\":\"\"}")}.signature",
         )
 
@@ -99,13 +99,13 @@ class MicrosoftAuthConfigHardeningTest {
         assertFalse(claims.containsKey("nonce"))
         assertEquals(
             "4102444800",
-            MicrosoftAuthConfig.decodeJwt("header.${encode("{\"exp\":4102444800}")}.signature")["exp"],
+            JwtClaims.decode("header.${encode("{\"exp\":4102444800}")}.signature")["exp"],
         )
     }
 
     @Test
     fun nullAndStructuredClaimsAreDroppedInsteadOfStringified() {
-        val claims = MicrosoftAuthConfig.decodeJwt(
+        val claims = JwtClaims.decode(
             "header.${encode("{\"email\":null,\"groups\":[\"a\"],\"address\":{\"x\":1},\"verified\":true,\"blocked\":false,\"exp\":5,\"ratio\":1.5,\"name\":\"Ada\"}")}.signature",
         )
 

@@ -47,7 +47,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.LinkedHashMap
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.UUID
 
@@ -205,15 +204,7 @@ object AuthAdapter {
             randomBytes,
             Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP,
         )
-        val hashed = try {
-            AuthCrypto.sha256Hex(raw)
-        } catch (_: UnsatisfiedLinkError) {
-            MessageDigest.getInstance("SHA-256")
-                .digest(raw.toByteArray(Charsets.US_ASCII))
-                .joinToString("") { byte ->
-                    (byte.toInt() and 0xff).toString(16).padStart(2, '0')
-                }
-        }
+        val hashed = Sha256.hex(raw)
         return arrayOf(raw, hashed)
     }
 
@@ -492,7 +483,7 @@ object AuthAdapter {
             return false
         }
         val expirationTime = getGoogleExpirationTimeMs(account.idToken)
-        val claims = MicrosoftAuthConfig.decodeJwt(account.idToken.orEmpty())
+        val claims = JwtClaims.decode(account.idToken.orEmpty())
         if (!nativeOnLoginSuccess(origin, "google", account.email, account.displayName,
             claims["given_name"], claims["family_name"], account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
             account.id, null, hostedDomain, scopes.toTypedArray(), expirationTime, generation)
@@ -928,8 +919,7 @@ object AuthAdapter {
     }
 
     private fun generateCodeChallenge(verifier: String): String {
-        val bytes = java.security.MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII))
-        return Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+        return Sha256.base64Url(verifier)
     }
 
     @JvmStatic
@@ -1209,7 +1199,7 @@ object AuthAdapter {
                 )
             }
 
-            val claims = MicrosoftAuthConfig.decodeJwt(idToken)
+            val claims = JwtClaims.decode(idToken)
             if (claims["nonce"] != expectedNonce) {
                 return@synchronized MicrosoftTokenCompletion(
                     origin = origin,
@@ -1754,7 +1744,7 @@ object AuthAdapter {
      */
     private fun getGoogleExpirationTimeMs(idToken: String?): Long? {
         if (idToken.isNullOrEmpty()) return null
-        val expSeconds = MicrosoftAuthConfig.decodeJwt(idToken)["exp"]?.toLongOrNull() ?: return null
+        val expSeconds = JwtClaims.decode(idToken)["exp"]?.toLongOrNull() ?: return null
         return epochSecondsToMillisOrNull(expSeconds)
     }
 
@@ -1920,14 +1910,14 @@ object AuthAdapter {
                     }
                     return
                 }
-                if (MicrosoftAuthConfig.decodeJwt(idToken)["nonce"] != expectedNonce) {
+                if (JwtClaims.decode(idToken)["nonce"] != expectedNonce) {
                     if (consumeGoogleGeneration(origin, generation)) {
                         nativeOnLoginError(origin, AuthErrorCode.INVALID_NONCE.code, "Nonce mismatch - token may be replayed", generation)
                     }
                     return
                 }
             }
-            val claims = MicrosoftAuthConfig.decodeJwt(idToken)
+            val claims = JwtClaims.decode(idToken)
             val expirationTime = getGoogleExpirationTimeMs(idToken)
             if (!nativeOnLoginSuccess(
                 origin, "google",
@@ -2006,7 +1996,7 @@ object AuthAdapter {
         generation: Long,
     ): Boolean {
         val credential = session.credential
-        val claims = MicrosoftAuthConfig.decodeJwt(credential.idToken)
+        val claims = JwtClaims.decode(credential.idToken)
         return nativeOnLoginSuccess(
             origin, "google",
             credential.email,
@@ -2384,7 +2374,7 @@ object AuthAdapter {
             }
             if (!synchronized(this) { acceptsSilentGenerationLocked(generation) }) return
             val expirationTime = getGoogleExpirationTimeMs(account.idToken)
-            val claims = MicrosoftAuthConfig.decodeJwt(account.idToken.orEmpty())
+            val claims = JwtClaims.decode(account.idToken.orEmpty())
             if (!nativeOnLoginSuccess("silent", "google", account.email, account.displayName,
                 claims["given_name"], claims["family_name"], account.photoUrl?.toString(), account.idToken, null, account.serverAuthCode,
                 account.id, null, hostedDomain, account.grantedScopes?.map { it.scopeUri }?.toTypedArray(), expirationTime, generation)
@@ -2696,7 +2686,7 @@ object AuthAdapter {
             val newRefreshToken = json.optString("refresh_token")
             val expiresIn = json.optLong("expires_in", 0)
             val expirationTime = expirationMillisFromExpiresIn(System.currentTimeMillis(), expiresIn)
-            val claims = MicrosoftAuthConfig.decodeJwt(idToken)
+            val claims = JwtClaims.decode(idToken)
             MicrosoftRefreshCompletion(
                 operation = operation,
                 generation = generation,

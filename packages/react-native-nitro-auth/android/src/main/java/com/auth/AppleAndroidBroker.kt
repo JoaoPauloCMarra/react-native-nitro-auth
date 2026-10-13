@@ -11,7 +11,6 @@ import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.FutureTask
 import java.util.concurrent.ScheduledThreadPoolExecutor
@@ -163,7 +162,7 @@ internal data class AppleCodeChallenge(
 
 internal fun createAppleCodeChallenge(verifier: String): String {
     require(isSha256Hex(verifier)) { "Apple PKCE verifier must be 32-byte lowercase hexadecimal" }
-    return sha256Hex(verifier)
+    return Sha256.hex(verifier)
 }
 
 internal fun createAppleCodeVerifier(random: SecureRandom = SecureRandom()): String {
@@ -176,10 +175,6 @@ internal fun createAppleCodePair(random: SecureRandom = SecureRandom()): AppleCo
     val verifier = createAppleCodeVerifier(random)
     return AppleCodeChallenge(verifier, createAppleCodeChallenge(verifier))
 }
-
-private fun sha256Hex(value: String): String = MessageDigest.getInstance("SHA-256")
-    .digest(value.toByteArray(StandardCharsets.US_ASCII))
-    .toLowerHex()
 
 private fun ByteArray.toLowerHex(): String = joinToString("") { byte ->
     (byte.toInt() and 0xff).toString(16).padStart(2, '0')

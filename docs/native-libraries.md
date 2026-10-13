@@ -9,8 +9,8 @@ nonce hash and JWT payload split used by iOS and Android.
 | --------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------ |
 | In-tree SHA-256 + base64url | `cpp/AuthCrypto.cpp` | One ASCII-raw → lowercase hex contract for `createNonce()`, plus JWT payload bytes without signature verify. |
 
-iOS calls the C ABI from `AuthAdapter`. Android prefers JNI and falls back to
-`MessageDigest` / `Base64` in unit tests that do not load the native library.
+iOS calls the C ABI from `AuthAdapter`. Android hashes with `MessageDigest`
+through one helper (`Sha256.kt`) for nonces, Apple PKCE, and Microsoft PKCE.
 
 ## Evaluated and not shipped
 

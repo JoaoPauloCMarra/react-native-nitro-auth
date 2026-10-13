@@ -10,7 +10,7 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
-class MicrosoftJwtDecodeTest {
+class JwtClaimsTest {
 
     @Test
     fun malformedUtf8ClaimIsRejected() {
@@ -18,7 +18,7 @@ class MicrosoftJwtDecodeTest {
             byteArrayOf(0xc3.toByte(), 0x28) +
             "\"}".toByteArray(Charsets.UTF_8)
 
-        assertTrue(MicrosoftAuthConfig.decodeJwt(jwtWithPayload(payload)).isEmpty())
+        assertTrue(JwtClaims.decode(jwtWithPayload(payload)).isEmpty())
     }
 
     @Test
@@ -27,7 +27,7 @@ class MicrosoftJwtDecodeTest {
 
         assertEquals(
             "Ada 🚀",
-            MicrosoftAuthConfig.decodeJwt(jwtWithPayload(payload))["name"],
+            JwtClaims.decode(jwtWithPayload(payload))["name"],
         )
     }
 
