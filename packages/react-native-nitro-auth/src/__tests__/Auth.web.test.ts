@@ -3284,4 +3284,228 @@ describe("AuthModule (web)", () => {
       });
     });
   });
+
+  describe("provider response branches", () => {
+    const microsoftConfig = { microsoftClientId: "test-client-id" };
+    const googleConfig = {
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+    };
+
+    const redirectWith = (query: (state: string) => string) => {
+      const popup = createPopupWindow();
+      const open = jest.fn((url: string) => {
+        const state = new URL(url).searchParams.get("state") ?? "";
+        popup.location.href = `${window.location.origin}${query(state)}`;
+        return popup;
+      });
+      installWindowOpen(open);
+      return open;
+    };
+
+    const settleLogin = async (promise: Promise<unknown>) => {
+      const [outcome] = await Promise.all([
+        promise.then(
+          () => undefined,
+          (error: unknown) => error,
+        ),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+      return outcome;
+    };
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    it("maps a Microsoft redirect error with and without a description", async () => {
+      redirectWith(
+        (state) =>
+          `?error=access_denied&error_description=user%20said%20no&state=${state}`,
+      );
+      const auth = await loadAuthModule(microsoftConfig);
+      expect(await settleLogin(auth.login("microsoft"))).toMatchObject({
+        code: "cancelled",
+        underlyingError: "user said no",
+      });
+
+      redirectWith((state) => `?error=server_error&state=${state}`);
+      expect(await settleLogin(auth.login("microsoft"))).toMatchObject({
+        code: "network_error",
+        underlyingError: "server_error",
+      });
+    });
+
+    it("rejects a Microsoft redirect without an authorization code", async () => {
+      redirectWith((state) => `?state=${state}`);
+      const auth = await loadAuthModule(microsoftConfig);
+
+      expect(await settleLogin(auth.login("microsoft"))).toMatchObject({
+        code: "token_error",
+      });
+    });
+
+    it("reports a provider error from the Microsoft token exchange", async () => {
+      redirectWith((state) => `?code=auth-code&state=${state}`);
+      installFetch(
+        jest.fn(async () => ({
+          json: async () => ({ error: "invalid_grant" }),
+        })),
+      );
+      const auth = await loadAuthModule(microsoftConfig);
+
+      expect(await settleLogin(auth.login("microsoft"))).toMatchObject({
+        code: "token_error",
+        underlyingError: "invalid_grant",
+      });
+    });
+
+    it("requests the default Microsoft scopes for an empty scope list", async () => {
+      const open = redirectWith(
+        (state) => `?error=access_denied&state=${state}`,
+      );
+      const auth = await loadAuthModule(microsoftConfig);
+
+      await settleLogin(auth.login("microsoft", { scopes: [] }));
+
+      const url = new URL(String(open.mock.calls[0]?.[0]));
+      expect(url.searchParams.get("scope")).toBe(
+        "openid email profile offline_access User.Read",
+      );
+    });
+
+    it("forwards the Google login hint to the authorization URL", async () => {
+      const open = redirectWith(
+        (state) => `#error=access_denied&state=${state}`,
+      );
+      const auth = await loadAuthModule(googleConfig);
+
+      await settleLogin(auth.login("google", { loginHint: "a@example.com" }));
+
+      const url = new URL(String(open.mock.calls[0]?.[0]));
+      expect(url.searchParams.get("login_hint")).toBe("a@example.com");
+    });
+
+    it("rejects a Google ID token whose payload is not an object", async () => {
+      const header = createBase64UrlSegmentFromObject({ alg: "none" });
+      const scalarPayload = Buffer.from('"just a string"')
+        .toString("base64")
+        .replace(/=+$/g, "");
+      redirectWith(
+        (state) => `#id_token=${header}.${scalarPayload}.sig&state=${state}`,
+      );
+      const auth = await loadAuthModule(googleConfig);
+
+      expect(await settleLogin(auth.login("google"))).toMatchObject({
+        code: "parse_error",
+      });
+    });
+
+    it("rejects a Google ID token whose nonce does not match", async () => {
+      redirectWith(
+        (state) =>
+          `#id_token=${createJwtWithPayload({ nonce: "other" })}&state=${state}`,
+      );
+      const auth = await loadAuthModule(googleConfig);
+
+      expect(await settleLogin(auth.login("google"))).toMatchObject({
+        code: "invalid_nonce",
+      });
+    });
+
+    it("rejects getCredential for providers without credentials", async () => {
+      const auth = await loadAuthService(googleConfig);
+
+      await expect(
+        auth.getCredential("microsoft" as never),
+      ).rejects.toMatchObject({ code: "unsupported_provider" });
+    });
+
+    it("rejects getCredential while another login is pending", async () => {
+      redirectWith(() => "");
+      const auth = await loadAuthService(googleConfig);
+      const pending = auth.login("google").catch(() => undefined);
+
+      await expect(auth.getCredential("google")).rejects.toMatchObject({
+        code: "operation_in_progress",
+      });
+
+      auth.logout();
+      await Promise.all([pending, jest.advanceTimersByTimeAsync(501)]);
+    });
+
+    it("keeps a Microsoft session without an expiry on silent restore", async () => {
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ provider: "microsoft", idToken: "cached" }),
+      );
+      const fetchMock = jest.fn();
+      installFetch(fetchMock);
+      const auth = await loadAuthModule(microsoftConfig);
+
+      await expect(auth.silentRestore()).resolves.toBeUndefined();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(auth.currentUser?.provider).toBe("microsoft");
+    });
+
+    it("reports a Microsoft refresh response without an ID token", async () => {
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ provider: "microsoft", idToken: "cached" }),
+      );
+      installFetch(
+        jest.fn(async () => ({
+          json: async () => ({ access_token: "a" }),
+        })),
+      );
+      const auth = await loadAuthModule({
+        ...microsoftConfig,
+        nitroAuthPersistTokensOnWeb: true,
+      });
+      sessionStorage.setItem(MS_REFRESH_TOKEN_KEY, "r1");
+
+      await expect(auth.refreshToken()).rejects.toMatchObject({
+        code: "no_id_token",
+      });
+    });
+
+    it("reports a provider error from the Microsoft refresh", async () => {
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ provider: "microsoft", idToken: "cached" }),
+      );
+      installFetch(
+        jest.fn(async () => ({
+          json: async () => ({ error: "invalid_grant" }),
+        })),
+      );
+      const auth = await loadAuthModule({
+        ...microsoftConfig,
+        nitroAuthPersistTokensOnWeb: true,
+      });
+      sessionStorage.setItem(MS_REFRESH_TOKEN_KEY, "r1");
+
+      await expect(auth.refreshToken()).rejects.toMatchObject({
+        code: "refresh_failed",
+      });
+    });
+
+    it("maps an Apple SDK failure that already carries an auth error code", async () => {
+      installAppleId({
+        auth: {
+          init: jest.fn(),
+          signIn: jest.fn(async () => {
+            throw new Error("not_signed_in");
+          }),
+        },
+      });
+      const auth = await loadAuthModule({
+        appleWebClientId: "apple-client-id",
+      });
+
+      expect(await settleLogin(auth.login("apple"))).toMatchObject({
+        code: "not_signed_in",
+      });
+    });
+  });
 });

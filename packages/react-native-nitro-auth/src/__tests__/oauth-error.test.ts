@@ -47,6 +47,10 @@ describe("mapOAuthErrorCode", () => {
     },
   );
 
+  it("defaults to the authorize context", () => {
+    expect(mapOAuthErrorCode("invalid_grant")).toBe("token_error");
+  });
+
   it("is case- and whitespace-insensitive", () => {
     expect(mapOAuthErrorCode("  Access_Denied ", "authorize")).toBe(
       "cancelled",

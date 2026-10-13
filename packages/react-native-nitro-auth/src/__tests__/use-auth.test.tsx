@@ -762,4 +762,99 @@ describe("useAuth", () => {
       expect(renderCount).toBe(countAfterMount);
     });
   });
+
+  describe("state reconciliation", () => {
+    const withPendingRefresh = async (
+      afterSecondOperation: () => void,
+    ): Promise<{ before: string[]; whilePending: string[] }> => {
+      let finishFirst: (() => void) | undefined;
+      mockRefreshToken.mockImplementationOnce(
+        () =>
+          new Promise<AuthTokens>((resolve) => {
+            finishFirst = () => {
+              resolve({});
+            };
+          }),
+      );
+      mockRequestScopes.mockImplementationOnce(async () => {
+        afterSecondOperation();
+      });
+      const { result } = renderHook(() => useAuth());
+      const before = result.current.scopes;
+      let first: Promise<AuthTokens> | undefined;
+      act(() => {
+        first = result.current.refreshToken();
+      });
+      await act(async () => {
+        await result.current.requestScopes(["email"]);
+      });
+      const whilePending = result.current.scopes;
+      await act(async () => {
+        finishFirst?.();
+        await first;
+      });
+      return { before, whilePending };
+    };
+
+    it("keeps the same scopes array when the service only reorders them", async () => {
+      mockScopes = ["email", "profile"];
+      const { before, whilePending } = await withPendingRefresh(() => {
+        mockScopes = ["profile", "email"];
+      });
+
+      expect(whilePending).toBe(before);
+    });
+
+    it("replaces the scopes when the service reports a different set", async () => {
+      mockScopes = ["email", "email"];
+      const { before, whilePending } = await withPendingRefresh(() => {
+        mockScopes = ["email", "profile"];
+      });
+
+      expect(whilePending).not.toBe(before);
+      expect(whilePending).toEqual(["email", "profile"]);
+    });
+
+    it("keeps the loading state while another operation is still running", async () => {
+      let finishFirst: (() => void) | undefined;
+      mockRefreshToken.mockImplementationOnce(
+        () =>
+          new Promise<AuthTokens>((resolve) => {
+            finishFirst = () => {
+              resolve({});
+            };
+          }),
+      );
+      mockRequestScopes.mockResolvedValueOnce(undefined);
+      const { result } = renderHook(() => useAuth());
+
+      let first: Promise<AuthTokens> | undefined;
+      act(() => {
+        first = result.current.refreshToken();
+      });
+      await act(async () => {
+        await result.current.requestScopes(["email"]);
+      });
+      expect(result.current.loading).toBe(true);
+
+      await act(async () => {
+        finishFirst?.();
+        await first;
+      });
+      expect(result.current.loading).toBe(false);
+    });
+
+    it("leaves a signed-out idle state untouched on logout", () => {
+      const { result } = renderHook(() => useAuth());
+      const before = result.current;
+
+      act(() => {
+        result.current.logout();
+      });
+
+      expect(result.current.user).toBe(before.user);
+      expect(result.current.scopes).toBe(before.scopes);
+      expect(mockLogout).toHaveBeenCalledTimes(1);
+    });
+  });
 });

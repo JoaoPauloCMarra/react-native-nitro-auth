@@ -342,6 +342,35 @@ describe("AuthService", () => {
     });
   });
 
+  describe("native module unavailable", () => {
+    it.each([
+      ["an Error", new Error("no hybrid object"), "no hybrid object"],
+      ["a non-Error value", "plain failure", "plain failure"],
+    ])(
+      "reports configuration_error when creation throws %s",
+      (_label, thrown, detail) => {
+        AuthService.dispose();
+        (NitroModules.createHybridObject as jest.Mock).mockImplementationOnce(
+          () => {
+            throw thrown;
+          },
+        );
+
+        let error: unknown;
+        try {
+          void AuthService.currentUser;
+        } catch (e) {
+          error = e;
+        }
+
+        expect(error).toMatchObject({
+          code: "configuration_error",
+          underlyingMessage: detail,
+        });
+      },
+    );
+  });
+
   describe("createNonce", () => {
     it("returns the native nonce pair", async () => {
       const nonce = { raw: "raw", hashed: "hashed" };

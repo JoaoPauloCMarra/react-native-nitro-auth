@@ -228,3 +228,12 @@ describe("postTokenRequest", () => {
     ).resolves.toMatchObject({ ok: false, errorCode: "refresh_failed" });
   });
 });
+
+describe("parseTokenResponse defaults", () => {
+  it("defaults to the token context for provider errors", () => {
+    expect(parseTokenResponse({ error: "invalid_grant" })).toMatchObject({
+      ok: false,
+      errorCode: "token_error",
+    });
+  });
+});

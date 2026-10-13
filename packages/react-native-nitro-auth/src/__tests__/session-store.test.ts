@@ -64,3 +64,12 @@ it("releases a failed subscription so a later mount can retry", () => {
   store.subscribe(() => {});
   expect(backend.onSessionChanged).toHaveBeenCalledTimes(2);
 });
+
+it("reports an unavailable snapshot when the backend returns nothing", () => {
+  const store = createSessionStore({
+    getSessionSnapshot: () => undefined as unknown as AuthSessionSnapshot,
+    onSessionChanged: () => () => {},
+  });
+
+  expect(() => store.getSnapshot()).toThrow("snapshot is unavailable");
+});
