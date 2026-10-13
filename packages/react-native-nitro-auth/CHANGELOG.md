@@ -68,7 +68,9 @@ Breaking changes are always listed first in each release section.
   reports `interaction_required`.
 - Dependencies: `GoogleSignIn` requires `~> 9.2` (CocoaPods trunk has no `10.x`
   yet), Android `play-services-auth` is `21.6.0` (`22.0.0` removes the legacy Google
-  Sign-In API this package uses for scope requests) and `googleid` is `1.2.1`.
+  Sign-In API this package uses for scope requests). `googleid` stays `1.2.0`:
+  `1.2.1` carries Kotlin 2.4 metadata, which the Kotlin 2.1 compiler in React Native
+  0.86 cannot read.
 - Web: Apple login no longer produces a name such as "undefined Doe" when Apple
   returns only one name part.
 - Web: logout clears the in-memory Microsoft refresh token in the default
