@@ -34,7 +34,7 @@
     "@expo/log-box": "~57.0.4",
     "@expo/dom-webview": "~57.0.1"
   },
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.3",
   "private": true,
   "scripts": {
     "setup": "bun scripts/setup.js",
