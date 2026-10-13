@@ -214,3 +214,4 @@ Checked with no certain finding: index.ts vs index.web.ts export parity: identic
 - 43 (part): per-provider `WebOAuthProvider` classes and the provider lookup replacing the `if` chains are not done; only the storage, error and JSON-helper extraction landed (wave 2 scope).
 - 54 (part): `MicrosoftSocialButtonContent` and the single Pressable are not done; the visible Pressable differences (hitSlop, accessibility wrapper, busy handling) need a visual pass. Only the duplicated content-prop construction is gone.
 - 56 (part): `logout`, `dispose` and `revokeAccess` keep their own supersede sequence because each mutates session state inside the same locked section.
+- 50 (part): the mirror `com.auth.AuthErrorCode` enum, `fromCode`/`wire` and the two alignment tests stay; replacing the int error codes with the generated enum needs a change to `scripts/generate-oauth-errors.js` and every `nativeOn*Error` call site.
