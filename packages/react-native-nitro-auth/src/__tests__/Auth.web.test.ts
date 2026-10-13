@@ -1,70 +1,20 @@
 import { TextDecoder, TextEncoder } from "util";
+import {
+  createPopupWindow,
+  installAppleId,
+  installFetch,
+  installWindowOpen,
+  loadAuthInstances,
+  loadAuthModule,
+  loadAuthService,
+  mockAuthConfig,
+} from "./support/web-auth-env";
+import type { AuthEvent } from "../Auth.nitro";
 
 const CACHE_KEY = "nitro_auth_user";
 const SCOPES_KEY = "nitro_auth_scopes";
 const MS_REFRESH_TOKEN_KEY = "nitro_auth_microsoft_refresh_token";
 const originalStorageRemoveItem = Storage.prototype.removeItem;
-
-type TestAuthUser = {
-  provider: string;
-  email?: string;
-  name?: string;
-  firstName?: string;
-  lastName?: string;
-  photo?: string;
-  accessToken?: string;
-  idToken?: string;
-  refreshToken?: string;
-  expirationTime?: number;
-  userId?: string;
-  scopes?: string[];
-};
-
-type TestAuthEvent = {
-  type: string;
-  provider?: string;
-  errorCode?: string;
-};
-
-type TestAuthModule = {
-  currentUser: TestAuthUser | undefined;
-  grantedScopes: string[];
-  createNonce: () => Promise<{ raw: string; hashed: string }>;
-  logout: () => void;
-  login: (
-    provider: "google" | "apple" | "microsoft",
-    options?: Record<string, unknown>,
-  ) => Promise<void>;
-  onAuthStateChanged: (
-    callback: (user: TestAuthUser | undefined) => void,
-  ) => () => void;
-  onTokensRefreshed: (
-    callback: (tokens: {
-      accessToken?: string;
-      idToken?: string;
-      refreshToken?: string;
-      expirationTime?: number;
-    }) => void,
-  ) => () => void;
-  onAuthEvent: (callback: (event: TestAuthEvent) => void) => () => void;
-  getAccessToken: () => Promise<string | undefined>;
-  requestScopes: (scopes: string[]) => Promise<void>;
-  revokeAccess: () => Promise<void>;
-  revokeScopes: (scopes: string[]) => Promise<{
-    revokedAtProvider: false;
-    revokedScopes: string[];
-  }>;
-  refreshToken: () => Promise<{
-    accessToken?: string;
-    idToken?: string;
-    refreshToken?: string;
-    expirationTime?: number;
-  }>;
-  silentRestore: () => Promise<void>;
-  dispose: () => void;
-  equals: (other: unknown) => boolean;
-  setLoggingEnabled: (enabled: boolean) => void;
-};
 
 const createBase64UrlSegmentFromObject = (value: Record<string, unknown>) => {
   const base64 = Buffer.from(JSON.stringify(value), "utf8").toString("base64");
@@ -105,53 +55,6 @@ const createJwtWithPayload = (payload: Record<string, unknown>) => {
   });
   const body = createBase64UrlSegmentFromObject(payload);
   return `${header}.${body}.sig`;
-};
-
-const mockAuthConfig = (extra?: Record<string, unknown>): void => {
-  jest.resetModules();
-  jest.doMock(
-    "expo-constants",
-    () => ({
-      __esModule: true,
-      default: { expoConfig: { extra: extra ?? {} } },
-    }),
-    { virtual: true },
-  );
-};
-
-const loadAuthModule = async (
-  extra?: Record<string, unknown>,
-): Promise<TestAuthModule> => {
-  mockAuthConfig(extra);
-  const module = await import("../Auth.web");
-  return module.AuthModule as unknown as TestAuthModule;
-};
-
-const loadAuthInstances = async (
-  extra?: Record<string, unknown>,
-): Promise<{ first: TestAuthModule; second: TestAuthModule }> => {
-  mockAuthConfig(extra);
-  const module = await import("../Auth.web");
-  const first = module.AuthModule as unknown as TestAuthModule;
-  module.resetAuthModule(module.AuthModule);
-  return {
-    first,
-    second: module.AuthModule as unknown as TestAuthModule,
-  };
-};
-
-const loadAuthService = async (extra?: Record<string, unknown>) => {
-  jest.resetModules();
-  jest.doMock(
-    "expo-constants",
-    () => ({
-      __esModule: true,
-      default: { expoConfig: { extra: extra ?? {} } },
-    }),
-    { virtual: true },
-  );
-  const module = await import("../service.web");
-  return module.AuthService;
 };
 
 describe("AuthModule (web)", () => {
@@ -204,16 +107,9 @@ describe("AuthModule (web)", () => {
   });
 
   afterEach(() => {
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: originalWindowOpen,
-    });
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: originalFetch,
-    });
+    jest.restoreAllMocks();
+    installWindowOpen(originalWindowOpen);
+    installFetch(originalFetch);
   });
 
   it("creates a random raw nonce and SHA-256 hex hash with WebCrypto", async () => {
@@ -237,20 +133,14 @@ describe("AuthModule (web)", () => {
       email: "credential@example.com",
       nonce: "00".repeat(32),
     });
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: { href: "" },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}#id_token=${idToken}&state=${state}&expires_in=3600`;
         return popup;
       }),
-    });
+    );
     const setItem = jest.spyOn(Storage.prototype, "setItem");
     const auth = await loadAuthService({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -292,11 +182,7 @@ describe("AuthModule (web)", () => {
     sessionStorage.setItem(SCOPES_KEY, cachedScopesValue);
 
     const popup = jest.fn(() => null);
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: popup,
-    });
+    installWindowOpen(popup);
     const randomValues = globalThis.crypto.getRandomValues as jest.Mock;
     const digest = globalThis.crypto.subtle.digest as jest.Mock;
     const setItem = jest.spyOn(Storage.prototype, "setItem");
@@ -409,7 +295,7 @@ describe("AuthModule (web)", () => {
 
       try {
         const module = await import("../Auth.web");
-        const auth = module.AuthModule as unknown as TestAuthModule;
+        const auth = module.AuthModule;
         expect(auth.currentUser).toBeUndefined();
         expect(() => {
           auth.logout();
@@ -443,7 +329,7 @@ describe("AuthModule (web)", () => {
 
     try {
       const module = await import("../Auth.web");
-      const auth = module.AuthModule as unknown as TestAuthModule;
+      const auth = module.AuthModule;
       expect(auth.currentUser).toMatchObject({
         provider: "google",
         userId: "session-user",
@@ -678,7 +564,7 @@ describe("AuthModule (web)", () => {
         },
       });
       const module = await import("../Auth.web");
-      const auth = module.AuthModule as unknown as TestAuthModule;
+      const auth = module.AuthModule;
 
       expect(auth.currentUser).toMatchObject({
         provider: "google",
@@ -741,7 +627,7 @@ describe("AuthModule (web)", () => {
     try {
       logger.setEnabled(true);
       const module = await import("../Auth.web");
-      const restoredAuth = module.AuthModule as unknown as TestAuthModule;
+      const restoredAuth = module.AuthModule;
 
       expect(restoredAuth.currentUser).toMatchObject({
         provider: "google",
@@ -789,11 +675,7 @@ describe("AuthModule (web)", () => {
         accessToken: "google-access-token",
       }),
     );
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(async () => ({ ok: true }) as Response),
-    });
+    installFetch(jest.fn(async () => ({ ok: true }) as Response));
     const auth = await loadAuthModule({
       nitroAuthWebStorage: "local",
       nitroAuthPersistTokensOnWeb: true,
@@ -822,13 +704,11 @@ describe("AuthModule (web)", () => {
         accessToken: "google-access-token",
       }),
     );
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(async () => {
+    installFetch(
+      jest.fn(async () => {
         throw new Error("network unavailable");
       }),
-    });
+    );
     const auth = await loadAuthModule({
       nitroAuthWebStorage: "local",
       nitroAuthPersistTokensOnWeb: true,
@@ -875,7 +755,7 @@ describe("AuthModule (web)", () => {
     const auth = await loadAuthModule();
 
     expect(auth.equals(auth)).toBe(true);
-    expect(auth.equals({})).toBe(false);
+    expect(auth.equals({} as never)).toBe(false);
     expect(() => {
       auth.setLoggingEnabled(true);
     }).not.toThrow();
@@ -911,13 +791,11 @@ describe("AuthModule (web)", () => {
       }),
     );
     localStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(async () => {
+    installFetch(
+      jest.fn(async () => {
         throw new Error("network unavailable");
       }),
-    });
+    );
     const auth = await loadAuthModule({
       nitroAuthWebStorage: "local",
       nitroAuthPersistTokensOnWeb: true,
@@ -930,18 +808,8 @@ describe("AuthModule (web)", () => {
 
   it("times out popup login instead of polling forever", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "https://accounts.google.com/signin",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(() => popup),
-    });
+    const popup = createPopupWindow("https://accounts.google.com/signin");
+    installWindowOpen(jest.fn(() => popup));
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -957,18 +825,8 @@ describe("AuthModule (web)", () => {
 
   it("maps concurrent login attempts to operation_in_progress", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "https://accounts.google.com/signin",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(() => popup),
-    });
+    const popup = createPopupWindow("https://accounts.google.com/signin");
+    installWindowOpen(jest.fn(() => popup));
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -984,22 +842,14 @@ describe("AuthModule (web)", () => {
 
   it("normalizes Google OAuth denial to cancelled", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}#error=access_denied&error_description=user%20closed&state=${state}`;
         return popup;
       }),
-    });
+    );
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -1015,22 +865,14 @@ describe("AuthModule (web)", () => {
 
   it("normalizes missing Google id tokens to no_id_token", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}#access_token=access-token&state=${state}`;
         return popup;
       }),
-    });
+    );
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -1076,11 +918,7 @@ describe("AuthModule (web)", () => {
           }),
         }) as Response,
     );
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: fetchMock,
-    });
+    installFetch(fetchMock);
 
     const [tokenA, tokenB] = await Promise.all([
       auth.getAccessToken(),
@@ -1114,29 +952,21 @@ describe("AuthModule (web)", () => {
             rejectRefresh = reject;
           }),
       );
-      Object.defineProperty(globalThis, "fetch", {
-        configurable: true,
-        writable: true,
-        value: fetchMock,
-      });
+      installFetch(fetchMock);
 
-      Object.defineProperty(window, "AppleID", {
-        configurable: true,
-        writable: true,
-        value: {
-          auth: {
-            init: jest.fn(),
-            signIn: jest.fn(async () => ({
-              authorization: {
-                id_token: createJwtWithPayload({
-                  email: "new@example.com",
-                  nonce: "switch-nonce",
-                }),
-                code: "apple-code",
-              },
-              user: { email: "new@example.com" },
-            })),
-          },
+      installAppleId({
+        auth: {
+          init: jest.fn(),
+          signIn: jest.fn(async () => ({
+            authorization: {
+              id_token: createJwtWithPayload({
+                email: "new@example.com",
+                nonce: "switch-nonce",
+              }),
+              code: "apple-code",
+            },
+            user: { email: "new@example.com" },
+          })),
         },
       });
 
@@ -1146,7 +976,7 @@ describe("AuthModule (web)", () => {
         microsoftClientId: "microsoft-client-id",
         appleWebClientId: "apple-client-id",
       });
-      const events: TestAuthEvent[] = [];
+      const events: AuthEvent[] = [];
       auth.onAuthEvent((event) => events.push(event));
       const refreshing = auth.refreshToken().then(
         () => "resolved",
@@ -1209,23 +1039,19 @@ describe("AuthModule (web)", () => {
     const appleSignInStarted = new Promise<void>((resolve) => {
       signalAppleSignIn = resolve;
     });
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: {
-        auth: {
-          init: jest.fn(),
-          signIn: jest.fn(
-            () =>
-              new Promise<{
-                authorization: { id_token: string; code: string };
-                user: { email: string };
-              }>((resolve) => {
-                finishAppleSignIn = resolve;
-                signalAppleSignIn?.();
-              }),
-          ),
-        },
+    installAppleId({
+      auth: {
+        init: jest.fn(),
+        signIn: jest.fn(
+          () =>
+            new Promise<{
+              authorization: { id_token: string; code: string };
+              user: { email: string };
+            }>((resolve) => {
+              finishAppleSignIn = resolve;
+              signalAppleSignIn?.();
+            }),
+        ),
       },
     });
 
@@ -1250,11 +1076,7 @@ describe("AuthModule (web)", () => {
           }),
         }) as Response,
     );
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: fetchMock,
-    });
+    installFetch(fetchMock);
 
     const loggingIn = auth.login("apple", { nonce: "switch-nonce" });
     await appleSignInStarted;
@@ -1304,24 +1126,16 @@ describe("AuthModule (web)", () => {
           resolveOldRefresh = resolve;
         }),
     );
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: fetchMock,
-    });
+    installFetch(fetchMock);
     const openMock = jest.fn(() => null);
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: openMock,
-    });
+    installWindowOpen(openMock);
 
     const auth = await loadAuthModule({
       nitroAuthWebStorage: "local",
       nitroAuthPersistTokensOnWeb: true,
       microsoftClientId: "microsoft-client-id",
     });
-    const events: TestAuthEvent[] = [];
+    const events: AuthEvent[] = [];
     auth.onAuthEvent((event) => events.push(event));
     const refreshing = auth.refreshToken().then(
       () => "resolved",
@@ -1379,10 +1193,8 @@ describe("AuthModule (web)", () => {
       microsoftClientId: "test-client-id",
     });
 
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(
+    installFetch(
+      jest.fn(
         async () =>
           ({
             ok: true,
@@ -1393,7 +1205,7 @@ describe("AuthModule (web)", () => {
             }),
           }) as Response,
       ),
-    });
+    );
 
     let unsubscribeB: () => void = () => undefined;
     const listenerA = jest.fn(() => {
@@ -1429,10 +1241,8 @@ describe("AuthModule (web)", () => {
       microsoftClientId: "test-client-id",
     });
 
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(
+    installFetch(
+      jest.fn(
         async () =>
           ({
             ok: true,
@@ -1443,7 +1253,7 @@ describe("AuthModule (web)", () => {
             }),
           }) as Response,
       ),
-    });
+    );
 
     const listenerA = jest.fn(() => {
       throw new Error("listener failed");
@@ -1498,25 +1308,17 @@ describe("AuthModule (web)", () => {
     }));
     const initMock = jest.fn();
 
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: undefined,
-    });
+    installAppleId(undefined);
 
     const appendSpy = jest
       .spyOn(document.head, "appendChild")
       .mockImplementation((node: Node) => {
         const scriptNode = node as HTMLScriptElement;
         setTimeout(() => {
-          Object.defineProperty(window, "AppleID", {
-            configurable: true,
-            writable: true,
-            value: {
-              auth: {
-                init: initMock,
-                signIn: signInMock,
-              },
+          installAppleId({
+            auth: {
+              init: initMock,
+              signIn: signInMock,
             },
           });
           scriptNode.dispatchEvent(new Event("load"));
@@ -1558,10 +1360,8 @@ describe("AuthModule (web)", () => {
       microsoftClientId: "test-client-id",
     });
 
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(
+    installFetch(
+      jest.fn(
         async () =>
           ({
             ok: true,
@@ -1573,7 +1373,7 @@ describe("AuthModule (web)", () => {
             }),
           }) as Response,
       ),
-    });
+    );
 
     await auth.refreshToken();
 
@@ -1596,10 +1396,8 @@ describe("AuthModule (web)", () => {
       microsoftClientId: "test-client-id",
     });
 
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(
+    installFetch(
+      jest.fn(
         async () =>
           ({
             ok: true,
@@ -1612,7 +1410,7 @@ describe("AuthModule (web)", () => {
             }),
           }) as Response,
       ),
-    });
+    );
 
     const tokens = await auth.refreshToken();
 
@@ -1622,21 +1420,13 @@ describe("AuthModule (web)", () => {
 
   it("normalizes Microsoft state mismatches to invalid_state", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(() => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn(() => {
         popup.location.href = `${window.location.origin}?code=auth-code&state=wrong-state`;
         return popup;
       }),
-    });
+    );
 
     const auth = await loadAuthModule({
       microsoftClientId: "test-client-id",
@@ -1651,11 +1441,7 @@ describe("AuthModule (web)", () => {
 
   it("rejects absolute Microsoft tenant URLs", async () => {
     const open = jest.fn();
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: open,
-    });
+    installWindowOpen(open);
 
     const auth = await loadAuthModule({
       microsoftClientId: "test-client-id",
@@ -1670,11 +1456,7 @@ describe("AuthModule (web)", () => {
 
   it("rejects invalid Microsoft B2C domains", async () => {
     const open = jest.fn();
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: open,
-    });
+    installWindowOpen(open);
 
     const auth = await loadAuthModule({
       microsoftClientId: "test-client-id",
@@ -1693,11 +1475,7 @@ describe("AuthModule (web)", () => {
       ReturnType<typeof window.open>,
       Parameters<typeof window.open>
     >(() => null);
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: open,
-    });
+    installWindowOpen(open);
 
     const auth = await loadAuthModule({
       microsoftClientId: "test-client-id",
@@ -1723,11 +1501,7 @@ describe("AuthModule (web)", () => {
       ReturnType<typeof window.open>,
       Parameters<typeof window.open>
     >(() => null);
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: open,
-    });
+    installWindowOpen(open);
 
     const auth = await loadAuthModule({
       microsoftClientId: "test-client-id",
@@ -1750,11 +1524,7 @@ describe("AuthModule (web)", () => {
 
   it("rejects policy-only Microsoft B2C tenants on custom domains", async () => {
     const open = jest.fn();
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: open,
-    });
+    installWindowOpen(open);
 
     const auth = await loadAuthModule({
       microsoftClientId: "test-client-id",
@@ -1770,26 +1540,16 @@ describe("AuthModule (web)", () => {
 
   it("normalizes Microsoft token responses without id tokens to no_id_token", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}?code=auth-code&state=${state}`;
         return popup;
       }),
-    });
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(
+    );
+    installFetch(
+      jest.fn(
         async () =>
           ({
             ok: true,
@@ -1798,7 +1558,7 @@ describe("AuthModule (web)", () => {
             }),
           }) as Response,
       ),
-    });
+    );
 
     const auth = await loadAuthModule({
       microsoftClientId: "test-client-id",
@@ -1816,26 +1576,16 @@ describe("AuthModule (web)", () => {
     const idToken = createJwtWithPayload({
       nonce: "different-nonce",
     });
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}?code=auth-code&state=${state}`;
         return popup;
       }),
-    });
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(
+    );
+    installFetch(
+      jest.fn(
         async () =>
           ({
             ok: true,
@@ -1845,7 +1595,7 @@ describe("AuthModule (web)", () => {
             }),
           }) as Response,
       ),
-    });
+    );
 
     const auth = await loadAuthModule({
       microsoftClientId: "test-client-id",
@@ -1860,21 +1610,13 @@ describe("AuthModule (web)", () => {
 
   it("rejects Google redirects with a missing state", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(() => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn(() => {
         popup.location.href = `${window.location.origin}#id_token=some-token`;
         return popup;
       }),
-    });
+    );
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -1889,21 +1631,13 @@ describe("AuthModule (web)", () => {
 
   it("rejects Google redirects with a forged state", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(() => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn(() => {
         popup.location.href = `${window.location.origin}#id_token=some-token&state=forged-state`;
         return popup;
       }),
-    });
+    );
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -1918,23 +1652,15 @@ describe("AuthModule (web)", () => {
 
   it("rejects popup redirects that are not the exact registered target", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         // A different path on the same origin must not be parsed.
         popup.location.href = `${window.location.origin}/signin/callback#id_token=some-token&state=${state}`;
         return popup;
       }),
-    });
+    );
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -1960,11 +1686,7 @@ describe("AuthModule (web)", () => {
     );
     sessionStorage.setItem(SCOPES_KEY, JSON.stringify(["openid"]));
     const open = jest.fn();
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: open,
-    });
+    installWindowOpen(open);
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -1987,11 +1709,7 @@ describe("AuthModule (web)", () => {
       }),
     );
     const open = jest.fn();
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: open,
-    });
+    installWindowOpen(open);
 
     const auth = await loadAuthModule();
 
@@ -2058,22 +1776,14 @@ describe("AuthModule (web)", () => {
     const idToken = createJwtWithPayload({
       nonce: "test-random-uuid",
     });
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}#id_token=${idToken}&state=${state}&expires_in=3600`;
         return popup;
       }),
-    });
+    );
 
     const loginPromise = auth.login("google");
     await Promise.all([
@@ -2099,22 +1809,14 @@ describe("AuthModule (web)", () => {
     });
 
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}#error=access_denied&state=${state}`;
         return popup;
       }),
-    });
+    );
 
     const loginPromise = auth.login("google");
     await Promise.all([
@@ -2157,11 +1859,7 @@ describe("AuthModule (web)", () => {
       microsoftClientId: "test-client-id",
     });
 
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(() => new Promise<Response>(() => {})),
-    });
+    installFetch(jest.fn(() => new Promise<Response>(() => {})));
 
     const refreshPromise = auth.refreshToken();
     auth.logout();
@@ -2170,18 +1868,8 @@ describe("AuthModule (web)", () => {
   });
 
   it("dispose rejects a pending login with cancelled", async () => {
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "https://accounts.google.com/signin",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(() => popup),
-    });
+    const popup = createPopupWindow("https://accounts.google.com/signin");
+    installWindowOpen(jest.fn(() => popup));
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -2211,10 +1899,8 @@ describe("AuthModule (web)", () => {
       microsoftClientId: "test-client-id",
     });
 
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(
+    installFetch(
+      jest.fn(
         async () =>
           ({
             ok: false,
@@ -2224,9 +1910,9 @@ describe("AuthModule (web)", () => {
             }),
           }) as Response,
       ),
-    });
+    );
 
-    const events: TestAuthEvent[] = [];
+    const events: AuthEvent[] = [];
     auth.onAuthEvent((event) => events.push(event));
 
     await expect(auth.refreshToken()).rejects.toThrow("refresh_failed");
@@ -2247,14 +1933,10 @@ describe("AuthModule (web)", () => {
     }));
     const initMock = jest.fn();
 
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: {
-        auth: {
-          init: initMock,
-          signIn: signInMock,
-        },
+    installAppleId({
+      auth: {
+        init: initMock,
+        signIn: signInMock,
       },
     });
 
@@ -2268,7 +1950,6 @@ describe("AuthModule (web)", () => {
   });
 
   it("falls back to in-memory storage when browser storage throws", async () => {
-    const originalSetItem = Storage.prototype.setItem;
     jest.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota exceeded");
     });
@@ -2278,8 +1959,6 @@ describe("AuthModule (web)", () => {
     auth.logout();
 
     expect(auth.currentUser).toBeUndefined();
-    jest.restoreAllMocks();
-    Storage.prototype.setItem = originalSetItem;
   });
 
   it("clears corrupted cached users and scope lists", async () => {
@@ -2387,7 +2066,7 @@ describe("AuthModule (web)", () => {
       { virtual: true },
     );
     const module = await import("../Auth.web");
-    const auth = module.AuthModule as unknown as TestAuthModule;
+    const auth = module.AuthModule;
 
     expect(auth.currentUser).toBeUndefined();
     await expect(auth.login("microsoft")).rejects.toThrow(
@@ -2446,10 +2125,8 @@ describe("AuthModule (web)", () => {
   it("keeps the replacement login guard when logout and login run in one tick", async () => {
     jest.useFakeTimers();
     const popups: { closed: boolean; close: jest.Mock }[] = [];
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(() => {
+    installWindowOpen(
+      jest.fn(() => {
         const popup = {
           closed: false,
           close: jest.fn(() => {
@@ -2464,7 +2141,7 @@ describe("AuthModule (web)", () => {
         popups.push(popup);
         return popup;
       }),
-    });
+    );
     const auth = await loadAuthModule({ microsoftClientId: "ms-client" });
 
     const first = auth.login("microsoft").then(
@@ -2500,16 +2177,12 @@ describe("AuthModule (web)", () => {
   ])(
     "maps Apple SDK rejection %j through the shared OAuth table",
     async (rejection, expectedCode) => {
-      Object.defineProperty(window, "AppleID", {
-        configurable: true,
-        writable: true,
-        value: {
-          auth: {
-            init: jest.fn(),
-            signIn: jest.fn(async () => {
-              throw rejection;
-            }),
-          },
+      installAppleId({
+        auth: {
+          init: jest.fn(),
+          signIn: jest.fn(async () => {
+            throw rejection;
+          }),
         },
       });
       const auth = await loadAuthModule({
@@ -2533,16 +2206,12 @@ describe("AuthModule (web)", () => {
 
   it("maps Apple SDK plain-object rejections to cancelled", async () => {
     for (const error of ["popup_closed_by_user", "user_cancelled_authorize"]) {
-      Object.defineProperty(window, "AppleID", {
-        configurable: true,
-        writable: true,
-        value: {
-          auth: {
-            init: jest.fn(),
-            signIn: jest.fn(async () => {
-              throw { error };
-            }),
-          },
+      installAppleId({
+        auth: {
+          init: jest.fn(),
+          signIn: jest.fn(async () => {
+            throw { error };
+          }),
         },
       });
       const auth = await loadAuthModule({
@@ -2574,16 +2243,12 @@ describe("AuthModule (web)", () => {
       ["unexpected vendor failure", "unknown"],
     ];
     for (const [message, expectedCode] of messages) {
-      Object.defineProperty(window, "AppleID", {
-        configurable: true,
-        writable: true,
-        value: {
-          auth: {
-            init: jest.fn(),
-            signIn: jest.fn(async () => {
-              throw new Error(message);
-            }),
-          },
+      installAppleId({
+        auth: {
+          init: jest.fn(),
+          signIn: jest.fn(async () => {
+            throw new Error(message);
+          }),
         },
       });
       const auth = await loadAuthModule({
@@ -2609,11 +2274,7 @@ describe("AuthModule (web)", () => {
         throw new Error("cross-origin");
       },
     });
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(() => popup),
-    });
+    installWindowOpen(jest.fn(() => popup));
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -2628,22 +2289,14 @@ describe("AuthModule (web)", () => {
 
   it("rejects malformed Google id tokens with parse_error", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}#id_token=not-a-jwt&state=${state}`;
         return popup;
       }),
-    });
+    );
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -2658,26 +2311,16 @@ describe("AuthModule (web)", () => {
 
   it("maps token exchange grant failures to token_error", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}?code=auth-code&state=${state}`;
         return popup;
       }),
-    });
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(
+    );
+    installFetch(
+      jest.fn(
         async () =>
           ({
             ok: false,
@@ -2687,7 +2330,7 @@ describe("AuthModule (web)", () => {
             }),
           }) as Response,
       ),
-    });
+    );
 
     const auth = await loadAuthModule({
       microsoftClientId: "test-client-id",
@@ -2717,11 +2360,7 @@ describe("AuthModule (web)", () => {
   });
 
   it("rejects when the Apple SDK script fails to load", async () => {
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: undefined,
-    });
+    installAppleId(undefined);
     const appendSpy = jest
       .spyOn(document.head, "appendChild")
       .mockImplementation((node: Node) => {
@@ -2736,17 +2375,13 @@ describe("AuthModule (web)", () => {
       appleWebClientId: "apple-client-id",
     });
 
-    await expect(auth.login("apple")).rejects.toThrow("unknown");
+    await expect(auth.login("apple")).rejects.toThrow("network_error");
     appendSpy.mockRestore();
   });
 
   it("does not remove an externally owned Apple SDK script after failure", async () => {
     jest.useFakeTimers();
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: undefined,
-    });
+    installAppleId(undefined);
     const externalScript = document.createElement("script");
     externalScript.id = "nitro-auth-apple-sdk";
     document.head.appendChild(externalScript);
@@ -2755,7 +2390,7 @@ describe("AuthModule (web)", () => {
     const login = auth.login("apple", { nonce: "external-script-nonce" });
     setTimeout(() => externalScript.dispatchEvent(new Event("error")), 0);
     await Promise.all([
-      expect(login).rejects.toThrow("unknown"),
+      expect(login).rejects.toThrow("network_error"),
       jest.advanceTimersByTimeAsync(0),
     ]);
 
@@ -2766,11 +2401,7 @@ describe("AuthModule (web)", () => {
 
   it("retries Apple SDK loading after a failed owned script", async () => {
     jest.useFakeTimers();
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: undefined,
-    });
+    installAppleId(undefined);
     const originalAppendChild = document.head.appendChild.bind(document.head);
     const scripts: HTMLScriptElement[] = [];
     const appendSpy = jest
@@ -2783,18 +2414,14 @@ describe("AuthModule (web)", () => {
           setTimeout(() => script.dispatchEvent(new Event("error")), 0);
         } else {
           setTimeout(() => {
-            Object.defineProperty(window, "AppleID", {
-              configurable: true,
-              writable: true,
-              value: {
-                auth: {
-                  init: jest.fn(),
-                  signIn: jest.fn(async () => ({
-                    authorization: {
-                      id_token: createJwtWithPayload({ nonce: "retry-nonce" }),
-                    },
-                  })),
-                },
+            installAppleId({
+              auth: {
+                init: jest.fn(),
+                signIn: jest.fn(async () => ({
+                  authorization: {
+                    id_token: createJwtWithPayload({ nonce: "retry-nonce" }),
+                  },
+                })),
               },
             });
             script.dispatchEvent(new Event("load"));
@@ -2806,7 +2433,7 @@ describe("AuthModule (web)", () => {
     const auth = await loadAuthModule({ appleWebClientId: "apple-client-id" });
     const failedLogin = auth.login("apple", { nonce: "retry-nonce" });
     await Promise.all([
-      expect(failedLogin).rejects.toThrow("unknown"),
+      expect(failedLogin).rejects.toThrow("network_error"),
       jest.advanceTimersByTimeAsync(0),
     ]);
 
@@ -2835,11 +2462,7 @@ describe("AuthModule (web)", () => {
 
   it("shares one Apple SDK load across concurrent module instances", async () => {
     jest.useFakeTimers();
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: undefined,
-    });
+    installAppleId(undefined);
     const idToken = createJwtWithPayload({ nonce: "parallel-nonce" });
     const init = jest.fn();
     const signIn = jest.fn(async () => ({
@@ -2854,11 +2477,7 @@ describe("AuthModule (web)", () => {
         scripts.push(script);
         const appended = originalAppendChild(node);
         setTimeout(() => {
-          Object.defineProperty(window, "AppleID", {
-            configurable: true,
-            writable: true,
-            value: { auth: { init, signIn } },
-          });
+          installAppleId({ auth: { init, signIn } });
           script.dispatchEvent(new Event("load"));
         }, 0);
         return appended;
@@ -2884,11 +2503,7 @@ describe("AuthModule (web)", () => {
 
   it("times out and removes an owned Apple SDK script", async () => {
     jest.useFakeTimers();
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: undefined,
-    });
+    installAppleId(undefined);
     const originalAppendChild = document.head.appendChild.bind(document.head);
     const scripts: HTMLScriptElement[] = [];
     const appendSpy = jest
@@ -2925,11 +2540,7 @@ describe("AuthModule (web)", () => {
 
   it("does not start Apple sign-in after disposal while the SDK loads", async () => {
     jest.useFakeTimers();
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: undefined,
-    });
+    installAppleId(undefined);
     let script: HTMLScriptElement | undefined;
     const originalAppendChild = document.head.appendChild.bind(document.head);
     const appendSpy = jest
@@ -2950,11 +2561,7 @@ describe("AuthModule (web)", () => {
     auth.dispose();
     await expect(login).rejects.toThrow("cancelled");
 
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: { auth: { init, signIn } },
-    });
+    installAppleId({ auth: { init, signIn } });
     script?.dispatchEvent(new Event("load"));
     await jest.advanceTimersByTimeAsync(0);
     script?.remove();
@@ -2966,11 +2573,7 @@ describe("AuthModule (web)", () => {
 
   it("ignores a stale Apple SDK event after a timed out load is retried", async () => {
     jest.useFakeTimers();
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: undefined,
-    });
+    installAppleId(undefined);
     const scripts: HTMLScriptElement[] = [];
     const originalAppendChild = document.head.appendChild.bind(document.head);
     const appendSpy = jest
@@ -3007,11 +2610,7 @@ describe("AuthModule (web)", () => {
       () => "rejected",
     );
     await jest.advanceTimersByTimeAsync(0);
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: { auth: { init, signIn } },
-    });
+    installAppleId({ auth: { init, signIn } });
     scripts[0]?.dispatchEvent(new Event("load"));
     await jest.advanceTimersByTimeAsync(0);
     const settledByStaleEvent = init.mock.calls.length > 0;
@@ -3037,11 +2636,7 @@ describe("AuthModule (web)", () => {
         accessToken: "google-access-token",
       }),
     );
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(async () => ({ ok: false, status: 400 }) as Response),
-    });
+    installFetch(jest.fn(async () => ({ ok: false, status: 400 }) as Response));
     const auth = await loadAuthModule();
 
     await expect(auth.revokeAccess()).rejects.toThrow("token_error");
@@ -3053,22 +2648,14 @@ describe("AuthModule (web)", () => {
     const idToken = createJwtWithPayload({
       nonce: "test-random-uuid",
     });
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}#id_token=${idToken}&state=${state}&expires_in=3600`;
         return popup;
       }),
-    });
+    );
 
     sessionStorage.setItem(
       CACHE_KEY,
@@ -3105,16 +2692,12 @@ describe("AuthModule (web)", () => {
       ["unauthorized_client", "configuration_error"],
     ];
     for (const [message, expectedCode] of cases) {
-      Object.defineProperty(window, "AppleID", {
-        configurable: true,
-        writable: true,
-        value: {
-          auth: {
-            init: jest.fn(),
-            signIn: jest.fn(async () => {
-              throw new Error(message);
-            }),
-          },
+      installAppleId({
+        auth: {
+          init: jest.fn(),
+          signIn: jest.fn(async () => {
+            throw new Error(message);
+          }),
         },
       });
       const auth = await loadAuthModule({
@@ -3140,14 +2723,10 @@ describe("AuthModule (web)", () => {
         id_token: createJwtWithPayload({ nonce: "test-random-uuid" }),
       },
     }));
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: {
-        auth: {
-          init: initMock,
-          signIn: signInMock,
-        },
+    installAppleId({
+      auth: {
+        init: initMock,
+        signIn: signInMock,
       },
     });
 
@@ -3165,18 +2744,14 @@ describe("AuthModule (web)", () => {
 
   it("preserves empty Apple scopes while keeping defaults when scopes are omitted", async () => {
     const initMock = jest.fn();
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: {
-        auth: {
-          init: initMock,
-          signIn: jest.fn(async () => ({
-            authorization: {
-              id_token: createJwtWithPayload({ nonce: "test-random-uuid" }),
-            },
-          })),
-        },
+    installAppleId({
+      auth: {
+        init: initMock,
+        signIn: jest.fn(async () => ({
+          authorization: {
+            id_token: createJwtWithPayload({ nonce: "test-random-uuid" }),
+          },
+        })),
       },
     });
 
@@ -3202,18 +2777,14 @@ describe("AuthModule (web)", () => {
 
   it("maps fullName to Apple's web name scope", async () => {
     const initMock = jest.fn();
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: {
-        auth: {
-          init: initMock,
-          signIn: jest.fn(async () => ({
-            authorization: {
-              id_token: createJwtWithPayload({ nonce: "test-random-uuid" }),
-            },
-          })),
-        },
+    installAppleId({
+      auth: {
+        init: initMock,
+        signIn: jest.fn(async () => ({
+          authorization: {
+            id_token: createJwtWithPayload({ nonce: "test-random-uuid" }),
+          },
+        })),
       },
     });
 
@@ -3255,10 +2826,8 @@ describe("AuthModule (web)", () => {
       }),
     );
     sessionStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh-token");
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(
+    installFetch(
+      jest.fn(
         async () =>
           ({
             ok: true,
@@ -3267,7 +2836,7 @@ describe("AuthModule (web)", () => {
             },
           }) as unknown as Response,
       ),
-    });
+    );
 
     const auth = await loadAuthModule({
       nitroAuthPersistTokensOnWeb: true,
@@ -3279,11 +2848,7 @@ describe("AuthModule (web)", () => {
 
   it("passes forceAccountPicker and openIDRealm into the Google auth URL", async () => {
     const open = jest.fn(() => null);
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: open,
-    });
+    installWindowOpen(open);
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -3305,11 +2870,7 @@ describe("AuthModule (web)", () => {
 
   it("passes loginHint and prompt into the Microsoft auth URL", async () => {
     const open = jest.fn(() => null);
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: open,
-    });
+    installWindowOpen(open);
 
     const auth = await loadAuthModule({
       microsoftClientId: "test-client-id",
@@ -3329,22 +2890,14 @@ describe("AuthModule (web)", () => {
 
   it("rejects Google redirects with malformed JWT payloads", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}#id_token=eyJhbGciOiJub25lIn0.bm90LXZhbGlkLWJhc2U2NC1jaGFycw&state=${state}`;
         return popup;
       }),
-    });
+    );
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -3358,7 +2911,6 @@ describe("AuthModule (web)", () => {
   });
 
   it("tolerates storage removal failures during logout", async () => {
-    const originalRemoveItem = Storage.prototype.removeItem;
     jest.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
       throw new Error("storage unavailable");
     });
@@ -3368,8 +2920,6 @@ describe("AuthModule (web)", () => {
     auth.logout();
 
     expect(auth.currentUser).toBeUndefined();
-    jest.restoreAllMocks();
-    Storage.prototype.removeItem = originalRemoveItem;
   });
 
   it("rejects unknown providers with unsupported_provider", async () => {
@@ -3389,14 +2939,10 @@ describe("AuthModule (web)", () => {
         name: { firstName: "Jane", lastName: "Doe" },
       },
     }));
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: {
-        auth: {
-          init: jest.fn(),
-          signIn: signInMock,
-        },
+    installAppleId({
+      auth: {
+        init: jest.fn(),
+        signIn: signInMock,
       },
     });
 
@@ -3429,26 +2975,16 @@ describe("AuthModule (web)", () => {
 
   it("requests additional Microsoft scopes through the popup flow", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}?code=auth-code&state=${state}`;
         return popup;
       }),
-    });
-    Object.defineProperty(globalThis, "fetch", {
-      configurable: true,
-      writable: true,
-      value: jest.fn(
+    );
+    installFetch(
+      jest.fn(
         async () =>
           ({
             ok: true,
@@ -3460,7 +2996,7 @@ describe("AuthModule (web)", () => {
             }),
           }) as unknown as Response,
       ),
-    });
+    );
 
     sessionStorage.setItem(
       CACHE_KEY,
@@ -3486,22 +3022,14 @@ describe("AuthModule (web)", () => {
 
   it("rejects Google redirects whose JWT payload contains invalid characters", async () => {
     jest.useFakeTimers();
-    const popup = {
-      closed: false,
-      close: jest.fn(),
-      location: {
-        href: "",
-      },
-    } as unknown as Window;
-    Object.defineProperty(window, "open", {
-      configurable: true,
-      writable: true,
-      value: jest.fn((url: string) => {
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
         const state = new URL(url).searchParams.get("state");
         popup.location.href = `${window.location.origin}#id_token=eyJhbGciOiJub25lIn0.bad!!chars&state=${state}`;
         return popup;
       }),
-    });
+    );
 
     const auth = await loadAuthModule({
       googleWebClientId: "test-client-id.apps.googleusercontent.com",
@@ -3520,25 +3048,17 @@ describe("AuthModule (web)", () => {
     document.head.appendChild(existingScript);
     const appendSpy = jest.spyOn(document.head, "appendChild");
 
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: undefined,
-    });
-    Object.defineProperty(window, "AppleID", {
-      configurable: true,
-      writable: true,
-      value: {
-        auth: {
-          init: jest.fn(),
-          signIn: jest.fn(async () => ({
-            authorization: {
-              id_token: createJwtWithPayload({
-                nonce: "test-random-uuid",
-              }),
-            },
-          })),
-        },
+    installAppleId(undefined);
+    installAppleId({
+      auth: {
+        init: jest.fn(),
+        signIn: jest.fn(async () => ({
+          authorization: {
+            id_token: createJwtWithPayload({
+              nonce: "test-random-uuid",
+            }),
+          },
+        })),
       },
     });
     // The script element already exists and the SDK is present: no new
@@ -3551,5 +3071,441 @@ describe("AuthModule (web)", () => {
     expect(appendSpy).not.toHaveBeenCalled();
     appendSpy.mockRestore();
     existingScript.remove();
+  });
+
+  describe("typed web errors and defaults (audit 36-46)", () => {
+    it("types getCredential configuration failures like login", async () => {
+      const auth = await loadAuthService({});
+      await expect(auth.getCredential("google")).rejects.toMatchObject({
+        code: "configuration_error",
+      });
+      await expect(auth.getCredential("apple")).rejects.toMatchObject({
+        code: "configuration_error",
+      });
+    });
+
+    it("types getCredential popup blocking", async () => {
+      installWindowOpen(jest.fn(() => null));
+      const auth = await loadAuthService({
+        googleWebClientId: "test-client-id.apps.googleusercontent.com",
+      });
+      await expect(auth.getCredential("google")).rejects.toMatchObject({
+        code: "popup_blocked",
+      });
+    });
+
+    it("requests offline_access in the default Microsoft web scopes", async () => {
+      const open = jest.fn(() => null);
+      installWindowOpen(open);
+      const auth = await loadAuthModule({ microsoftClientId: "ms-client" });
+      await expect(auth.login("microsoft")).rejects.toThrow("popup_blocked");
+      const authorizeUrl = new URL(
+        String((open.mock.calls[0] as unknown[])[0]),
+      );
+      expect(authorizeUrl.searchParams.get("scope")).toBe(
+        "openid email profile offline_access User.Read",
+      );
+    });
+
+    it("omits a missing Apple name part instead of printing undefined", async () => {
+      installAppleId({
+        auth: {
+          init: jest.fn(),
+          signIn: jest.fn(async () => ({
+            authorization: {
+              id_token: createJwtWithPayload({ nonce: "apple-name-nonce" }),
+            },
+            user: { name: { lastName: "Doe" } },
+          })),
+        },
+      });
+      const auth = await loadAuthModule({
+        appleWebClientId: "apple-client-id",
+      });
+      await auth.login("apple", { nonce: "apple-name-nonce" });
+      expect(auth.currentUser?.name).toBe("Doe");
+      expect(auth.currentUser?.firstName).toBeUndefined();
+    });
+
+    it("gives every concurrent refreshToken caller the same typed error", async () => {
+      const auth = await loadAuthModule();
+      const [first, second] = await Promise.all([
+        auth.refreshToken().catch((e: unknown) => e),
+        auth.refreshToken().catch((e: unknown) => e),
+      ]);
+      expect(first).toMatchObject({ code: "not_signed_in" });
+      expect(second).toMatchObject({ code: "not_signed_in" });
+    });
+
+    it("rejects Apple refresh with unsupported_provider for every caller", async () => {
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ provider: "apple", idToken: "apple-id-token" }),
+      );
+      const auth = await loadAuthModule();
+      const [first, second] = await Promise.all([
+        auth.refreshToken().catch((e: unknown) => e),
+        auth.refreshToken().catch((e: unknown) => e),
+      ]);
+      expect(first).toMatchObject({ code: "unsupported_provider" });
+      expect(second).toMatchObject({ code: "unsupported_provider" });
+    });
+
+    it("types a Microsoft refresh without a client id as configuration_error for every caller", async () => {
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ provider: "microsoft", idToken: "ms-id-token" }),
+      );
+      sessionStorage.setItem(MS_REFRESH_TOKEN_KEY, "refresh");
+      const auth = await loadAuthModule({ nitroAuthPersistTokensOnWeb: true });
+      const [first, second] = await Promise.all([
+        auth.refreshToken().catch((e: unknown) => e),
+        auth.refreshToken().catch((e: unknown) => e),
+      ]);
+      expect(first).toMatchObject({ code: "configuration_error" });
+      expect(second).toMatchObject({ code: "configuration_error" });
+    });
+  });
+
+  describe("in-memory Microsoft refresh token (default mode)", () => {
+    const installMicrosoftLogin = (
+      tokenResponses: Record<string, unknown>[],
+    ) => {
+      const popup = createPopupWindow();
+      installWindowOpen(
+        jest.fn((url: string) => {
+          const state = new URL(url).searchParams.get("state");
+          popup.location.href = `${window.location.origin}?code=auth-code&state=${state}`;
+          return popup;
+        }),
+      );
+      const responses = [...tokenResponses];
+      installFetch(
+        jest.fn(
+          async () =>
+            ({
+              ok: true,
+              json: async () => responses.shift(),
+            }) as unknown as Response,
+        ),
+      );
+    };
+    const idToken = () => createJwtWithPayload({ nonce: "test-random-uuid" });
+
+    it("drops the refresh token on logout", async () => {
+      jest.useFakeTimers();
+      installMicrosoftLogin([
+        {
+          id_token: idToken(),
+          access_token: "a",
+          refresh_token: "r1",
+          expires_in: 3600,
+        },
+        { id_token: idToken(), access_token: "b", expires_in: 3600 },
+      ]);
+      const auth = await loadAuthModule({
+        microsoftClientId: "test-client-id",
+      });
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      auth.logout();
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      await expect(auth.refreshToken()).rejects.toMatchObject({
+        code: "refresh_failed",
+      });
+    });
+
+    it("does not keep the previous account's refresh token after a login without one", async () => {
+      jest.useFakeTimers();
+      installMicrosoftLogin([
+        {
+          id_token: idToken(),
+          access_token: "a",
+          refresh_token: "r-account-a",
+          expires_in: 3600,
+        },
+        { id_token: idToken(), access_token: "b", expires_in: 3600 },
+      ]);
+      const auth = await loadAuthModule({
+        microsoftClientId: "test-client-id",
+      });
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      await expect(auth.refreshToken()).rejects.toMatchObject({
+        code: "refresh_failed",
+      });
+    });
+
+    it("keeps the refresh token when a scope request returns none", async () => {
+      jest.useFakeTimers();
+      installMicrosoftLogin([
+        {
+          id_token: idToken(),
+          access_token: "a",
+          refresh_token: "r1",
+          expires_in: 3600,
+        },
+        { id_token: idToken(), access_token: "b", expires_in: 3600 },
+        {
+          id_token: idToken(),
+          access_token: "c",
+          refresh_token: "r2",
+          expires_in: 3600,
+        },
+      ]);
+      const auth = await loadAuthModule({
+        microsoftClientId: "test-client-id",
+      });
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+      await Promise.all([
+        auth.requestScopes(["Mail.Read"]),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      await expect(auth.refreshToken()).resolves.toMatchObject({
+        accessToken: "c",
+      });
+    });
+  });
+
+  describe("provider response branches", () => {
+    const microsoftConfig = { microsoftClientId: "test-client-id" };
+    const googleConfig = {
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+    };
+
+    const redirectWith = (query: (state: string) => string) => {
+      const popup = createPopupWindow();
+      const open = jest.fn((url: string) => {
+        const state = new URL(url).searchParams.get("state") ?? "";
+        popup.location.href = `${window.location.origin}${query(state)}`;
+        return popup;
+      });
+      installWindowOpen(open);
+      return open;
+    };
+
+    const settleLogin = async (promise: Promise<unknown>) => {
+      const [outcome] = await Promise.all([
+        promise.then(
+          () => undefined,
+          (error: unknown) => error,
+        ),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+      return outcome;
+    };
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    it("maps a Microsoft redirect error with and without a description", async () => {
+      redirectWith(
+        (state) =>
+          `?error=access_denied&error_description=user%20said%20no&state=${state}`,
+      );
+      const auth = await loadAuthModule(microsoftConfig);
+      expect(await settleLogin(auth.login("microsoft"))).toMatchObject({
+        code: "cancelled",
+        underlyingError: "user said no",
+      });
+
+      redirectWith((state) => `?error=server_error&state=${state}`);
+      expect(await settleLogin(auth.login("microsoft"))).toMatchObject({
+        code: "network_error",
+        underlyingError: "server_error",
+      });
+    });
+
+    it("rejects a Microsoft redirect without an authorization code", async () => {
+      redirectWith((state) => `?state=${state}`);
+      const auth = await loadAuthModule(microsoftConfig);
+
+      expect(await settleLogin(auth.login("microsoft"))).toMatchObject({
+        code: "token_error",
+      });
+    });
+
+    it("reports a provider error from the Microsoft token exchange", async () => {
+      redirectWith((state) => `?code=auth-code&state=${state}`);
+      installFetch(
+        jest.fn(async () => ({
+          json: async () => ({ error: "invalid_grant" }),
+        })),
+      );
+      const auth = await loadAuthModule(microsoftConfig);
+
+      expect(await settleLogin(auth.login("microsoft"))).toMatchObject({
+        code: "token_error",
+        underlyingError: "invalid_grant",
+      });
+    });
+
+    it("requests the default Microsoft scopes for an empty scope list", async () => {
+      const open = redirectWith(
+        (state) => `?error=access_denied&state=${state}`,
+      );
+      const auth = await loadAuthModule(microsoftConfig);
+
+      await settleLogin(auth.login("microsoft", { scopes: [] }));
+
+      const url = new URL(String(open.mock.calls[0]?.[0]));
+      expect(url.searchParams.get("scope")).toBe(
+        "openid email profile offline_access User.Read",
+      );
+    });
+
+    it("forwards the Google login hint to the authorization URL", async () => {
+      const open = redirectWith(
+        (state) => `#error=access_denied&state=${state}`,
+      );
+      const auth = await loadAuthModule(googleConfig);
+
+      await settleLogin(auth.login("google", { loginHint: "a@example.com" }));
+
+      const url = new URL(String(open.mock.calls[0]?.[0]));
+      expect(url.searchParams.get("login_hint")).toBe("a@example.com");
+    });
+
+    it("rejects a Google ID token whose payload is not an object", async () => {
+      const header = createBase64UrlSegmentFromObject({ alg: "none" });
+      const scalarPayload = Buffer.from('"just a string"')
+        .toString("base64")
+        .replace(/=+$/g, "");
+      redirectWith(
+        (state) => `#id_token=${header}.${scalarPayload}.sig&state=${state}`,
+      );
+      const auth = await loadAuthModule(googleConfig);
+
+      expect(await settleLogin(auth.login("google"))).toMatchObject({
+        code: "parse_error",
+      });
+    });
+
+    it("rejects a Google ID token whose nonce does not match", async () => {
+      redirectWith(
+        (state) =>
+          `#id_token=${createJwtWithPayload({ nonce: "other" })}&state=${state}`,
+      );
+      const auth = await loadAuthModule(googleConfig);
+
+      expect(await settleLogin(auth.login("google"))).toMatchObject({
+        code: "invalid_nonce",
+      });
+    });
+
+    it("rejects getCredential for providers without credentials", async () => {
+      const auth = await loadAuthService(googleConfig);
+
+      await expect(
+        auth.getCredential("microsoft" as never),
+      ).rejects.toMatchObject({ code: "unsupported_provider" });
+    });
+
+    it("rejects getCredential while another login is pending", async () => {
+      redirectWith(() => "");
+      const auth = await loadAuthService(googleConfig);
+      const pending = auth.login("google").catch(() => undefined);
+
+      await expect(auth.getCredential("google")).rejects.toMatchObject({
+        code: "operation_in_progress",
+      });
+
+      auth.logout();
+      await Promise.all([pending, jest.advanceTimersByTimeAsync(501)]);
+    });
+
+    it("keeps a Microsoft session without an expiry on silent restore", async () => {
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ provider: "microsoft", idToken: "cached" }),
+      );
+      const fetchMock = jest.fn();
+      installFetch(fetchMock);
+      const auth = await loadAuthModule(microsoftConfig);
+
+      await expect(auth.silentRestore()).resolves.toBeUndefined();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(auth.currentUser?.provider).toBe("microsoft");
+    });
+
+    it("reports a Microsoft refresh response without an ID token", async () => {
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ provider: "microsoft", idToken: "cached" }),
+      );
+      installFetch(
+        jest.fn(async () => ({
+          json: async () => ({ access_token: "a" }),
+        })),
+      );
+      const auth = await loadAuthModule({
+        ...microsoftConfig,
+        nitroAuthPersistTokensOnWeb: true,
+      });
+      sessionStorage.setItem(MS_REFRESH_TOKEN_KEY, "r1");
+
+      await expect(auth.refreshToken()).rejects.toMatchObject({
+        code: "no_id_token",
+      });
+    });
+
+    it("reports a provider error from the Microsoft refresh", async () => {
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ provider: "microsoft", idToken: "cached" }),
+      );
+      installFetch(
+        jest.fn(async () => ({
+          json: async () => ({ error: "invalid_grant" }),
+        })),
+      );
+      const auth = await loadAuthModule({
+        ...microsoftConfig,
+        nitroAuthPersistTokensOnWeb: true,
+      });
+      sessionStorage.setItem(MS_REFRESH_TOKEN_KEY, "r1");
+
+      await expect(auth.refreshToken()).rejects.toMatchObject({
+        code: "refresh_failed",
+      });
+    });
+
+    it("maps an Apple SDK failure that already carries an auth error code", async () => {
+      installAppleId({
+        auth: {
+          init: jest.fn(),
+          signIn: jest.fn(async () => {
+            throw new Error("not_signed_in");
+          }),
+        },
+      });
+      const auth = await loadAuthModule({
+        appleWebClientId: "apple-client-id",
+      });
+
+      expect(await settleLogin(auth.login("apple"))).toMatchObject({
+        code: "not_signed_in",
+      });
+    });
   });
 });

@@ -27,7 +27,7 @@ press label="Toggle icon-only buttons"
 press label="Toggle button appearance"
 press label="Toggle button shape"
 scroll down
-wait text "signed-out"
+wait text "session=signed-out"
 press id="e2e-capabilities-run"
 wait id="e2e-capabilities"
 wait text "ok:provider-capability-matrix=match"

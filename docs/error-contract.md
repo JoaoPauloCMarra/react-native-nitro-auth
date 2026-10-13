@@ -13,7 +13,7 @@ agree with it. Fixture tests that enforce parts of it live in
 Every public failure is an `AuthError` with:
 
 - `code` — a stable `AuthErrorCode`, safe to switch on;
-- `operation` — the phase that failed (`login`, `getCredential`, `requestScopes`, `revokeScopes`,
+- `operation` — the phase that failed (`login`, `createNonce`, `getCredential`, `requestScopes`, `revokeScopes`,
   `revokeAccess`, `getAccessToken`, `refreshToken`, `silentRestore`, `logout`,
   `dispose`), attached by the service boundary;
 - `underlyingMessage` — the raw platform/provider detail when it differs from
@@ -45,23 +45,24 @@ Identical provider error strings produce identical codes on every platform.
 `context` selects the operation bucket: `authorize`/`token` surface token
 failures as `token_error`; `refresh` surfaces them as `refresh_failed`.
 
-| Provider error            | Code                             |
-| ------------------------- | -------------------------------- |
-| `access_denied`           | `cancelled`                      |
-| `user_cancelled`          | `cancelled`                      |
-| `popup_closed_by_user`    | `cancelled`                      |
-| `interaction_required`    | `interaction_required`           |
-| `login_required`          | `interaction_required`           |
-| `consent_required`        | `interaction_required`           |
-| `invalid_client`          | `configuration_error`            |
-| `invalid_scope`           | `configuration_error`            |
-| `unauthorized_client`     | `configuration_error`            |
-| `invalid_grant`           | `token_error` / `refresh_failed` |
-| `invalid_request`         | `token_error` / `refresh_failed` |
-| `invalid_token`           | `token_error` / `refresh_failed` |
-| `server_error`            | `network_error`                  |
-| `temporarily_unavailable` | `network_error`                  |
-| anything else             | `unknown`                        |
+| Provider error             | Code                             |
+| -------------------------- | -------------------------------- |
+| `access_denied`            | `cancelled`                      |
+| `user_cancelled`           | `cancelled`                      |
+| `popup_closed_by_user`     | `cancelled`                      |
+| `user_cancelled_authorize` | `cancelled`                      |
+| `interaction_required`     | `interaction_required`           |
+| `login_required`           | `interaction_required`           |
+| `consent_required`         | `interaction_required`           |
+| `invalid_client`           | `configuration_error`            |
+| `invalid_scope`            | `configuration_error`            |
+| `unauthorized_client`      | `configuration_error`            |
+| `invalid_grant`            | `token_error` / `refresh_failed` |
+| `invalid_request`          | `token_error` / `refresh_failed` |
+| `invalid_token`            | `token_error` / `refresh_failed` |
+| `server_error`             | `network_error`                  |
+| `temporarily_unavailable`  | `network_error`                  |
+| anything else              | `unknown`                        |
 
 ## 2. Token semantics (U2, X6)
 
@@ -117,7 +118,8 @@ service boundary, and the C++ coordinator:
 
 SC-09 divergence (documented, not a parity defect): native cancels the first
 login (generation advance); the replacement settles with the platform result,
-which may include `operation_in_progress` while provider UI is still active.
+which on Android may include `operation_in_progress` while provider UI is still active
+(iOS cancels the first login and never reports it).
 Web keeps the first request active and rejects the second with
 `operation_in_progress`. C++ mock tests prove coordinator settlement, not actual
 provider UI teardown timing.
@@ -215,6 +217,18 @@ or operation-event delivery. See [architecture](https://github.com/JoaoPauloCMar
   revocation succeeds. When no eligible Google session exists, every platform
   rejects with `not_signed_in`; providers without client-side revocation
   reject with `unsupported_provider`.
+- Android Credential Manager Google sessions refresh without UI: the request
+  asks for authorized accounts only, auto-select, and immediately available
+  credentials (`setPreferImmediatelyAvailableCredentials(true)`), and runs only
+  with a foreground Activity. A missing Activity, missing client id, no matching
+  credential, interruption, cancellation or any other failure rejects with
+  `refresh_failed` and keeps the session. `silentRestore()` in the same process
+  returns the in-memory session.
+- Android Google status codes (login, `requestScopes()`, legacy silent refresh)
+  map through one table: 12501 and 16 to `cancelled`, 12502 to
+  `operation_in_progress`, 15 to `timeout`, 4 to `not_signed_in`, 7 to
+  `network_error`, 8 and 10 to `configuration_error`, anything else to `unknown`.
+  A non-Google failure in the legacy silent refresh stays `network_error`.
 - Modern Android Google sessions created through Credential Manager/One-Tap are
   not eligible for client-side provider revocation and reject with
   `unsupported_provider`.
@@ -241,6 +255,14 @@ empty, non-string required credentials, or a response above 64 KiB rejects with
 `network_error`; request and interactive deadlines use `timeout`. An Apple
 `APPLE_AUTHORIZATION_CANCELLED` response and browser dismissal map to `cancelled`.
 Raw server error messages never reach the public error detail.
+
+On iOS, `ASAuthorizationError.unknown` (`1000`) from Sign in with Apple maps to
+`configuration_error`. iOS returns it when the app lacks the
+`com.apple.developer.applesignin` entitlement; it can also mean the device has no
+Apple ID. The detail names the entitlement and the `ios.appleSignIn` plugin option.
+
+On web, an Apple SDK script that fails to load rejects with `network_error`
+(`timeout` when the load deadline passes).
 
 Only the current attempt's exact callback scheme, host `apple`, path `/callback`,
 and single UUID `attemptId` are accepted. Unexpected, duplicate, and stale

@@ -14,48 +14,41 @@ import type {
   AuthEventType,
 } from "./Auth.nitro";
 import { isAuthErrorCode } from "./utils/auth-error";
+import { AuthWebError, getSafeErrorCategory } from "./utils/auth-web-error";
 import { logger } from "./utils/logger";
 import { mapOAuthErrorCode } from "./utils/oauth-error";
 import type { OAuthErrorContext } from "./utils/oauth-error";
 import {
-  buildAuthorizationCodeBody,
-  buildRefreshTokenBody,
   parseExpiresInMilliseconds,
-  parseTokenResponse,
+  postTokenRequest,
 } from "./utils/oauth-token-client";
+import {
+  getOptionalString,
+  isJsonObject,
+  setIfDefined,
+  setOrDelete,
+  type JsonObject,
+} from "./utils/web-json";
+import {
+  STORAGE_MODE_LOCAL,
+  STORAGE_MODE_MEMORY,
+  STORAGE_MODE_SESSION,
+  WebSessionStorage,
+} from "./utils/web-session-storage";
 
-const CACHE_KEY = "nitro_auth_user";
-const SCOPES_KEY = "nitro_auth_scopes";
-const MS_REFRESH_TOKEN_KEY = "nitro_auth_microsoft_refresh_token";
 const DEFAULT_SCOPES = ["openid", "email", "profile"];
-const MS_DEFAULT_SCOPES = ["openid", "email", "profile", "User.Read"];
-const STORAGE_MODE_SESSION = "session";
-const STORAGE_MODE_LOCAL = "local";
-const STORAGE_MODE_MEMORY = "memory";
+const MS_DEFAULT_SCOPES = [
+  "openid",
+  "email",
+  "profile",
+  "offline_access",
+  "User.Read",
+];
 const POPUP_POLL_INTERVAL_MS = 500;
 const POPUP_POLL_INTERVAL_CROSS_ORIGIN_MS = 1000;
 const POPUP_TIMEOUT_MS = 120000;
 const APPLE_SDK_LOAD_TIMEOUT_MS = 15000;
 const APPLE_SDK_SCRIPT_ID = "nitro-auth-apple-sdk";
-const WEB_CREDENTIAL_FIELDS = [
-  "accessToken",
-  "idToken",
-  "serverAuthCode",
-  "authorizationCode",
-  "refreshToken",
-] as const;
-const WEB_PROFILE_FIELDS = [
-  "email",
-  "name",
-  "firstName",
-  "lastName",
-  "photo",
-] as const;
-const WEB_STORAGE_MODES = new Set([
-  STORAGE_MODE_SESSION,
-  STORAGE_MODE_LOCAL,
-  STORAGE_MODE_MEMORY,
-] as const);
 const MICROSOFT_TENANT_PATTERN =
   /^(common|organizations|consumers|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})$/;
 const MICROSOFT_B2C_TENANT_PATH_PATTERN =
@@ -67,7 +60,6 @@ const MICROSOFT_B2CLOGIN_TENANT_NAME_PATTERN =
 const MICROSOFT_DOMAIN_PATTERN =
   /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
 const JWT_BASE64_URL_RE = /^[A-Za-z0-9_-]+$/;
-const inMemoryWebStorage = new Map<string, string>();
 let _appleSdkLoadState: AppleSdkLoadState | undefined;
 let _appleSdkRetryScriptId = 0;
 const _terminalAppleSdkScripts = new WeakSet<HTMLScriptElement>();
@@ -107,154 +99,15 @@ type AuthWebExtraConfig = {
   nitroAuthPersistProfileOnWeb?: boolean;
 };
 
-type JsonObject = Record<string, unknown>;
 type AppleAuthInitConfig = Parameters<
   NonNullable<Window["AppleID"]>["auth"]["init"]
 >[0];
 
-class AuthWebError extends Error {
-  public readonly code: AuthErrorCode;
-  public readonly underlyingError: string | undefined;
-
-  constructor(message: AuthErrorCode, underlyingError?: string) {
-    super(message);
-    this.name = "AuthWebError";
-    this.code = message;
-    this.underlyingError = underlyingError;
-  }
-}
-
-const getSafeErrorCategory = (error: unknown): string => {
-  try {
-    if (error instanceof AuthWebError) {
-      return error.code;
-    }
-    if (error instanceof Error) {
-      const name = error.name;
-      switch (name) {
-        case "AbortError":
-        case "InvalidStateError":
-        case "NetworkError":
-        case "NotAllowedError":
-        case "NotReadableError":
-        case "QuotaExceededError":
-        case "SecurityError":
-        case "TimeoutError":
-          return name;
-        default:
-          return "Error";
-      }
-    }
-  } catch {
-    return "UnknownError";
-  }
-  return "UnknownError";
-};
-
-const isJsonObject = (value: unknown): value is JsonObject =>
-  typeof value === "object" && value !== null;
-
-const isAuthProvider = (value: unknown): value is AuthProvider =>
-  value === "google" || value === "apple" || value === "microsoft";
-
-const getOptionalString = (
-  source: JsonObject,
-  key: string,
-): string | undefined => {
-  const candidate = source[key];
-  return typeof candidate === "string" ? candidate : undefined;
-};
-
-const getOptionalNumber = (
-  source: JsonObject,
-  key: string,
-): number | undefined => {
-  const candidate = source[key];
-  return typeof candidate === "number" && Number.isFinite(candidate)
-    ? candidate
-    : undefined;
-};
-
-function setIfDefined<T extends object, K extends keyof T>(
-  target: T,
-  key: K,
-  value: T[K] | undefined,
-): void {
-  if (value !== undefined) {
-    target[key] = value;
-  }
-}
-
-function setOrDelete<T extends object, K extends keyof T>(
-  target: T,
-  key: K,
-  value: T[K] | undefined,
-): void {
-  if (value === undefined) {
-    delete target[key];
-    return;
-  }
-
-  target[key] = value;
-}
-
-const parseAuthUser = (value: unknown): AuthUser | undefined => {
-  if (!isJsonObject(value) || !isAuthProvider(value.provider)) {
-    return undefined;
-  }
-
-  const scopesCandidate = value.scopes;
-  const scopes = Array.isArray(scopesCandidate)
-    ? scopesCandidate.filter(
-        (scope): scope is string => typeof scope === "string",
-      )
-    : undefined;
-
-  const user: AuthUser = {
-    provider: value.provider,
-  };
-  setIfDefined(user, "email", getOptionalString(value, "email"));
-  setIfDefined(user, "name", getOptionalString(value, "name"));
-  setIfDefined(user, "firstName", getOptionalString(value, "firstName"));
-  setIfDefined(user, "lastName", getOptionalString(value, "lastName"));
-  setIfDefined(user, "photo", getOptionalString(value, "photo"));
-  setIfDefined(user, "idToken", getOptionalString(value, "idToken"));
-  setIfDefined(user, "accessToken", getOptionalString(value, "accessToken"));
-  setIfDefined(user, "refreshToken", getOptionalString(value, "refreshToken"));
-  setIfDefined(
-    user,
-    "serverAuthCode",
-    getOptionalString(value, "serverAuthCode"),
-  );
-  setIfDefined(
-    user,
-    "authorizationCode",
-    getOptionalString(value, "authorizationCode"),
-  );
-  setIfDefined(user, "userId", getOptionalString(value, "userId"));
-  setIfDefined(user, "phoneNumber", getOptionalString(value, "phoneNumber"));
-  setIfDefined(user, "hostedDomain", getOptionalString(value, "hostedDomain"));
-  setIfDefined(user, "scopes", scopes);
-  setIfDefined(
-    user,
-    "expirationTime",
-    getOptionalNumber(value, "expirationTime"),
-  );
-  setIfDefined(
-    user,
-    "underlyingError",
-    getOptionalString(value, "underlyingError"),
-  );
-  return user;
-};
-
-const parseScopes = (value: unknown): string[] | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  return value.filter((scope): scope is string => typeof scope === "string");
-};
+const formatDisplayName = (
+  firstName?: string,
+  lastName?: string,
+): string | undefined =>
+  [firstName, lastName].filter(Boolean).join(" ") || undefined;
 
 const getProviderErrorField = (error: unknown): string | undefined => {
   if (error instanceof Error || !isJsonObject(error)) return undefined;
@@ -363,8 +216,7 @@ class AuthWeb implements Auth {
   private _listeners: ((user: AuthUser | undefined) => void)[] = [];
   private _tokenListeners: ((tokens: AuthTokens) => void)[] = [];
   private _eventListeners: ((event: AuthEvent) => void)[] = [];
-  private _browserStorageResolved = false;
-  private _browserStorageCache: Storage | undefined;
+  private readonly _storage: WebSessionStorage;
   private _refreshPromise: Promise<AuthTokens> | undefined;
   private _refreshReject: ((error: unknown) => void) | undefined;
   private _loginReject: ((error: unknown) => void) | undefined;
@@ -413,316 +265,14 @@ class AuthWeb implements Auth {
 
   constructor() {
     this._config = getConfig();
+    this._storage = new WebSessionStorage(this._config);
     this.loadFromCache();
   }
 
-  private shouldPersistTokensInStorage(): boolean {
-    return this._config.nitroAuthPersistTokensOnWeb === true;
-  }
-
-  private shouldPersistProfile(): boolean {
-    return this._config.nitroAuthPersistProfileOnWeb !== false;
-  }
-
-  private getWebStorageMode(): "session" | "local" | "memory" {
-    const configuredMode = this._config.nitroAuthWebStorage;
-    if (configuredMode && WEB_STORAGE_MODES.has(configuredMode)) {
-      return configuredMode;
-    }
-    return STORAGE_MODE_SESSION;
-  }
-
-  private getBrowserStorage(): Storage | undefined {
-    if (this._browserStorageResolved) {
-      return this._browserStorageCache;
-    }
-
-    this._browserStorageResolved = true;
-    if (typeof window === "undefined") {
-      this._browserStorageCache = undefined;
-      return undefined;
-    }
-
-    const mode = this.getWebStorageMode();
-    if (mode === STORAGE_MODE_MEMORY) {
-      this._browserStorageCache = undefined;
-      return undefined;
-    }
-
-    try {
-      const storage =
-        mode === STORAGE_MODE_LOCAL
-          ? window.localStorage
-          : window.sessionStorage;
-      const testKey = "__nitro_auth_storage_probe__";
-      storage.setItem(testKey, "1");
-      storage.removeItem(testKey);
-      this._browserStorageCache = storage;
-      return storage;
-    } catch (error) {
-      logger.warn(
-        "Configured web storage is unavailable; using in-memory fallback",
-        {
-          mode,
-          error: getSafeErrorCategory(error),
-        },
-      );
-      this._browserStorageCache = undefined;
-      return undefined;
-    }
-  }
-
-  private saveValue(key: string, value: string): void {
-    const storage = this.getBrowserStorage();
-    if (storage) {
-      storage.setItem(key, value);
-      return;
-    }
-    inMemoryWebStorage.set(key, value);
-  }
-
-  private loadValue(key: string): string | undefined {
-    const storage = this.getBrowserStorage();
-    if (storage) {
-      return storage.getItem(key) ?? undefined;
-    }
-    return inMemoryWebStorage.get(key);
-  }
-
-  private removeValue(key: string): void {
-    const storage = this.getBrowserStorage();
-    if (storage) {
-      storage.removeItem(key);
-      return;
-    }
-    inMemoryWebStorage.delete(key);
-  }
-
-  private removePersistedBrowserValue(key: string): void {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    for (const mode of [STORAGE_MODE_LOCAL, STORAGE_MODE_SESSION] as const) {
-      try {
-        const storage =
-          mode === STORAGE_MODE_LOCAL
-            ? window.localStorage
-            : window.sessionStorage;
-        storage.removeItem(key);
-      } catch (error) {
-        logger.debug("Failed to clear persisted browser value", {
-          key,
-          mode,
-          error: getSafeErrorCategory(error),
-        });
-      }
-    }
-  }
-
-  private sanitizeOtherBrowserUserCaches(
-    selectedBrowserMode:
-      typeof STORAGE_MODE_LOCAL | typeof STORAGE_MODE_SESSION | undefined,
-  ): void {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    for (const mode of [STORAGE_MODE_LOCAL, STORAGE_MODE_SESSION] as const) {
-      if (mode === selectedBrowserMode) {
-        continue;
-      }
-
-      let storage: Storage;
-      let cached: string | null;
-      try {
-        storage =
-          mode === STORAGE_MODE_LOCAL
-            ? window.localStorage
-            : window.sessionStorage;
-        cached = storage.getItem(CACHE_KEY);
-      } catch (error) {
-        logger.warn("Failed to inspect cached auth user in browser storage", {
-          mode,
-          error: getSafeErrorCategory(error),
-        });
-        continue;
-      }
-
-      if (cached === null) {
-        continue;
-      }
-
-      let parsedValue: unknown;
-      try {
-        parsedValue = JSON.parse(cached);
-      } catch (error) {
-        logger.warn(
-          "Failed to parse cached auth user in browser storage; removing it",
-          { mode, error: getSafeErrorCategory(error) },
-        );
-        this.removeInvalidBrowserUserCache(storage, mode);
-        continue;
-      }
-
-      if (!isJsonObject(parsedValue) || !parseAuthUser(parsedValue)) {
-        logger.warn(
-          "Invalid cached auth user in browser storage; removing it",
-          {
-            mode,
-          },
-        );
-        this.removeInvalidBrowserUserCache(storage, mode);
-        continue;
-      }
-
-      const sanitizedCache = JSON.stringify(
-        this.sanitizeUserForPersistence(parsedValue),
-      );
-      if (sanitizedCache === cached) {
-        continue;
-      }
-
-      try {
-        storage.setItem(CACHE_KEY, sanitizedCache);
-      } catch (error) {
-        logger.warn(
-          "Failed to sanitize cached auth user in browser storage; sensitive fields may remain persisted",
-          { mode, error: getSafeErrorCategory(error) },
-        );
-      }
-    }
-  }
-
-  private removeInvalidBrowserUserCache(
-    storage: Storage,
-    mode: typeof STORAGE_MODE_LOCAL | typeof STORAGE_MODE_SESSION,
-  ): void {
-    try {
-      storage.removeItem(CACHE_KEY);
-    } catch (error) {
-      logger.warn(
-        "Failed to remove invalid cached auth user from browser storage",
-        { mode, error: getSafeErrorCategory(error) },
-      );
-    }
-  }
-
-  private sanitizeUserForPersistence(user: AuthUser): AuthUser;
-  private sanitizeUserForPersistence(user: JsonObject): JsonObject;
-  private sanitizeUserForPersistence(
-    user: AuthUser | JsonObject,
-  ): AuthUser | JsonObject {
-    const safeUser = { ...user };
-    if (!this.shouldPersistTokensInStorage()) {
-      for (const field of WEB_CREDENTIAL_FIELDS) {
-        Reflect.deleteProperty(safeUser, field);
-      }
-    }
-    if (!this.shouldPersistProfile()) {
-      for (const field of WEB_PROFILE_FIELDS) {
-        Reflect.deleteProperty(safeUser, field);
-      }
-    }
-    return safeUser;
-  }
-
-  private removeInvalidCacheValue(key: string): void {
-    try {
-      this.removeFromCache(key);
-    } catch (error) {
-      logger.warn("Failed to remove invalid cached auth data", {
-        key,
-        error: getSafeErrorCategory(error),
-      });
-    }
-  }
-
-  private saveRefreshToken(refreshToken: string): void {
-    if (this.shouldPersistTokensInStorage()) {
-      this.saveValue(MS_REFRESH_TOKEN_KEY, refreshToken);
-      return;
-    }
-
-    // Security-first default: keep refresh tokens in-memory only on web.
-    inMemoryWebStorage.set(MS_REFRESH_TOKEN_KEY, refreshToken);
-  }
-
-  private loadRefreshToken(): string | undefined {
-    if (this.shouldPersistTokensInStorage()) {
-      return this.loadValue(MS_REFRESH_TOKEN_KEY);
-    }
-    return inMemoryWebStorage.get(MS_REFRESH_TOKEN_KEY);
-  }
-
-  private loadFromCache() {
-    const cached = this.loadValue(CACHE_KEY);
-
-    if (cached !== undefined) {
-      try {
-        const parsedValue: unknown = JSON.parse(cached);
-        if (!isJsonObject(parsedValue)) {
-          throw new Error("Expected cached auth user to be an object");
-        }
-        const parsedUser = parseAuthUser(parsedValue);
-        if (!parsedUser) {
-          throw new Error("Expected cached auth user to be a valid AuthUser");
-        }
-
-        const safeRecord = this.sanitizeUserForPersistence(parsedValue);
-        const sanitizedCache = JSON.stringify(safeRecord);
-        if (sanitizedCache !== cached) {
-          try {
-            this.saveValue(CACHE_KEY, sanitizedCache);
-          } catch (error) {
-            logger.warn(
-              "Failed to sanitize cached auth user; keeping the in-memory session safe",
-              { error: getSafeErrorCategory(error) },
-            );
-          }
-        }
-
-        this._currentUser = this.sanitizeUserForPersistence(parsedUser);
-      } catch (error) {
-        logger.warn("Failed to parse cached auth user; clearing cache", {
-          error: getSafeErrorCategory(error),
-        });
-        this.removeInvalidCacheValue(CACHE_KEY);
-      }
-    }
-
-    const scopes = this.loadValue(SCOPES_KEY);
-
-    if (scopes) {
-      try {
-        const parsedScopes = parseScopes(JSON.parse(scopes));
-        if (!parsedScopes) {
-          throw new Error("Expected cached scopes to be an array");
-        }
-        this._grantedScopes = parsedScopes;
-      } catch (error) {
-        logger.warn("Failed to parse cached scopes; clearing cache", {
-          error: getSafeErrorCategory(error),
-        });
-        this.removeInvalidCacheValue(SCOPES_KEY);
-      }
-    }
-
-    const configuredStorageMode = this.getWebStorageMode();
-    const selectedBrowserMode =
-      configuredStorageMode === STORAGE_MODE_MEMORY
-        ? undefined
-        : configuredStorageMode;
-    this.sanitizeOtherBrowserUserCaches(selectedBrowserMode);
-
-    if (!this.shouldPersistTokensInStorage()) {
-      this.removePersistedBrowserValue(MS_REFRESH_TOKEN_KEY);
-      inMemoryWebStorage.delete(MS_REFRESH_TOKEN_KEY);
-    }
-  }
-
-  private removeFromCache(key: string) {
-    this.removeValue(key);
+  private loadFromCache(): void {
+    const restored = this._storage.restore();
+    if (restored.user) this._currentUser = restored.user;
+    if (restored.scopes) this._grantedScopes = restored.scopes;
   }
 
   get currentUser(): AuthUser | undefined {
@@ -815,6 +365,7 @@ class AuthWeb implements Auth {
   private async runLoginOperation(
     operation: () => Promise<void>,
     onStart?: () => void,
+    errorContext: OAuthErrorContext = "authorize",
   ): Promise<AuthUser | undefined> {
     if (this._disposed) {
       throw new AuthWebError("cancelled", "Auth module disposed");
@@ -846,6 +397,8 @@ class AuthWeb implements Auth {
     try {
       await cancellable;
       return completedUser;
+    } catch (e: unknown) {
+      throw this.mapError(e, errorContext);
     } finally {
       if (this._captureLoginUser === capture)
         this._captureLoginUser = undefined;
@@ -1030,6 +583,7 @@ class AuthWeb implements Auth {
             undefined,
             undefined,
             generation,
+            true,
           );
         },
         () => {
@@ -1059,7 +613,7 @@ class AuthWeb implements Auth {
     this._grantedScopes = this._grantedScopes.filter(
       (scope) => !scopesToRevoke.has(scope),
     );
-    this.saveValue(SCOPES_KEY, JSON.stringify(this._grantedScopes));
+    this._storage.saveScopes(this._grantedScopes);
     if (this._currentUser) {
       this._currentUser.scopes = this._grantedScopes;
       this.updateUser(this._currentUser);
@@ -1134,7 +688,11 @@ class AuthWeb implements Auth {
     let rejectRefresh: ((error: unknown) => void) | undefined;
     const refreshPromise = new Promise<AuthTokens>((resolve, reject) => {
       rejectRefresh = reject;
-      void this.performRefreshToken(generation).then(resolve).catch(reject);
+      void this.performRefreshToken(generation)
+        .then(resolve)
+        .catch((e: unknown) => {
+          reject(this.mapError(e, "refresh"));
+        });
     });
     this._refreshPromise = refreshPromise;
     this._refreshReject = rejectRefresh;
@@ -1160,12 +718,12 @@ class AuthWeb implements Auth {
 
   private async performRefreshToken(generation: number): Promise<AuthTokens> {
     if (!this._currentUser) {
-      throw new Error("No user logged in");
+      throw new AuthWebError("not_signed_in", "No user logged in");
     }
 
     if (this._currentUser.provider === "microsoft") {
       logger.log("Refreshing Microsoft tokens...");
-      const refreshToken = this.loadRefreshToken();
+      const refreshToken = this._storage.loadRefreshToken();
 
       if (!refreshToken) {
         throw new AuthWebError("refresh_failed", "No refresh token available");
@@ -1173,7 +731,8 @@ class AuthWeb implements Auth {
 
       const clientId = this._config.microsoftClientId;
       if (!clientId) {
-        throw new Error(
+        throw new AuthWebError(
+          "configuration_error",
           "Microsoft Client ID not configured. Add 'microsoftClientId' to expo.extra in your app.config.js",
         );
       }
@@ -1182,28 +741,11 @@ class AuthWeb implements Auth {
 
       const authBaseUrl = this.getMicrosoftAuthBaseUrl(tenant, b2cDomain);
       const tokenUrl = `${authBaseUrl}oauth2/v2.0/token`;
-      const body = buildRefreshTokenBody({
-        tokenUrl,
-        clientId,
-        refreshToken,
-      });
-
-      let response: Response;
-      try {
-        response = await fetch(tokenUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: body.toString(),
-        });
-      } catch (error) {
-        throw new AuthWebError("network_error", String(error));
-      }
-
-      const json = await this.parseResponseObject(response);
+      const parsed = await postTokenRequest(
+        { tokenUrl, clientId, refreshToken },
+        "refresh",
+      );
       this.assertActiveGeneration(generation);
-      const parsed = parseTokenResponse(json, "refresh");
       if (!parsed.ok) {
         throw new AuthWebError(
           parsed.errorCode,
@@ -1222,7 +764,7 @@ class AuthWeb implements Auth {
       const expirationTime = parsed.tokens.expirationTime;
 
       if (newRefreshToken) {
-        this.saveRefreshToken(newRefreshToken);
+        this._storage.saveRefreshToken(newRefreshToken);
       }
 
       const currentUser = this._currentUser;
@@ -1258,19 +800,23 @@ class AuthWeb implements Auth {
     }
 
     if (this._currentUser.provider !== "google") {
-      throw new Error(
+      throw new AuthWebError(
+        "unsupported_provider",
         `Token refresh not supported for ${this._currentUser.provider}`,
       );
     }
 
     logger.log("Refreshing tokens...");
-    await this.runLoginOperation(() =>
-      this.loginGoogle(
-        this._grantedScopes.length > 0 ? this._grantedScopes : DEFAULT_SCOPES,
-        undefined,
-        undefined,
-        generation,
-      ),
+    await this.runLoginOperation(
+      () =>
+        this.loginGoogle(
+          this._grantedScopes.length > 0 ? this._grantedScopes : DEFAULT_SCOPES,
+          undefined,
+          undefined,
+          generation,
+        ),
+      undefined,
+      "refresh",
     );
     this.assertActiveGeneration(generation);
     const tokens: AuthTokens = {};
@@ -1302,23 +848,6 @@ class AuthWeb implements Auth {
       return new AuthWebError(providerCode, rawMessage);
     }
     return new AuthWebError(mapInternalErrorMessage(rawMessage), rawMessage);
-  }
-
-  private async parseResponseObject(response: Response): Promise<JsonObject> {
-    let parsed: unknown;
-    try {
-      parsed = await response.json();
-    } catch (error) {
-      throw new AuthWebError("parse_error", String(error));
-    }
-
-    if (!isJsonObject(parsed)) {
-      throw new AuthWebError(
-        "parse_error",
-        "Expected JSON object response from auth provider",
-      );
-    }
-    return parsed;
   }
 
   private parseJwtPayload(token: string): JsonObject {
@@ -1404,19 +933,21 @@ class AuthWeb implements Auth {
 
       const cancel = () => {
         cleanup(timeoutId, true);
-        reject(new Error("cancelled"));
+        reject(new AuthWebError("cancelled"));
       };
 
       const timeoutId = window.setTimeout(() => {
         cleanup(timeoutId, true);
-        reject(new Error(`${provider.toLowerCase()}_auth_timeout`));
+        reject(
+          new AuthWebError("timeout", `${provider.toLowerCase()}_auth_timeout`),
+        );
       }, POPUP_TIMEOUT_MS);
 
       const poll = () => {
         pollId = undefined;
         if (popup.closed) {
           cleanup(timeoutId, false);
-          reject(new Error("cancelled"));
+          reject(new AuthWebError("cancelled"));
           return;
         }
 
@@ -1468,7 +999,8 @@ class AuthWeb implements Auth {
     const clientId = this._config.googleWebClientId;
 
     if (!clientId) {
-      throw new Error(
+      throw new AuthWebError(
+        "configuration_error",
         "Google Web Client ID not configured. Add 'GOOGLE_WEB_CLIENT_ID' to your .env file.",
       );
     }
@@ -1513,7 +1045,12 @@ class AuthWeb implements Auth {
       );
 
       if (!popup) {
-        reject(new Error("Popup blocked. Please allow popups for this site."));
+        reject(
+          new AuthWebError(
+            "popup_blocked",
+            "Popup blocked. Please allow popups for this site.",
+          ),
+        );
         return;
       }
 
@@ -1561,7 +1098,7 @@ class AuthWeb implements Auth {
 
         if (!this._credentialOnlyLogin) {
           this._grantedScopes = scopes;
-          this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
+          this._storage.saveScopes(scopes);
         }
 
         const user: AuthUser = {
@@ -1614,11 +1151,13 @@ class AuthWeb implements Auth {
     tenant?: string,
     prompt?: string,
     generation?: number,
+    keepRefreshToken = false,
   ): Promise<void> {
     const clientId = this._config.microsoftClientId;
 
     if (!clientId) {
-      throw new Error(
+      throw new AuthWebError(
+        "configuration_error",
         "Microsoft Client ID not configured. Add 'microsoftClientId' to expo.extra in your app.config.js",
       );
     }
@@ -1630,9 +1169,7 @@ class AuthWeb implements Auth {
       b2cDomain,
     );
 
-    const effectiveScopes = scopes.length
-      ? scopes
-      : ["openid", "email", "profile", "offline_access", "User.Read"];
+    const effectiveScopes = scopes.length ? scopes : MS_DEFAULT_SCOPES;
 
     const codeVerifier = this.generateCodeVerifier();
     const codeChallenge = await this.generateCodeChallenge(codeVerifier);
@@ -1669,7 +1206,12 @@ class AuthWeb implements Auth {
       );
 
       if (!popup) {
-        reject(new Error("Popup blocked. Please allow popups for this site."));
+        reject(
+          new AuthWebError(
+            "popup_blocked",
+            "Popup blocked. Please allow popups for this site.",
+          ),
+        );
         return;
       }
 
@@ -1713,6 +1255,7 @@ class AuthWeb implements Auth {
             effectiveTenant,
             nonce,
             effectiveScopes,
+            keepRefreshToken,
             generation,
           );
         },
@@ -1752,6 +1295,7 @@ class AuthWeb implements Auth {
     tenant: string,
     expectedNonce: string,
     scopes: string[],
+    keepRefreshToken: boolean,
     generation?: number,
   ): Promise<void> {
     const authBaseUrl = this.getMicrosoftAuthBaseUrl(
@@ -1760,28 +1304,13 @@ class AuthWeb implements Auth {
     );
     const tokenUrl = `${authBaseUrl}oauth2/v2.0/token`;
 
-    const body = buildAuthorizationCodeBody({
-      tokenUrl,
-      clientId,
-      code,
-      redirectUri,
-      codeVerifier,
-    });
-
-    const response = await fetch(tokenUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: body.toString(),
-    });
-
-    const json = await this.parseResponseObject(response);
+    const parsed = await postTokenRequest(
+      { tokenUrl, clientId, code, redirectUri, codeVerifier },
+      "token",
+    );
     if (generation !== undefined) {
       this.assertActiveGeneration(generation);
     }
-
-    const parsed = parseTokenResponse(json, "token");
     if (!parsed.ok) {
       throw new AuthWebError(
         parsed.errorCode,
@@ -1807,11 +1336,13 @@ class AuthWeb implements Auth {
     const refreshToken = parsed.tokens.refreshToken;
 
     if (refreshToken) {
-      this.saveRefreshToken(refreshToken);
+      this._storage.saveRefreshToken(refreshToken);
+    } else if (!keepRefreshToken) {
+      this._storage.clearRefreshToken();
     }
 
     this._grantedScopes = scopes;
-    this.saveValue(SCOPES_KEY, JSON.stringify(scopes));
+    this._storage.saveScopes(scopes);
 
     const user: AuthUser = {
       provider: "microsoft",
@@ -1973,11 +1504,11 @@ class AuthWeb implements Auth {
       if (window.AppleID) {
         settle();
       } else {
-        settle(new Error("Failed to load Apple SDK"));
+        settle(new AuthWebError("network_error", "Failed to load Apple SDK"));
       }
     };
     state.onError = () => {
-      settle(new Error("Failed to load Apple SDK"));
+      settle(new AuthWebError("network_error", "Failed to load Apple SDK"));
     };
 
     try {
@@ -2024,7 +1555,8 @@ class AuthWeb implements Auth {
     const clientId = this._config.appleWebClientId;
 
     if (!clientId) {
-      throw new Error(
+      throw new AuthWebError(
+        "configuration_error",
         "Apple Web Client ID not configured. Add 'APPLE_WEB_CLIENT_ID' to your .env file.",
       );
     }
@@ -2034,7 +1566,7 @@ class AuthWeb implements Auth {
       this.assertActiveGeneration(generation);
     }
     if (!window.AppleID) {
-      throw new Error("Apple SDK not loaded");
+      throw new AuthWebError("network_error", "Apple SDK not loaded");
     }
 
     const nonce = options?.nonce ?? crypto.randomUUID();
@@ -2073,9 +1605,10 @@ class AuthWeb implements Auth {
       setIfDefined(
         user,
         "name",
-        response.user?.name
-          ? `${response.user.name.firstName} ${response.user.name.lastName}`.trim()
-          : undefined,
+        formatDisplayName(
+          response.user?.name?.firstName,
+          response.user?.name?.lastName,
+        ),
       );
       this.updateUser(user);
     } catch (error) {
@@ -2110,7 +1643,7 @@ class AuthWeb implements Auth {
         } else if (
           user.provider === "microsoft" &&
           this.isAccessTokenExpiring(user) &&
-          this.loadRefreshToken()
+          this._storage.loadRefreshToken()
         ) {
           // Network-only refresh: no popup is opened.
           await this.performRefreshToken(this._sessionGeneration);
@@ -2141,9 +1674,7 @@ class AuthWeb implements Auth {
         new AuthWebError("not_signed_in", "Auth session was cleared"),
       );
     }
-    this.removeFromCache(CACHE_KEY);
-    this.removeFromCache(SCOPES_KEY);
-    this.removeFromCache(MS_REFRESH_TOKEN_KEY);
+    this._storage.clearSession();
     if (!this._disposed) {
       this.notify();
       this.emitEvent("logout", provider);
@@ -2155,8 +1686,7 @@ class AuthWeb implements Auth {
     if (this._credentialOnlyLogin) return;
     this._currentUser = user;
     if (!this._credentialOnlyLogin) {
-      const userToPersist = this.sanitizeUserForPersistence(user);
-      this.saveValue(CACHE_KEY, JSON.stringify(userToPersist));
+      this._storage.saveUser(user);
     }
     this.notify();
   }

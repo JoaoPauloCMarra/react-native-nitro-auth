@@ -123,6 +123,11 @@ enum AuthCore {
     return code
   }
 
+  static func microsoftRefreshTokenAfterCommit(current: String?, received: String, keepExisting: Bool) -> String? {
+    if !received.isEmpty { return received }
+    return keepExisting ? current : nil
+  }
+
   static func shouldClearMicrosoftRefreshToken(statusCode: Int) -> Bool {
     (400...499).contains(statusCode) && statusCode != 408 && statusCode != 429
   }
@@ -227,20 +232,40 @@ enum AuthCore {
     return .unknown
   }
 
+  static let appleSignInSetupHint =
+    "Sign in with Apple failed with error 1000. This usually means the app lacks the com.apple.developer.applesignin entitlement: set the react-native-nitro-auth config plugin option ios.appleSignIn to true, rebuild with a paid Apple team, and make sure the device is signed in to an Apple ID."
+
+  static func appleErrorDetail(_ error: Error, appleErrorDomain: String, appleUnknownCode: Int) -> String {
+    let nsError = error as NSError
+    if nsError.domain == appleErrorDomain && nsError.code == appleUnknownCode {
+      return appleSignInSetupHint
+    }
+    return error.localizedDescription
+  }
+
+  static let googleSignInErrorDomain = "com.google.GIDSignIn"
+
+  static func isGoogleScopesAlreadyGranted(_ error: Error?) -> Bool {
+    guard let nsError = error as NSError? else { return false }
+    return nsError.domain == googleSignInErrorDomain && nsError.code == -8
+  }
+
   static func mapProviderError(
     _ error: Error,
     appleErrorDomain: String,
     appleCanceledCode: Int,
-    appleInvalidResponseCode: Int
+    appleInvalidResponseCode: Int,
+    appleUnknownCode: Int? = nil
   ) -> PlatformAuthErrorCode {
     let nsError = error as NSError
     if nsError.domain == NSURLErrorDomain {
       return .networkError
     }
-    if nsError.domain == "com.google.GIDSignIn" {
+    if nsError.domain == googleSignInErrorDomain {
       switch nsError.code {
       case -5: return .cancelled
       case -4: return .notSignedIn
+      case -11: return .interactionRequired
       default: break
       }
     }
@@ -248,6 +273,7 @@ enum AuthCore {
       switch nsError.code {
       case appleCanceledCode: return .cancelled
       case appleInvalidResponseCode: return .configurationError
+      case _ where appleUnknownCode != nil && nsError.code == appleUnknownCode: return .configurationError
       default: return .unknown
       }
     }

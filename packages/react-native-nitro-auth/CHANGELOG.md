@@ -6,6 +6,82 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [0.14.0] - 2026-10-13
+
+### Breaking changes
+
+- The Expo config plugin now rejects unknown or mistyped options at `expo prebuild`
+  instead of ignoring them. Migration: remove or correct the option named in the
+  error (`ios` and `android` accept only the keys in the README table, and provider
+  values must be strings; `ios.appleSignIn` and `googleButtonFont` must be booleans).
+  `null` and `undefined` are accepted for any option.
+- Several failures now carry a specific `AuthError.code` where they used to report
+  `unknown` or `network_error`. Migration: switch on the new codes, and stop treating
+  the old fallback as the only signal.
+  - Web `getCredential()` and `login()` report `configuration_error` for a missing
+    client id, `popup_blocked`, `cancelled` and `timeout` instead of `unknown`.
+  - Web Apple SDK script load failure reports `network_error` instead of `unknown`.
+  - Web `refreshToken()` for an Apple session reports `unsupported_provider`; a
+    missing Microsoft client id reports `configuration_error`; every concurrent
+    caller gets the same code.
+  - Android legacy Google silent refresh reports the Google status code
+    (`not_signed_in` for a revoked grant, `network_error`, `configuration_error`,
+    `timeout`, `cancelled`) instead of always `network_error`. Apps that retry on
+    `network_error` must now send `not_signed_in` users through `login("google")`.
+  - iOS Sign in with Apple error `1000` (`ASAuthorizationError.unknown`, returned
+    when the app lacks the `com.apple.developer.applesignin` entitlement) reports
+    `configuration_error` with a message naming the entitlement and the
+    `ios.appleSignIn` plugin option instead of `unknown`.
+  - Android Credential Manager Google sessions no longer reject `refreshToken()`
+    with `not_signed_in`; refresh returns a fresh ID token or rejects `refresh_failed`.
+- Web: a default `login("microsoft")` now requests `offline_access`, so it receives
+  a refresh token (and consent screens may mention offline access). A Microsoft login
+  that returns no refresh token now drops the previous one; a scope request keeps it.
+
+### Added
+
+- `AuthService.createNonce()` returns the raw and SHA-256 hex nonce pair on iOS,
+  Android and web, with the `createNonce` operation on typed errors and lifecycle events.
+
+### Changed
+
+- Android: Credential Manager Google sessions (the default `login("google")`) refresh
+  with a non-interactive request (authorized accounts, auto-select, immediately
+  available credentials only) and need a foreground Activity. Anything that would need
+  UI rejects with `refresh_failed` and keeps the session. `silentRestore()` in the
+  same process returns the in-memory session.
+- Android Google status codes map through one table for login, `requestScopes()` and
+  the legacy silent refresh: 12501 and 16 to `cancelled`, 15 to `timeout`, 4 to
+  `not_signed_in`, 7 to `network_error`, 8 and 10 to `configuration_error`.
+- iOS: signing in with Google or Microsoft after the other in the same process clears
+  the other provider's session, so `refreshToken()`, `requestScopes()` and
+  `silentRestore()` act on the provider that is signed in (Android already behaved
+  this way). Apple sign-in does not clear Google or Microsoft state.
+- iOS: a Microsoft login that returns no refresh token drops the previous one; a scope
+  request keeps it. Google is signed out on the main queue after the Microsoft commit.
+
+### Fixed
+
+- iOS: `requestScopes()` for a Google user whose scopes are already granted resolves
+  with the current user (as on Android) instead of rejecting `unknown`.
+- iOS: an expired Google refresh token (`GIDSignInErrorCode.refreshTokenExpired`)
+  reports `interaction_required`.
+- Dependencies: `GoogleSignIn` requires `~> 9.2` (CocoaPods trunk has no `10.x`
+  yet), Android `play-services-auth` is `21.6.0` (`22.0.0` removes the legacy Google
+  Sign-In API this package uses for scope requests). `googleid` stays `1.2.0`:
+  `1.2.1` carries Kotlin 2.4 metadata, which the Kotlin 2.1 compiler in React Native
+  0.86 cannot read.
+- Web: Apple login no longer produces a name such as "undefined Doe" when Apple
+  returns only one name part.
+- Web: logout clears the in-memory Microsoft refresh token in the default
+  (non-persisted) mode.
+- Web: the Microsoft authorization-code exchange maps network failures to `network_error`.
+- iOS: `silentRestore()` for a Google user returns `firstName` and `lastName` like login.
+- Expo config plugin: removing or changing an iOS provider option on a later
+  `expo prebuild` now removes only the `Info.plist` keys and URL schemes the plugin
+  wrote (tracked in a `NitroAuthManaged` entry). Keys and schemes owned by the app,
+  `expo.scheme`, Firebase, `expo-auth-session` or another plugin are never removed.
+
 ## [0.13.2] - 2026-10-03
 
 ### Breaking changes

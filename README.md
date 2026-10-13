@@ -375,6 +375,9 @@ await fetch(yourAuthEndpoint, {
 });
 ```
 
+`AuthService.createNonce()` returns a `{ raw, hashed }` pair (base64url raw nonce and
+its SHA-256 hex digest) on every platform when you need to build the nonce yourself.
+
 `getCredential()` supports Google and Apple. It creates a random nonce, sends
 its SHA-256 hex value to the provider, returns the raw nonce for backend
 verification, and clears provider state before resolving without publishing a
@@ -488,6 +491,19 @@ Supported login options:
 - `refreshToken()` supports Google and Microsoft. Apple token exchange and
   refresh belong on your backend. Native Apple sessions reject `refreshToken()`
   and `requestScopes()` with `unsupported_provider` while preserving the session.
+- On Android, a Credential Manager Google session (the default `login("google")`)
+  refreshes with a non-interactive Credential Manager request: authorized accounts
+  only, auto-select, and `setPreferImmediatelyAvailableCredentials(true)`, so it
+  never opens account-selection UI. It needs a foreground Activity and a credential
+  for the same account. If either is missing, or Credential Manager would need
+  UI (no credential, interrupted, cancelled), `refreshToken()` and the
+  auto-refresh in `getAccessToken()` reject with `refresh_failed` and the session
+  stays signed in; call `login("google")` again to recover. In the same process
+  `silentRestore()` returns that session instead of reporting no session.
+- On Android, Google status codes map the same way for login, `requestScopes()`
+  and the legacy silent refresh: 12501 and 16 to `cancelled`, 15 to `timeout`,
+  4 to `not_signed_in`, 7 to `network_error`, 8 and 10 to `configuration_error`,
+  anything else to `unknown`.
 - `revokeAccess()` clears local state only after provider revocation succeeds.
   Client-side revocation supports Google web and iOS sessions, plus Android
   sessions created through legacy Google Sign-In. Unsupported providers reject

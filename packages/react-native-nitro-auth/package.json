@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-auth",
-  "version": "0.13.2",
+  "version": "0.14.0",
   "description": "High-performance authentication library for React Native with Google Sign-In, Apple Sign-In, and Microsoft Sign-In support, powered by Nitro Modules (JSI)",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -49,9 +49,7 @@
     "test:swift": "node scripts/test-swift.js",
     "prepublishOnly": "bun run clean && bun run codegen && bun run build && bun run typecheck && bun run lint && bun run test && bun run test:cpp",
     "prepack": "bun ../../scripts/sync-package-docs.ts prepare",
-    "postpack": "bun ../../scripts/sync-package-docs.ts cleanup",
-    "pack:dry-run": "node scripts/package-dry-run.js pack",
-    "publish:dry-run": "node scripts/package-dry-run.js publish"
+    "postpack": "bun ../../scripts/sync-package-docs.ts cleanup"
   },
   "keywords": [
     "react-native",
@@ -93,7 +91,7 @@
     "@react-native/babel-preset": "^0.86.3",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^22.20.4",
-    "expo": "~57.0.26",
+    "expo": "~57.0.28",
     "expo-build-properties": "~57.0.22",
     "jest-environment-jsdom": "^29.7.0",
     "react": "19.2.3",

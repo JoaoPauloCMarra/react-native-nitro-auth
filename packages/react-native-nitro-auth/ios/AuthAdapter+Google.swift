@@ -26,6 +26,23 @@ extension AuthAdapter {
     return true
   }
 
+  static func googleUserData(_ user: GIDGoogleUser, idToken: String, serverAuthCode: String) -> [String: Any] {
+    [
+      "provider": "google",
+      "email": user.profile?.email ?? "",
+      "name": user.profile?.name ?? "",
+      "firstName": user.profile?.givenName ?? "",
+      "lastName": user.profile?.familyName ?? "",
+      "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
+      "idToken": idToken,
+      "accessToken": user.accessToken.tokenString,
+      "serverAuthCode": serverAuthCode,
+      "userId": user.userID ?? "",
+      "hostedDomain": user.configuration.hostedDomain ?? "",
+      "expirationTime": AuthCore.googleExpirationTime(user.accessToken.expirationDate),
+    ]
+  }
+
   static func handleGoogleResult(_ result: GIDSignInResult?, error: Error?, operation: AuthAdapter.AuthOperationToken, expectedNonce: String? = nil, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
     if let error = error {
       completion(nil, NSNumber(value: mapError(error).rawValue), error.localizedDescription)
@@ -51,6 +68,7 @@ extension AuthAdapter {
 
     let serverAuthCode = result?.serverAuthCode ?? ""
     guard commitCurrentOperation(operation, {
+      activateSession(.google)
       inMemoryGoogleServerAuthCode = serverAuthCode.isEmpty ? nil : serverAuthCode
     }) else {
       completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
@@ -61,20 +79,24 @@ extension AuthAdapter {
       return
     }
 
-    let data: [String: Any] = [
-      "provider": "google",
-      "email": user.profile?.email ?? "",
-      "name": user.profile?.name ?? "",
-      "firstName": user.profile?.givenName ?? "",
-      "lastName": user.profile?.familyName ?? "",
-      "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
-      "idToken": idToken ?? "",
-      "accessToken": user.accessToken.tokenString,
-      "serverAuthCode": serverAuthCode,
-      "userId": user.userID ?? "",
-      "hostedDomain": user.configuration.hostedDomain ?? "",
-      "expirationTime": AuthCore.googleExpirationTime(user.accessToken.expirationDate),
-    ]
+    let data = googleUserData(user, idToken: idToken ?? "", serverAuthCode: serverAuthCode)
+    completion(data as NSDictionary, nil, nil)
+  }
+
+  static func completeGoogleScopesAlreadyGranted(
+    _ user: GIDGoogleUser,
+    operation: AuthAdapter.AuthOperationToken,
+    completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void
+  ) {
+    var serverAuthCode = ""
+    guard commitCurrentOperation(operation, {
+      activateSession(.google)
+      serverAuthCode = inMemoryGoogleServerAuthCode ?? ""
+    }) else {
+      completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+      return
+    }
+    let data = googleUserData(user, idToken: user.idToken?.tokenString ?? "", serverAuthCode: serverAuthCode)
     completion(data as NSDictionary, nil, nil)
   }
 
@@ -117,7 +139,8 @@ extension AuthAdapter {
       error,
       appleErrorDomain: ASAuthorizationError.errorDomain,
       appleCanceledCode: ASAuthorizationError.canceled.rawValue,
-      appleInvalidResponseCode: ASAuthorizationError.invalidResponse.rawValue
+      appleInvalidResponseCode: ASAuthorizationError.invalidResponse.rawValue,
+      appleUnknownCode: ASAuthorizationError.unknown.rawValue
     )
   }
 }

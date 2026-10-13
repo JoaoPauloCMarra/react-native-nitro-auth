@@ -14,7 +14,7 @@ final class ErrorMappingTests: XCTestCase {
   private let appleDomain = "com.apple.AuthenticationServices.AuthorizationError"
 
   private func mapProvider(_ error: NSError) -> PlatformAuthErrorCode {
-    AuthCore.mapProviderError(error, appleErrorDomain: appleDomain, appleCanceledCode: 1001, appleInvalidResponseCode: 1002)
+    AuthCore.mapProviderError(error, appleErrorDomain: appleDomain, appleCanceledCode: 1001, appleInvalidResponseCode: 1002, appleUnknownCode: 1000)
   }
 
   private func oauthErrorSource() throws -> [String: String] {
@@ -108,13 +108,34 @@ final class ErrorMappingTests: XCTestCase {
     XCTAssertEqual(mapProvider(NSError(domain: "com.google.GIDSignIn", code: -4)), .notSignedIn)
     XCTAssertEqual(mapProvider(NSError(domain: appleDomain, code: 1001)), .cancelled)
     XCTAssertEqual(mapProvider(NSError(domain: appleDomain, code: 1002)), .configurationError)
-    for code in [1000, 1003, 1004, 1005, 0, -1] {
+    for code in [1003, 1004, 1005, 0, -1] {
       XCTAssertEqual(mapProvider(NSError(domain: appleDomain, code: code)), .unknown, "\(code)")
     }
+    XCTAssertEqual(mapProvider(NSError(domain: appleDomain, code: 1000)), .configurationError)
     XCTAssertEqual(
       mapProvider(NSError(domain: appleDomain, code: 1000, userInfo: [NSLocalizedDescriptionKey: "The user cancelled"])),
-      .unknown
+      .configurationError
     )
+    XCTAssertEqual(mapProvider(NSError(domain: "Other", code: 1000)), .unknown)
+    let hint = AuthCore.appleErrorDetail(NSError(domain: appleDomain, code: 1000), appleErrorDomain: appleDomain, appleUnknownCode: 1000)
+    XCTAssertTrue(hint.contains("com.apple.developer.applesignin"))
+    XCTAssertTrue(hint.contains("ios.appleSignIn"))
+    XCTAssertEqual(
+      AuthCore.appleErrorDetail(NSError(domain: appleDomain, code: 1004, userInfo: [NSLocalizedDescriptionKey: "failed"]), appleErrorDomain: appleDomain, appleUnknownCode: 1000),
+      "failed"
+    )
+  }
+
+  func testGoogleScopesAlreadyGrantedIsRecognisedOnlyForTheGoogleDomain() {
+    XCTAssertTrue(AuthCore.isGoogleScopesAlreadyGranted(NSError(domain: "com.google.GIDSignIn", code: -8)))
+    XCTAssertFalse(AuthCore.isGoogleScopesAlreadyGranted(NSError(domain: "com.google.GIDSignIn", code: -5)))
+    XCTAssertFalse(AuthCore.isGoogleScopesAlreadyGranted(NSError(domain: "Other", code: -8)))
+    XCTAssertFalse(AuthCore.isGoogleScopesAlreadyGranted(nil))
+  }
+
+  func testExpiredGoogleRefreshTokenRequiresInteraction() {
+    XCTAssertEqual(mapProvider(NSError(domain: "com.google.GIDSignIn", code: -11)), .interactionRequired)
+    XCTAssertEqual(mapProvider(NSError(domain: "Other", code: -11)), .unknown)
   }
 
   func testProviderErrorMessageHeuristicsAreTheLastResort() {

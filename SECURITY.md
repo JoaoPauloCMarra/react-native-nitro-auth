@@ -8,7 +8,7 @@ while the release train is actively publishing them.
 
 | Version   | Supported          |
 | --------- | ------------------ |
-| 0.13.x    | :white_check_mark: |
+| 0.14.x    | :white_check_mark: |
 | older 0.x | :x:                |
 
 ## Credential And PII Rules

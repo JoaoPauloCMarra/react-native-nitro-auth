@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import {
   AuthError,
   AuthService,
@@ -7,7 +7,8 @@ import {
   type AuthLifecycleEvent,
   type AuthPlatform,
 } from "react-native-nitro-auth";
-import { authErrorCode } from "../components/e2e-auth-checks";
+import { authErrorCode, currentPlatform } from "../components/e2e-auth-checks";
+import { labStyles } from "../components/e2e-lab-ui";
 
 const NATIVE_TIMEOUT_MS = 10000;
 const EVENT_TIMEOUT_MS = 1000;
@@ -26,17 +27,6 @@ const CHECK_NAMES = [
 
 type CheckName = (typeof CHECK_NAMES)[number];
 type CheckTokens = Record<CheckName, string>;
-
-function currentPlatform(): AuthPlatform {
-  if (
-    Platform.OS === "ios" ||
-    Platform.OS === "android" ||
-    Platform.OS === "web"
-  ) {
-    return Platform.OS;
-  }
-  return "web";
-}
 
 function initialTokens(): CheckTokens {
   const tokens = {} as CheckTokens;
@@ -353,15 +343,15 @@ export default function SignedOutExtendedScreen() {
         accessibilityLabel={values.join(" ")}
         style={styles.resultsProbe}
       />
-      <Text style={styles.title}>Signed-out extended lab</Text>
-      <Text style={styles.subtitle}>
+      <Text style={labStyles.title}>Signed-out extended lab</Text>
+      <Text style={labStyles.subtitle}>
         Auto-runs signed-out guard, error, restore, logout, scope, setup-gate,
         and dispose checks on a disposable QA target. It calls native logout and
         dispose. No provider credentials or token values are rendered.
       </Text>
-      <Text style={styles.result}>auth://e2e-signed-out-extended</Text>
+      <Text style={labStyles.result}>auth://e2e-signed-out-extended</Text>
       {values.map((value, index) => (
-        <Text key={CHECK_NAMES[index]} style={styles.result}>
+        <Text key={CHECK_NAMES[index]} style={labStyles.result}>
           {value}
         </Text>
       ))}
@@ -379,18 +369,4 @@ const styles = StyleSheet.create({
     paddingTop: 48,
   },
   resultsProbe: { height: 1 },
-  title: {
-    color: "#0f172a",
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  subtitle: {
-    color: "#475569",
-    fontSize: 13,
-  },
-  result: {
-    color: "#0f172a",
-    fontFamily: "Menlo",
-    fontSize: 11,
-  },
 });

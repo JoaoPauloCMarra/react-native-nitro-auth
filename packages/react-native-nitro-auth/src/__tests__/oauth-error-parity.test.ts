@@ -11,6 +11,7 @@ const kotlinPath = join(
   packageRoot,
   "android/src/main/java/com/auth/OAuthErrorCodes.kt",
 );
+const docsPath = join(packageRoot, "..", "..", "docs", "error-contract.md");
 const swiftPath = join(packageRoot, "ios/GeneratedOAuthErrorCodes.swift");
 
 function readUtf8(path: string): string {
@@ -47,6 +48,20 @@ function parseSwiftTable(content: string): Mapping {
   return result;
 }
 
+function parseDocsTable(content: string): Mapping {
+  const result: Mapping = {};
+  const pattern =
+    /^\|\s*`([a-z_]+)`\s*\|\s*`([a-z_]+)`(?: \/ `refresh_failed`)?\s*\|$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(content)) !== null) {
+    const providerError = match[1];
+    const code = match[2];
+    if (providerError === undefined || code === undefined) continue;
+    result[providerError] = code as AuthErrorCode;
+  }
+  return result;
+}
+
 describe("oauth error mapping parity", () => {
   const source = JSON.parse(readUtf8(sourcePath)) as Mapping;
   const sourceEntries = Object.entries(source).sort(([a], [b]) =>
@@ -79,5 +94,10 @@ describe("oauth error mapping parity", () => {
     for (const [providerError, code] of sourceEntries) {
       expect(swiftTable[providerError]).toBe(code);
     }
+  });
+
+  it("documents the canonical table in docs/error-contract.md", () => {
+    const docsTable = parseDocsTable(readUtf8(docsPath));
+    expect(docsTable).toEqual(Object.fromEntries(sourceEntries));
   });
 });

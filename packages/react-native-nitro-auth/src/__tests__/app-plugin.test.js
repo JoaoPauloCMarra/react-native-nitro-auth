@@ -811,4 +811,196 @@ describe("Microsoft Expo configuration", () => {
       expect.stringContaining("ios.bundleIdentifier"),
     );
   });
+
+  it("removes stale iOS provider keys and URL schemes when their options change or disappear", async () => {
+    const config = {
+      name: "Example",
+      slug: "example",
+      ios: { bundleIdentifier: "com.example" },
+    };
+    const modOptions = {
+      projectRoot: "/tmp/example",
+      platformProjectRoot: "/tmp/example/ios",
+    };
+    const ownScheme = { CFBundleURLSchemes: ["myapp"] };
+    let plist = await applyExpoMod(
+      withNitroAuth(cloneConfig(config), {
+        ios: {
+          googleClientId: "111-old.apps.googleusercontent.com",
+          googleServerClientId: "server-old",
+          microsoftClientId: "MS",
+          microsoftTenant: "tenant",
+          microsoftB2cDomain: "example.b2clogin.com",
+        },
+      }),
+      "ios",
+      "infoPlist",
+      { CFBundleURLTypes: [ownScheme] },
+      modOptions,
+    );
+    plist = await applyExpoMod(
+      withNitroAuth(cloneConfig(config), {
+        ios: { googleClientId: "222-new.apps.googleusercontent.com" },
+      }),
+      "ios",
+      "infoPlist",
+      plist,
+      modOptions,
+    );
+    expect(plist.GIDClientID).toBe("222-new.apps.googleusercontent.com");
+    expect(plist.CFBundleURLTypes).toEqual([
+      ownScheme,
+      { CFBundleURLSchemes: ["com.googleusercontent.apps.222-new"] },
+    ]);
+    for (const key of [
+      "GIDServerClientID",
+      "MSALClientID",
+      "MSALTenant",
+      "MSALB2cDomain",
+    ]) {
+      expect(plist).not.toHaveProperty(key);
+    }
+    plist = await applyExpoMod(
+      withNitroAuth(cloneConfig(config), {}),
+      "ios",
+      "infoPlist",
+      plist,
+      modOptions,
+    );
+    expect(plist).not.toHaveProperty("GIDClientID");
+    expect(plist.CFBundleURLTypes).toEqual([ownScheme]);
+  });
+
+  it.each([
+    [{ googleClientId: "id" }, /Unknown .*"googleClientId"/],
+    [{ ios: { googleClientID: "id" } }, /"ios\.googleClientID"/],
+    [{ android: { microsoftClientID: "id" } }, /"android\.microsoftClientID"/],
+    [
+      { ios: { microsoftClientId: 42 } },
+      /"ios\.microsoftClientId" must be a string/,
+    ],
+    [{ ios: { appleSignIn: "yes" } }, /"ios\.appleSignIn" must be a boolean/],
+    [{ ios: "id" }, /"ios" must be an object/],
+  ])("rejects misplaced or mistyped options %j", (props, message) => {
+    expect(() =>
+      withNitroAuth({ name: "Example", slug: "example" }, props),
+    ).toThrow(message);
+  });
+
+  it("accepts every documented option and undefined environment values", () => {
+    expect(() =>
+      withNitroAuth(
+        { name: "Example", slug: "example" },
+        {
+          googleButtonFont: true,
+          ios: {
+            googleClientId: undefined,
+            googleServerClientId: "server",
+            googleUrlScheme: "scheme",
+            appleSignIn: true,
+            microsoftClientId: "ms",
+            microsoftTenant: "common",
+            microsoftB2cDomain: "tenant.b2clogin.com",
+          },
+          android: {
+            googleClientId: "web",
+            microsoftClientId: "ms",
+            microsoftTenant: "common",
+            microsoftB2cDomain: "tenant.b2clogin.com",
+          },
+        },
+      ),
+    ).not.toThrow();
+  });
+
+  describe("iOS Info.plist ownership", () => {
+    const config = {
+      name: "Example",
+      slug: "example",
+      ios: { bundleIdentifier: "com.example" },
+    };
+    const modOptions = {
+      projectRoot: "/tmp/example",
+      platformProjectRoot: "/tmp/example/ios",
+    };
+    const run = (props, plist) =>
+      applyExpoMod(
+        withNitroAuth(cloneConfig(config), props),
+        "ios",
+        "infoPlist",
+        plist,
+        modOptions,
+      );
+
+    it("never removes keys or schemes the plugin did not write", async () => {
+      const owned = {
+        GIDClientID: "user-owned.apps.googleusercontent.com",
+        MSALClientID: "user-msal",
+        CFBundleURLTypes: [
+          {
+            CFBundleURLSchemes: [
+              "myapp",
+              "com.googleusercontent.apps.firebase-reversed",
+            ],
+          },
+          { CFBundleURLSchemes: ["msauth.com.other.library"] },
+        ],
+      };
+      const plist = await run({}, cloneConfig(owned));
+      expect(plist).toEqual(owned);
+    });
+
+    it("keeps an identical app-owned value when the option matches it", async () => {
+      const owned = { GIDClientID: "same.apps.googleusercontent.com" };
+      let plist = await run(
+        { ios: { googleClientId: "same.apps.googleusercontent.com" } },
+        cloneConfig(owned),
+      );
+      plist = await run({}, plist);
+      expect(plist).toEqual(owned);
+    });
+
+    it("keeps an app value that replaced a managed one between runs", async () => {
+      let plist = await run(
+        { ios: { googleClientId: "plugin.apps.googleusercontent.com" } },
+        {},
+      );
+      plist.GIDClientID = "app.apps.googleusercontent.com";
+      plist = await run({}, plist);
+      expect(plist.GIDClientID).toBe("app.apps.googleusercontent.com");
+    });
+
+    it("removes only what it wrote when options change", async () => {
+      const ownScheme = { CFBundleURLSchemes: ["myapp"] };
+      let plist = await run(
+        {
+          ios: {
+            googleClientId: "111-old.apps.googleusercontent.com",
+            microsoftClientId: "MS",
+          },
+        },
+        { CFBundleURLTypes: [ownScheme] },
+      );
+      plist = await run({}, plist);
+      expect(plist).toEqual({ CFBundleURLTypes: [ownScheme] });
+    });
+  });
+
+  it("treats null options like undefined", async () => {
+    expect(() =>
+      withNitroAuth({ name: "Example", slug: "example" }, null),
+    ).not.toThrow();
+    expect(() =>
+      withNitroAuth(
+        { name: "Example", slug: "example" },
+        { ios: null, android: null, googleButtonFont: undefined },
+      ),
+    ).not.toThrow();
+    expect(() =>
+      withNitroAuth(
+        { name: "Example", slug: "example" },
+        { ios: { googleClientId: null } },
+      ),
+    ).not.toThrow();
+  });
 });

@@ -93,6 +93,6 @@ std::shared_ptr<Promise<void>> PlatformAuth::revokeAccess(AuthProvider provider)
 }
 bool PlatformAuth::hasPlayServices() { return adapter()->hasPlayServices(); }
 void PlatformAuth::invalidatePendingOperations() { adapter()->invalidatePendingOperations(); }
-void PlatformAuth::cancelPendingOperations(AuthErrorCode) { adapter()->cancel(); }
+void PlatformAuth::cancelPendingOperations() { adapter()->cancel(); }
 void PlatformAuth::logout() { adapter()->logout(); }
 }

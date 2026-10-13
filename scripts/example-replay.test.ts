@@ -312,8 +312,8 @@ test("coverage distinguishes visual-only assertions from provider acceptance", (
     ),
   );
   assert.ok(
-    manifest.pending.some(
-      (row: { id: string }) => row.id === "credentials.nonce-web-native-bridge",
+    manifest.pending.every(
+      (row: { id: string }) => row.id !== "credentials.nonce-web-native-bridge",
     ),
   );
   assert.ok(

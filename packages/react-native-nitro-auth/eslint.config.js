@@ -24,6 +24,22 @@ module.exports = defineConfig([
     },
   },
   {
+    files: ["src/__tests__/**/*.js"],
+    languageOptions: {
+      globals: {
+        describe: "readonly",
+        it: "readonly",
+        test: "readonly",
+        expect: "readonly",
+        jest: "readonly",
+        beforeEach: "readonly",
+        afterEach: "readonly",
+        beforeAll: "readonly",
+        afterAll: "readonly",
+      },
+    },
+  },
+  {
     ignores: ["lib/**", "nitrogen/generated/**", "coverage/**"],
   },
 ]);

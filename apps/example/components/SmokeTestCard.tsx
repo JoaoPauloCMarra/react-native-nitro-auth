@@ -17,6 +17,7 @@ import {
   getProviderTokenCapabilities,
   type AuthLifecycleEvent,
 } from "react-native-nitro-auth";
+import { currentPlatform } from "./e2e-auth-checks";
 
 type TestStatus = "pass" | "fail" | "skip" | "pending";
 
@@ -168,12 +169,7 @@ function buildTests(hookReturn: ReturnType<typeof useAuth>): TestCase[] {
       );
     }),
     test("Capabilities describe every provider on this platform", () => {
-      const platform =
-        Platform.OS === "ios"
-          ? "ios"
-          : Platform.OS === "android"
-            ? "android"
-            : "web";
+      const platform = currentPlatform();
       const google = getProviderTokenCapabilities("google", platform);
       const apple = getProviderTokenCapabilities("apple", platform);
       const microsoft = getProviderTokenCapabilities("microsoft", platform);

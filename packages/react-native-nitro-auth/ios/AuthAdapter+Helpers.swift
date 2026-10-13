@@ -101,7 +101,12 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
   }
 
   func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
-    completion(nil, NSNumber(value: AuthAdapter.mapError(error).rawValue), error.localizedDescription)
+    let detail = AuthCore.appleErrorDetail(
+      error,
+      appleErrorDomain: ASAuthorizationError.errorDomain,
+      appleUnknownCode: ASAuthorizationError.unknown.rawValue
+    )
+    completion(nil, NSNumber(value: AuthAdapter.mapError(error).rawValue), detail)
   }
 }
 

@@ -345,6 +345,10 @@ export function createAuthService(
       });
     },
 
+    createNonce() {
+      return wrapAuthOperation("createNonce", () => getAuth().createNonce());
+    },
+
     silentRestore() {
       return wrapAuthOperation("silentRestore", () =>
         runSessionOperation("silentRestore", () => getAuth().silentRestore()),

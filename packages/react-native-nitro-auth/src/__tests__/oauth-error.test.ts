@@ -1,3 +1,5 @@
+import { OAUTH_ERROR_CODES } from "../generated/oauth-error-codes";
+import { isAuthErrorCode } from "../utils/auth-error";
 import {
   mapOAuthErrorCode,
   type OAuthErrorContext,
@@ -12,27 +14,9 @@ import type { AuthErrorCode } from "../Auth.nitro";
  * `docs/error-contract.md`; a fixture here is a contract for every platform.
  */
 const AUTHORIZE_FIXTURES: readonly [string, AuthErrorCode][] = [
-  ["access_denied", "cancelled"],
-  ["user_cancelled", "cancelled"],
-  ["popup_closed_by_user", "cancelled"],
-  ["interaction_required", "interaction_required"],
-  ["login_required", "interaction_required"],
-  ["consent_required", "interaction_required"],
-  ["invalid_client", "configuration_error"],
-  ["invalid_scope", "configuration_error"],
-  ["unauthorized_client", "configuration_error"],
-  ["invalid_grant", "token_error"],
-  ["invalid_request", "token_error"],
-  ["invalid_token", "token_error"],
-  ["server_error", "network_error"],
-  ["temporarily_unavailable", "network_error"],
+  ...Object.entries(OAUTH_ERROR_CODES),
   ["unsupported_response_type", "unknown"],
   ["", "unknown"],
-];
-
-const TOKEN_CONTEXT_DIFFERENCES: readonly [string, AuthErrorCode][] = [
-  ["invalid_grant", "token_error"],
-  ["invalid_request", "token_error"],
 ];
 
 const REFRESH_CONTEXT_DIFFERENCES: readonly [string, AuthErrorCode][] = [
@@ -49,7 +33,7 @@ describe("mapOAuthErrorCode", () => {
     },
   );
 
-  it.each(TOKEN_CONTEXT_DIFFERENCES)(
+  it.each(AUTHORIZE_FIXTURES)(
     "maps %s to %s in the token context",
     (providerError, expected) => {
       expect(mapOAuthErrorCode(providerError, "token")).toBe(expected);
@@ -62,6 +46,10 @@ describe("mapOAuthErrorCode", () => {
       expect(mapOAuthErrorCode(providerError, "refresh")).toBe(expected);
     },
   );
+
+  it("defaults to the authorize context", () => {
+    expect(mapOAuthErrorCode("invalid_grant")).toBe("token_error");
+  });
 
   it("is case- and whitespace-insensitive", () => {
     expect(mapOAuthErrorCode("  Access_Denied ", "authorize")).toBe(
@@ -87,48 +75,19 @@ describe("mapOAuthErrorCode", () => {
   });
 
   it("treats every fixture value as a valid public code", () => {
-    const codes = new Set<AuthErrorCode>(
-      AUTHORIZE_FIXTURES.map(([, code]) => code),
-    );
-    for (const code of codes) {
-      expect([
-        "cancelled",
-        "interaction_required",
-        "timeout",
-        "popup_blocked",
-        "network_error",
-        "configuration_error",
-        "not_signed_in",
-        "operation_in_progress",
-        "unsupported_provider",
-        "invalid_state",
-        "invalid_nonce",
-        "token_error",
-        "no_id_token",
-        "parse_error",
-        "refresh_failed",
-        "unknown",
-      ]).toContain(code);
+    for (const [, code] of AUTHORIZE_FIXTURES) {
+      expect(isAuthErrorCode(code)).toBe(true);
     }
   });
 
   it("documents that the refresh bucket is the only context difference", () => {
-    const allErrors = new Set(AUTHORIZE_FIXTURES.map(([error]) => error));
-    const differences: { error: string; expected: AuthErrorCode }[] = [];
-    for (const error of allErrors) {
+    for (const [error] of AUTHORIZE_FIXTURES) {
       const authorize = mapOAuthErrorCode(error, "authorize");
-      const token = mapOAuthErrorCode(error, "token");
-      const refresh = mapOAuthErrorCode(error, "refresh");
-      expect(token).toBe(authorize);
-      differences.push({
-        error,
-        expected: authorize === "token_error" ? "refresh_failed" : authorize,
-      });
-      expect(refresh).toBe(
+      expect(mapOAuthErrorCode(error, "token")).toBe(authorize);
+      expect(mapOAuthErrorCode(error, "refresh")).toBe(
         authorize === "token_error" ? "refresh_failed" : authorize,
       );
     }
-    expect(differences).toHaveLength(allErrors.size);
   });
 });
 

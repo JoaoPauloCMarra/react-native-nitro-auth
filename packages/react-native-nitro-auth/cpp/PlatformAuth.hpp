@@ -24,7 +24,7 @@ public:
   static std::shared_ptr<Promise<std::optional<AuthUser>>> silentRestore();
   static bool hasPlayServices();
   static void invalidatePendingOperations();
-  static void cancelPendingOperations(AuthErrorCode reason);
+  static void cancelPendingOperations();
   static void logout();
   static std::shared_ptr<Promise<void>> revokeAccess(AuthProvider provider);
 };

@@ -57,8 +57,7 @@ public class AuthAdapter: NSObject {
   static var activeMicrosoftWebAuthSessionEpoch: UInt64?
   private static var activeAppleSignInController: ASAuthorizationController?
   static let tokenStoreLock = NSLock()
-  private static let interactiveAuthLock = NSLock()
-  private static var interactiveAuthInProgress = false
+  private static let appleSignInControllerLock = NSLock()
   static var authEpoch: UInt64 = 0
   static var activeOperation: AuthOperationToken?
 
@@ -84,7 +83,7 @@ public class AuthAdapter: NSObject {
     invalidatedOperation?.providerInvocation.invalidate()
     activeOperation = operation
     tokenStoreLock.unlock()
-    finishInteractiveAuth()
+    releaseAppleSignInController()
     DispatchQueue.main.async {
       guard activeMicrosoftWebAuthSessionEpoch == invalidatedEpoch else {
         return
@@ -113,6 +112,27 @@ public class AuthAdapter: NSObject {
     return isCurrent
   }
 
+  enum SessionProvider {
+    case google
+    case microsoft
+  }
+
+  static func activateSession(_ provider: SessionProvider) {
+    switch provider {
+    case .google:
+      inMemoryMicrosoftRefreshToken = nil
+      inMemoryMicrosoftScopes = defaultMicrosoftScopes
+    case .microsoft:
+      inMemoryGoogleServerAuthCode = nil
+    }
+  }
+
+  static func signOutGoogleOnMainQueue() {
+    DispatchQueue.main.async {
+      GIDSignIn.sharedInstance.signOut()
+    }
+  }
+
   static func commitCurrentOperation(_ operation: AuthOperationToken, _ mutation: () -> Void) -> Bool {
     tokenStoreLock.lock()
     defer { tokenStoreLock.unlock() }
@@ -121,21 +141,10 @@ public class AuthAdapter: NSObject {
     return true
   }
 
-  private static func beginInteractiveAuth() -> Bool {
-    interactiveAuthLock.lock()
-    defer { interactiveAuthLock.unlock() }
-    if interactiveAuthInProgress {
-      return false
-    }
-    interactiveAuthInProgress = true
-    return true
-  }
-
-  private static func finishInteractiveAuth() {
-    interactiveAuthLock.lock()
+  private static func releaseAppleSignInController() {
+    appleSignInControllerLock.lock()
     activeAppleSignInController = nil
-    interactiveAuthInProgress = false
-    interactiveAuthLock.unlock()
+    appleSignInControllerLock.unlock()
   }
 
   static func completeInteractiveAuth(_ operation: AuthOperationToken, _ completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) -> (NSDictionary?, NSNumber?, String?) -> Void {
@@ -146,7 +155,7 @@ public class AuthAdapter: NSObject {
         completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
         return
       }
-      finishInteractiveAuth()
+      releaseAppleSignInController()
       completion(data, code, message)
     }
   }
@@ -167,10 +176,6 @@ public class AuthAdapter: NSObject {
   public static func login(provider: String, scopes: [String], loginHint: String?, nonce: String?, useSheet: Bool, forceAccountPicker: Bool = false, tenant: String? = nil, prompt: String? = nil, hostedDomain: String? = nil, openIDRealm: String? = nil, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
     let operation = beginOperation()
     if provider == "google" {
-      guard beginInteractiveAuth() else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.operationInProgress.rawValue), nil)
-        return
-      }
       let complete = completeInteractiveAuth(operation, completion)
       guard let clientId = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String, !clientId.isEmpty else {
         complete(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
@@ -212,10 +217,6 @@ public class AuthAdapter: NSObject {
         performSignIn()
       }
     } else if provider == "apple" {
-      guard beginInteractiveAuth() else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.operationInProgress.rawValue), nil)
-        return
-      }
       let complete = completeInteractiveAuth(operation, completion)
       let appleIDProvider = ASAuthorizationAppleIDProvider()
       let request = appleIDProvider.createRequest()
@@ -232,9 +233,9 @@ public class AuthAdapter: NSObject {
       let controller = ASAuthorizationController(authorizationRequests: [request])
       let delegate = AppleSignInDelegate(expectedNonce: nonce, completion: complete)
       controller.delegate = delegate
-      interactiveAuthLock.lock()
+      appleSignInControllerLock.lock()
       activeAppleSignInController = controller
-      interactiveAuthLock.unlock()
+      appleSignInControllerLock.unlock()
       objc_setAssociatedObject(controller, &delegateHandle, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
       DispatchQueue.main.async {
@@ -278,6 +279,10 @@ public class AuthAdapter: NSObject {
           presenting: rootVC,
           operation: operation,
           completion: { result, error in
+            if AuthCore.isGoogleScopesAlreadyGranted(error) {
+              self.completeGoogleScopesAlreadyGranted(currentUser, operation: operation, completion: complete)
+              return
+            }
             self.handleGoogleResult(result, error: error, operation: operation, completion: complete)
           }
         ) else {
@@ -296,7 +301,7 @@ public class AuthAdapter: NSObject {
       return
     }
     let mergedScopes = AuthCore.mergedScopes(currentScopes, adding: scopes)
-    loginMicrosoft(scopes: mergedScopes, loginHint: nil, tenant: nil, prompt: nil, operation: operation, completion: completion)
+    loginMicrosoft(scopes: mergedScopes, loginHint: nil, tenant: nil, prompt: nil, keepRefreshToken: true, operation: operation, completion: completion)
   }
 
   @objc
@@ -348,18 +353,7 @@ public class AuthAdapter: NSObject {
           tokenStoreLock.lock()
           let cachedServerAuthCode = inMemoryGoogleServerAuthCode
           tokenStoreLock.unlock()
-          let data: [String: Any] = [
-            "provider": "google",
-            "email": user.profile?.email ?? "",
-            "name": user.profile?.name ?? "",
-            "photo": user.profile?.imageURL(withDimension: 300)?.absoluteString ?? "",
-            "idToken": user.idToken?.tokenString ?? "",
-          "accessToken": user.accessToken.tokenString,
-          "serverAuthCode": cachedServerAuthCode ?? "",
-          "userId": user.userID ?? "",
-          "hostedDomain": user.configuration.hostedDomain ?? "",
-          "expirationTime": AuthCore.googleExpirationTime(user.accessToken.expirationDate)
-          ]
+          let data = googleUserData(user, idToken: user.idToken?.tokenString ?? "", serverAuthCode: cachedServerAuthCode ?? "")
           completion(data as NSDictionary, nil, nil)
           return
         }

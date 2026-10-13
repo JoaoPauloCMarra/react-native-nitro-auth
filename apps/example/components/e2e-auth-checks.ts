@@ -1,8 +1,20 @@
+import { Platform } from "react-native";
 import {
   AuthError,
   getProviderTokenCapabilities,
   type AuthPlatform,
 } from "react-native-nitro-auth";
+
+export function currentPlatform(): AuthPlatform {
+  if (
+    Platform.OS === "ios" ||
+    Platform.OS === "android" ||
+    Platform.OS === "web"
+  ) {
+    return Platform.OS;
+  }
+  return "web";
+}
 
 export function authErrorCode(error: unknown): string {
   return error instanceof AuthError ? error.code : "unknown";

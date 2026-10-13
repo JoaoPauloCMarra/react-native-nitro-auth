@@ -1,12 +1,6 @@
 const path = require("path");
 
-const authWebCoveragePath = path.join(
-  __dirname,
-  "src",
-  `file:${__dirname}`,
-  "src",
-  "Auth.web.ts",
-);
+const authWebCoveragePath = path.join(__dirname, "src", "Auth.web.ts");
 
 module.exports = {
   testEnvironment: "jsdom",

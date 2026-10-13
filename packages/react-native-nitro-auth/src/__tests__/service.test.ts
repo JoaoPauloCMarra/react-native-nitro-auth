@@ -342,6 +342,53 @@ describe("AuthService", () => {
     });
   });
 
+  describe("native module unavailable", () => {
+    it.each([
+      ["an Error", new Error("no hybrid object"), "no hybrid object"],
+      ["a non-Error value", "plain failure", "plain failure"],
+    ])(
+      "reports configuration_error when creation throws %s",
+      (_label, thrown, detail) => {
+        AuthService.dispose();
+        (NitroModules.createHybridObject as jest.Mock).mockImplementationOnce(
+          () => {
+            throw thrown;
+          },
+        );
+
+        let error: unknown;
+        try {
+          void AuthService.currentUser;
+        } catch (e) {
+          error = e;
+        }
+
+        expect(error).toMatchObject({
+          code: "configuration_error",
+          underlyingMessage: detail,
+        });
+      },
+    );
+  });
+
+  describe("createNonce", () => {
+    it("returns the native nonce pair", async () => {
+      const nonce = { raw: "raw", hashed: "hashed" };
+      native().createNonce.mockResolvedValueOnce(nonce);
+      await expect(AuthService.createNonce()).resolves.toEqual(nonce);
+    });
+
+    it("wraps native failures with the createNonce operation", async () => {
+      native().createNonce.mockRejectedValueOnce(new Error("network_error"));
+      const error = await AuthService.createNonce().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(AuthError);
+      expect(error).toMatchObject({
+        code: "network_error",
+        operation: "createNonce",
+      });
+    });
+  });
+
   describe("silentRestore", () => {
     it("resolves on success", async () => {
       native().silentRestore.mockResolvedValueOnce(undefined);

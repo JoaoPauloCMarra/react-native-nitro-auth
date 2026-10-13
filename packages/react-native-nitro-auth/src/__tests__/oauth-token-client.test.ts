@@ -3,6 +3,7 @@ import {
   buildRefreshTokenBody,
   parseExpiresInMilliseconds,
   parseTokenResponse,
+  postTokenRequest,
 } from "../utils/oauth-token-client";
 
 const REQUEST_FIXTURES = {
@@ -149,6 +150,90 @@ describe("parseTokenResponse", () => {
     expect(parseTokenResponse(null, "token")).toMatchObject({
       ok: false,
       errorCode: "parse_error",
+    });
+  });
+});
+
+describe("postTokenRequest", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("POSTs the form body to tokenUrl and parses tokens", async () => {
+    const fetchMock = jest.fn(async () => ({
+      json: async () => ({ id_token: "id", access_token: "access" }),
+    }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const result = await postTokenRequest(REQUEST_FIXTURES, "token");
+    expect(result).toEqual({
+      ok: true,
+      tokens: { idToken: "id", accessToken: "access" },
+    });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe(REQUEST_FIXTURES.tokenUrl);
+    expect(init.method).toBe("POST");
+    expect(String(init.body)).toContain("grant_type=authorization_code");
+  });
+
+  it("builds a refresh body when no code is given", async () => {
+    const fetchMock = jest.fn(async () => ({ json: async () => ({}) }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await postTokenRequest(
+      {
+        tokenUrl: REQUEST_FIXTURES.tokenUrl,
+        clientId: REQUEST_FIXTURES.clientId,
+        refreshToken: REQUEST_FIXTURES.refreshToken,
+      },
+      "refresh",
+    );
+    const [, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(String(init.body)).toContain("grant_type=refresh_token");
+  });
+
+  it("maps fetch failures to network_error", async () => {
+    globalThis.fetch = jest.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    await expect(postTokenRequest(REQUEST_FIXTURES, "token")).resolves.toEqual({
+      ok: false,
+      errorCode: "network_error",
+      underlyingMessage: "TypeError: Failed to fetch",
+    });
+  });
+
+  it("maps unreadable bodies to parse_error", async () => {
+    globalThis.fetch = jest.fn(async () => ({
+      json: async () => {
+        throw new SyntaxError("Unexpected token");
+      },
+    })) as unknown as typeof fetch;
+    await expect(
+      postTokenRequest(REQUEST_FIXTURES, "token"),
+    ).resolves.toMatchObject({ ok: false, errorCode: "parse_error" });
+  });
+
+  it("maps provider errors with the given context", async () => {
+    globalThis.fetch = jest.fn(async () => ({
+      json: async () => ({ error: "invalid_grant" }),
+    })) as unknown as typeof fetch;
+    await expect(
+      postTokenRequest(REQUEST_FIXTURES, "refresh"),
+    ).resolves.toMatchObject({ ok: false, errorCode: "refresh_failed" });
+  });
+});
+
+describe("parseTokenResponse defaults", () => {
+  it("defaults to the token context for provider errors", () => {
+    expect(parseTokenResponse({ error: "invalid_grant" })).toMatchObject({
+      ok: false,
+      errorCode: "token_error",
     });
   });
 });

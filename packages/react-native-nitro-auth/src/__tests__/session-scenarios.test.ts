@@ -18,6 +18,11 @@
  */
 
 import { TextDecoder, TextEncoder } from "util";
+import {
+  installFetch,
+  installWindowOpen,
+  mockAuthConfig,
+} from "./support/web-auth-env";
 import { createAuthService } from "../create-auth-service";
 import type { AuthTokens, AuthUser } from "../Auth.nitro";
 
@@ -71,46 +76,28 @@ function installPopupMock(onRedirect: (state?: string) => string): PopupMock {
     close: jest.fn(),
     location: { href: "" },
   };
-  Object.defineProperty(window, "open", {
-    configurable: true,
-    writable: true,
-    value: jest.fn((url: string) => {
+  installWindowOpen(
+    jest.fn((url: string) => {
       const state = new URL(url).searchParams.get("state") ?? undefined;
       popup.location.href = onRedirect(state);
       return popup;
     }),
-  });
+  );
   return popup;
 }
 
 function installFetchMock(response: Partial<Response>): void {
-  Object.defineProperty(globalThis, "fetch", {
-    configurable: true,
-    writable: true,
-    value: jest.fn(async () => response as Response),
-  });
+  installFetch(jest.fn(async () => response as Response));
 }
 
 async function createWebFacade(): Promise<{
   facade: SessionFacade;
   controls: SessionControls;
 }> {
-  jest.resetModules();
-  jest.doMock(
-    "expo-constants",
-    () => ({
-      __esModule: true,
-      default: {
-        expoConfig: {
-          extra: {
-            microsoftClientId: "test-client-id",
-            googleWebClientId: "test-client-id.apps.googleusercontent.com",
-          },
-        },
-      },
-    }),
-    { virtual: true },
-  );
+  mockAuthConfig({
+    microsoftClientId: "test-client-id",
+    googleWebClientId: "test-client-id.apps.googleusercontent.com",
+  });
   const module = await import("../Auth.web");
   const auth = module.AuthModule;
   const { resetAuthModule } = module;

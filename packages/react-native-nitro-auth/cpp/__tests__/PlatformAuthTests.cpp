@@ -222,7 +222,7 @@ void testRegistryFailureRejectsAsyncCallsAndIsRetried() {
     for (const auto& call : std::vector<std::function<void()>>{
            [] { PlatformAuth::hasPlayServices(); },
            [] { PlatformAuth::invalidatePendingOperations(); },
-           [] { PlatformAuth::cancelPendingOperations(AuthErrorCode::CANCELLED); },
+           [] { PlatformAuth::cancelPendingOperations(); },
            [] { PlatformAuth::logout(); },
          }) {
       bool rejectedWithConfiguration = false;
@@ -307,8 +307,8 @@ void testAdapterThrowingOnEveryAsyncMethod() {
 void testSyncMethodsDelegateAndPropagateAdapterErrors() {
   fakeAdapter->reset();
   PlatformAuth::invalidatePendingOperations();
-  PlatformAuth::cancelPendingOperations(AuthErrorCode::NOT_SIGNED_IN);
-  PlatformAuth::cancelPendingOperations(AuthErrorCode::CANCELLED);
+  PlatformAuth::cancelPendingOperations();
+  PlatformAuth::cancelPendingOperations();
   PlatformAuth::logout();
   assert(fakeAdapter->invalidateCalls == 1);
   assert(fakeAdapter->cancelCalls == 2);
@@ -319,7 +319,7 @@ void testSyncMethodsDelegateAndPropagateAdapterErrors() {
   for (const auto& call : std::vector<std::function<void()>>{
          [] { PlatformAuth::hasPlayServices(); },
          [] { PlatformAuth::invalidatePendingOperations(); },
-         [] { PlatformAuth::cancelPendingOperations(AuthErrorCode::CANCELLED); },
+         [] { PlatformAuth::cancelPendingOperations(); },
          [] { PlatformAuth::logout(); },
        }) {
     bool propagated = false;

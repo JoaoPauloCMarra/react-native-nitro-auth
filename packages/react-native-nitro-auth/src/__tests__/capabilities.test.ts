@@ -55,8 +55,9 @@ describe("getProviderTokenCapabilities", () => {
   });
 
   it("keeps the typed platform union closed", () => {
-    const platform = "android";
-    const capabilities = getProviderTokenCapabilities("google", platform);
-    expect(capabilities.accessTokenExpirySource).not.toBe("unavailable");
+    const rejectsUnknownPlatform = () =>
+      // @ts-expect-error "macos" is not an AuthPlatform
+      getProviderTokenCapabilities("google", "macos");
+    expect(rejectsUnknownPlatform).toBeInstanceOf(Function);
   });
 });

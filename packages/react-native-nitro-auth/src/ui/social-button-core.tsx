@@ -206,27 +206,31 @@ export function SocialButtonCore({
     }
   }, [currentUser, isDisabled, login, onError, onPress, onSuccess, provider]);
 
+  const buildContentProps = (
+    width: number,
+    height: number,
+    contentIconOnly: boolean,
+  ): SocialButtonContentProps => ({
+    provider,
+    label,
+    appearance: resolvedAppearance,
+    shape: resolvedShape,
+    iconOnly: contentIconOnly,
+    disabled: isDisabled,
+    loading: isLoading,
+    width,
+    height,
+    ...(official === undefined && textStyle !== undefined ? { textStyle } : {}),
+    ...(official === undefined && borderRadius !== undefined
+      ? { borderRadius }
+      : {}),
+  });
+
   if (provider === "microsoft") {
     const legacyVariant = variant ?? "primary";
     const customComponent =
       official === undefined ? customComponents?.microsoft : undefined;
-    const contentProps: SocialButtonContentProps = {
-      provider,
-      label,
-      appearance: resolvedAppearance,
-      shape: resolvedShape,
-      iconOnly: false,
-      disabled: isDisabled,
-      loading: isLoading,
-      width: viewportWidth,
-      height: BUTTON_HEIGHT,
-      ...(official === undefined && textStyle !== undefined
-        ? { textStyle }
-        : {}),
-      ...(official === undefined && borderRadius !== undefined
-        ? { borderRadius }
-        : {}),
-    };
+    const contentProps = buildContentProps(viewportWidth, BUTTON_HEIGHT, false);
     const textColor = getMicrosoftTextColor(isDisabled, legacyVariant);
     return (
       <Pressable
@@ -284,21 +288,7 @@ export function SocialButtonCore({
     fontScale,
     viewportWidth,
   );
-  const customContentProps: SocialButtonContentProps = {
-    provider,
-    label,
-    appearance: resolvedAppearance,
-    shape: resolvedShape,
-    iconOnly,
-    disabled: isDisabled,
-    loading: isLoading,
-    width,
-    height,
-    ...(official === undefined && textStyle !== undefined ? { textStyle } : {}),
-    ...(official === undefined && borderRadius !== undefined
-      ? { borderRadius }
-      : {}),
-  };
+  const customContentProps = buildContentProps(width, height, iconOnly);
   const customComponent =
     official === undefined ? customComponents?.[provider] : undefined;
   const showBusyContent = isLoading && loadingIndicator !== null;

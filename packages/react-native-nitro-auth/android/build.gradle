@@ -94,7 +94,7 @@ dependencies {
   implementation project(":react-native-nitro-modules")
   
   // Google Sign-In SDK (full scope support)
-  implementation "com.google.android.gms:play-services-auth:21.5.1"
+  implementation "com.google.android.gms:play-services-auth:21.6.0"
   
   // Activity result APIs
   implementation "androidx.activity:activity-ktx:1.10.1"
@@ -108,5 +108,5 @@ dependencies {
   implementation "com.google.android.libraries.identity.googleid:googleid:1.2.0"
 
   testImplementation "junit:junit:4.13.2"
-  testImplementation "org.robolectric:robolectric:4.13"
+  testImplementation "org.robolectric:robolectric:4.17"
 }

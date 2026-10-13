@@ -224,20 +224,23 @@ describe("OfficialSocialButton (web)", () => {
     const previousDev = globals.__DEV__;
     globals.__DEV__ = true;
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
-    render(
-      React.createElement(OfficialSocialButton, {
-        provider: "apple",
-        renderMode: "svg" as "image",
-      }),
-    );
+    try {
+      render(
+        React.createElement(OfficialSocialButton, {
+          provider: "apple",
+          renderMode: "svg" as "image",
+        }),
+      );
 
-    expect(screen.getByTestId("apple-android-light-pill.png")).toBeTruthy();
-    expect(screen.queryByTestId("apple-android-light-pill.svg")).toBeNull();
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("official-buttons/svg"),
-    );
-    warn.mockRestore();
-    globals.__DEV__ = previousDev;
+      expect(screen.getByTestId("apple-android-light-pill.png")).toBeTruthy();
+      expect(screen.queryByTestId("apple-android-light-pill.svg")).toBeNull();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("official-buttons/svg"),
+      );
+    } finally {
+      warn.mockRestore();
+      globals.__DEV__ = previousDev;
+    }
   });
 
   it("uses Android artwork on web and preserves the source ratio", () => {
