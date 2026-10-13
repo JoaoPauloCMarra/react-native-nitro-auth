@@ -25,6 +25,10 @@ None.
   id rejects with `configuration_error`.
 - Web: a failed Apple SDK script load rejects with `network_error` instead of `unknown`.
 - Web: the Microsoft authorization-code exchange maps network failures to `network_error`.
+- Expo config plugin: re-running `expo prebuild` after removing or changing an iOS
+  provider option now removes the stale `GIDClientID`, `GIDServerClientID`,
+  `MSALClientID`, `MSALTenant` and `MSALB2cDomain` keys and the managed
+  `com.googleusercontent.apps.*` / `msauth.*` URL schemes, matching the Android strings.
 
 ## [0.13.2] - 2026-10-03
 

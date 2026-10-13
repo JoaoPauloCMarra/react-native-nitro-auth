@@ -45,23 +45,24 @@ Identical provider error strings produce identical codes on every platform.
 `context` selects the operation bucket: `authorize`/`token` surface token
 failures as `token_error`; `refresh` surfaces them as `refresh_failed`.
 
-| Provider error            | Code                             |
-| ------------------------- | -------------------------------- |
-| `access_denied`           | `cancelled`                      |
-| `user_cancelled`          | `cancelled`                      |
-| `popup_closed_by_user`    | `cancelled`                      |
-| `interaction_required`    | `interaction_required`           |
-| `login_required`          | `interaction_required`           |
-| `consent_required`        | `interaction_required`           |
-| `invalid_client`          | `configuration_error`            |
-| `invalid_scope`           | `configuration_error`            |
-| `unauthorized_client`     | `configuration_error`            |
-| `invalid_grant`           | `token_error` / `refresh_failed` |
-| `invalid_request`         | `token_error` / `refresh_failed` |
-| `invalid_token`           | `token_error` / `refresh_failed` |
-| `server_error`            | `network_error`                  |
-| `temporarily_unavailable` | `network_error`                  |
-| anything else             | `unknown`                        |
+| Provider error             | Code                             |
+| -------------------------- | -------------------------------- |
+| `access_denied`            | `cancelled`                      |
+| `user_cancelled`           | `cancelled`                      |
+| `popup_closed_by_user`     | `cancelled`                      |
+| `user_cancelled_authorize` | `cancelled`                      |
+| `interaction_required`     | `interaction_required`           |
+| `login_required`           | `interaction_required`           |
+| `consent_required`         | `interaction_required`           |
+| `invalid_client`           | `configuration_error`            |
+| `invalid_scope`            | `configuration_error`            |
+| `unauthorized_client`      | `configuration_error`            |
+| `invalid_grant`            | `token_error` / `refresh_failed` |
+| `invalid_request`          | `token_error` / `refresh_failed` |
+| `invalid_token`            | `token_error` / `refresh_failed` |
+| `server_error`             | `network_error`                  |
+| `temporarily_unavailable`  | `network_error`                  |
+| anything else              | `unknown`                        |
 
 ## 2. Token semantics (U2, X6)
 

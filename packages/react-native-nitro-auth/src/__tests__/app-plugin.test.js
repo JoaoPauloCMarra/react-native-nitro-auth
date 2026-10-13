@@ -811,4 +811,63 @@ describe("Microsoft Expo configuration", () => {
       expect.stringContaining("ios.bundleIdentifier"),
     );
   });
+
+  it("removes stale iOS provider keys and URL schemes when their options change or disappear", async () => {
+    const config = {
+      name: "Example",
+      slug: "example",
+      ios: { bundleIdentifier: "com.example" },
+    };
+    const modOptions = {
+      projectRoot: "/tmp/example",
+      platformProjectRoot: "/tmp/example/ios",
+    };
+    const ownScheme = { CFBundleURLSchemes: ["myapp"] };
+    let plist = await applyExpoMod(
+      withNitroAuth(cloneConfig(config), {
+        ios: {
+          googleClientId: "111-old.apps.googleusercontent.com",
+          googleServerClientId: "server-old",
+          microsoftClientId: "MS",
+          microsoftTenant: "tenant",
+          microsoftB2cDomain: "example.b2clogin.com",
+        },
+      }),
+      "ios",
+      "infoPlist",
+      { CFBundleURLTypes: [ownScheme] },
+      modOptions,
+    );
+    plist = await applyExpoMod(
+      withNitroAuth(cloneConfig(config), {
+        ios: { googleClientId: "222-new.apps.googleusercontent.com" },
+      }),
+      "ios",
+      "infoPlist",
+      plist,
+      modOptions,
+    );
+    expect(plist.GIDClientID).toBe("222-new.apps.googleusercontent.com");
+    expect(plist.CFBundleURLTypes).toEqual([
+      ownScheme,
+      { CFBundleURLSchemes: ["com.googleusercontent.apps.222-new"] },
+    ]);
+    for (const key of [
+      "GIDServerClientID",
+      "MSALClientID",
+      "MSALTenant",
+      "MSALB2cDomain",
+    ]) {
+      expect(plist).not.toHaveProperty(key);
+    }
+    plist = await applyExpoMod(
+      withNitroAuth(cloneConfig(config), {}),
+      "ios",
+      "infoPlist",
+      plist,
+      modOptions,
+    );
+    expect(plist).not.toHaveProperty("GIDClientID");
+    expect(plist.CFBundleURLTypes).toEqual([ownScheme]);
+  });
 });

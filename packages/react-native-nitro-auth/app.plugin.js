@@ -100,6 +100,17 @@ const MANAGED_ANDROID_STRINGS = [
   "nitro_auth_microsoft_tenant",
   "nitro_auth_microsoft_b2c_domain",
 ];
+const MANAGED_IOS_PLIST_KEYS = [
+  "GIDClientID",
+  "GIDServerClientID",
+  "MSALClientID",
+  "MSALTenant",
+  "MSALB2cDomain",
+];
+const MANAGED_IOS_URL_SCHEME_PREFIXES = [
+  "com.googleusercontent.apps.",
+  "msauth.",
+];
 const MICROSOFT_AUTH_ACTIVITY = "com.auth.MicrosoftAuthActivity";
 // Manifest merge replaces the placeholder with the final applicationId, so
 // applicationIdSuffix and product flavors keep a matching redirect host.
@@ -329,6 +340,31 @@ const withNitroAuth = (config, props = {}) => {
   config = withGoogleSignInIosPods(config);
 
   config = withInfoPlist(config, (config) => {
+    for (const key of MANAGED_IOS_PLIST_KEYS) {
+      delete config.modResults[key];
+    }
+    if (Array.isArray(config.modResults.CFBundleURLTypes)) {
+      const remainingUrlTypes = config.modResults.CFBundleURLTypes.flatMap(
+        (urlType) => {
+          const schemes = urlType.CFBundleURLSchemes ?? [];
+          const keptSchemes = schemes.filter(
+            (scheme) =>
+              !MANAGED_IOS_URL_SCHEME_PREFIXES.some((prefix) =>
+                scheme.startsWith(prefix),
+              ),
+          );
+          if (keptSchemes.length === schemes.length) return [urlType];
+          return keptSchemes.length > 0
+            ? [{ ...urlType, CFBundleURLSchemes: keptSchemes }]
+            : [];
+        },
+      );
+      if (remainingUrlTypes.length > 0) {
+        config.modResults.CFBundleURLTypes = remainingUrlTypes;
+      } else {
+        delete config.modResults.CFBundleURLTypes;
+      }
+    }
     if (ios.googleClientId) {
       config.modResults.GIDClientID = ios.googleClientId;
     }
