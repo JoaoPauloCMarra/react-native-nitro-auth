@@ -54,8 +54,7 @@ React Native Nitro module for authentication (Google, Apple, Microsoft). C++ cor
 - Early returns over deep nesting
 - `StyleSheet.create` for styles, no inline style objects
 - Conventional commits: `fix:`, `feat:`, `chore:`, `refactor:`, `docs:`
-- PR body is the current version's CHANGELOG section. The GitHub release
-  description must match it. Do not add Summary, Test plan, or extra sections.
+- PR and GitHub release descriptions follow the workspace `AGENTS.md` section "PR And Release Descriptions": the same short text for both, with the full detail kept in `CHANGELOG.md`.
 
 ## Replay maintenance
 
