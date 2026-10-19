@@ -60,6 +60,10 @@ async function main(): Promise<void> {
   );
   const sourceEntry = join(sourceDirectory, "index.ts");
   const officialButtonsEntry = join(sourceDirectory, "official-buttons.ts");
+  const officialButtonsSvgEntry = join(
+    sourceDirectory,
+    "official-buttons-svg.ts",
+  );
   const temporaryRoot = await mkdtemp(join(tmpdir(), "nitro-rn087-types-"));
 
   try {
@@ -129,6 +133,7 @@ async function main(): Promise<void> {
           include: [
             sourceEntry,
             officialButtonsEntry,
+            officialButtonsSvgEntry,
             `${sourceDirectory}/**/*.d.ts`,
           ],
         },

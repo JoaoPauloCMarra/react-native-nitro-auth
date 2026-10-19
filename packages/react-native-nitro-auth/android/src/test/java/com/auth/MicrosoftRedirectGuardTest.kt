@@ -94,11 +94,11 @@ class MicrosoftRedirectGuardTest {
     @Test
     fun cancelsWhenBrowserWasOpenedAndNoRedirectArrived() {
         assertTrue(
-            shouldCancelMicrosoftAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = true,
-                redirectReceived = false,
-                resumingActivityIsRedirectHandler = false,
+                callbackReceived = false,
+                resumingActivityIsCallbackHandler = false,
             ),
         )
     }
@@ -106,11 +106,11 @@ class MicrosoftRedirectGuardTest {
     @Test
     fun doesNotCancelWhenRedirectWasReceived() {
         assertFalse(
-            shouldCancelMicrosoftAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = true,
-                redirectReceived = true,
-                resumingActivityIsRedirectHandler = false,
+                callbackReceived = true,
+                resumingActivityIsCallbackHandler = false,
             ),
         )
     }
@@ -118,11 +118,11 @@ class MicrosoftRedirectGuardTest {
     @Test
     fun doesNotCancelWhenResumingActivityIsTheRedirectHandler() {
         assertFalse(
-            shouldCancelMicrosoftAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = true,
-                redirectReceived = false,
-                resumingActivityIsRedirectHandler = true,
+                callbackReceived = false,
+                resumingActivityIsCallbackHandler = true,
             ),
         )
     }
@@ -130,11 +130,11 @@ class MicrosoftRedirectGuardTest {
     @Test
     fun doesNotCancelWhenFlowIsNotInProgress() {
         assertFalse(
-            shouldCancelMicrosoftAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = false,
                 browserWasOpened = true,
-                redirectReceived = false,
-                resumingActivityIsRedirectHandler = false,
+                callbackReceived = false,
+                resumingActivityIsCallbackHandler = false,
             ),
         )
     }
@@ -142,11 +142,11 @@ class MicrosoftRedirectGuardTest {
     @Test
     fun doesNotCancelWhenBrowserWasNeverOpened() {
         assertFalse(
-            shouldCancelMicrosoftAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = false,
-                redirectReceived = false,
-                resumingActivityIsRedirectHandler = false,
+                callbackReceived = false,
+                resumingActivityIsCallbackHandler = false,
             ),
         )
     }
@@ -160,40 +160,40 @@ class MicrosoftRedirectGuardTest {
         assertEquals(2L, suppressionGeneration)
 
         assertFalse(
-            shouldCancelMicrosoftAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = true,
-                redirectReceived = false,
-                resumingActivityIsRedirectHandler = true,
+                callbackReceived = false,
+                resumingActivityIsCallbackHandler = true,
                 resumeSuppressionGeneration = suppressionGeneration,
                 currentGeneration = 2L,
             ),
         )
 
         assertTrue(
-            shouldConsumeMicrosoftResumeSuppression(
+            shouldConsumeBrowserResumeSuppression(
                 resumeSuppressionGeneration = suppressionGeneration,
                 currentGeneration = 2L,
-                resumingActivityIsRedirectHandler = false,
+                resumingActivityIsCallbackHandler = false,
             ),
         )
         assertFalse(
-            shouldCancelMicrosoftAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = true,
-                redirectReceived = false,
-                resumingActivityIsRedirectHandler = false,
+                callbackReceived = false,
+                resumingActivityIsCallbackHandler = false,
                 resumeSuppressionGeneration = suppressionGeneration,
                 currentGeneration = 2L,
             ),
         )
         suppressionGeneration = null
         assertTrue(
-            shouldCancelMicrosoftAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = true,
-                redirectReceived = false,
-                resumingActivityIsRedirectHandler = false,
+                callbackReceived = false,
+                resumingActivityIsCallbackHandler = false,
                 resumeSuppressionGeneration = suppressionGeneration,
                 currentGeneration = 2L,
             ),

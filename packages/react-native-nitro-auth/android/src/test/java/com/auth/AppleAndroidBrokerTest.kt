@@ -115,7 +115,7 @@ class AppleAndroidBrokerTest {
     @Test
     fun browserReturnCancelsOnlyAnOpenedUnclaimedAppleFlow() {
         assertTrue(
-            shouldCancelAppleAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = true,
                 callbackReceived = false,
@@ -123,7 +123,7 @@ class AppleAndroidBrokerTest {
             ),
         )
         assertFalse(
-            shouldCancelAppleAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = true,
                 callbackReceived = true,
@@ -131,7 +131,7 @@ class AppleAndroidBrokerTest {
             ),
         )
         assertFalse(
-            shouldCancelAppleAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = true,
                 callbackReceived = false,
@@ -139,7 +139,7 @@ class AppleAndroidBrokerTest {
             ),
         )
         assertFalse(
-            shouldCancelAppleAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = true,
                 callbackReceived = false,
@@ -149,7 +149,7 @@ class AppleAndroidBrokerTest {
             ),
         )
         assertFalse(
-            shouldCancelAppleAuth(
+            shouldCancelBrowserFlow(
                 authInProgress = true,
                 browserWasOpened = false,
                 callbackReceived = false,
@@ -161,21 +161,21 @@ class AppleAndroidBrokerTest {
     @Test
     fun staleCallbackResumeSuppressionIsConsumedOnlyByTheCurrentHost() {
         assertTrue(
-            shouldConsumeAppleResumeSuppression(
+            shouldConsumeBrowserResumeSuppression(
                 resumeSuppressionGeneration = 8L,
                 currentGeneration = 8L,
                 resumingActivityIsCallbackHandler = false,
             ),
         )
         assertFalse(
-            shouldConsumeAppleResumeSuppression(
+            shouldConsumeBrowserResumeSuppression(
                 resumeSuppressionGeneration = 8L,
                 currentGeneration = 8L,
                 resumingActivityIsCallbackHandler = true,
             ),
         )
         assertFalse(
-            shouldConsumeAppleResumeSuppression(
+            shouldConsumeBrowserResumeSuppression(
                 resumeSuppressionGeneration = 7L,
                 currentGeneration = 8L,
                 resumingActivityIsCallbackHandler = false,

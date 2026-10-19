@@ -145,19 +145,23 @@ AuthSessionSnapshot HybridAuth::getSessionSnapshot() {
   return AuthSessionSnapshot(static_cast<double>(_snapshotRevision), _currentUser, _grantedScopes);
 }
 
-std::function<void()> HybridAuth::onSessionChanged(const std::function<void(const AuthSessionSnapshot&)>& callback) {
+template <typename Callback>
+std::function<void()> HybridAuth::subscribe(ListenerRegistry<Callback> HybridAuth::* registry, const Callback& callback) {
   std::lock_guard<std::recursive_mutex> lock(_mutex);
-  const auto id = _nextSnapshotListenerId++;
-  _snapshotListeners[id] = callback;
+  const auto id = (this->*registry).add(callback);
   auto weak = weak_from_this();
-  return [weak, id]() {
+  return [weak, registry, id]() {
     auto self = weak.lock();
     if (!self) return;
     auto* auth = dynamic_cast<HybridAuth*>(self.get());
     if (!auth) return;
     std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
-    auth->_snapshotListeners.erase(id);
+    (auth->*registry).remove(id);
   };
+}
+
+std::function<void()> HybridAuth::onSessionChanged(const std::function<void(const AuthSessionSnapshot&)>& callback) {
+  return subscribe(&HybridAuth::_snapshotListeners, callback);
 }
 
 void HybridAuth::notifyAuthStateChanged() {
@@ -170,15 +174,12 @@ void HybridAuth::notifyAuthStateChanged() {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
     ++_snapshotRevision;
     snapshot = AuthSessionSnapshot(static_cast<double>(_snapshotRevision), _currentUser, _grantedScopes);
-    for (const auto& [id, listener] : _snapshotListeners) snapshotListeners.push_back(listener);
+    snapshotListeners = _snapshotListeners.snapshot();
     user = _currentUser;
     if (user) {
       provider = user->provider;
     }
-    listeners.reserve(_listeners.size());
-    for (auto const& [id, listener] : _listeners) {
-      listeners.push_back(listener);
-    }
+    listeners = _listeners.snapshot();
   }
   invokeListenersSafely(snapshotListeners, snapshot);
   invokeListenersSafely(listeners, user);
@@ -186,64 +187,32 @@ void HybridAuth::notifyAuthStateChanged() {
 }
 
 std::function<void()> HybridAuth::onAuthStateChanged(const std::function<void(const std::optional<AuthUser>&)>& callback) {
-  std::lock_guard<std::recursive_mutex> lock(_mutex);
-  uint64_t id = _nextListenerId++;
-  _listeners[id] = callback;
-  
-  auto weak = weak_from_this();
-  return [weak, id]() {
-    auto self = weak.lock();
-    if (!self) return;
-    auto* auth = dynamic_cast<HybridAuth*>(self.get());
-    if (!auth) return;
-    std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
-    auth->_listeners.erase(id);
-  };
+  return subscribe(&HybridAuth::_listeners, callback);
 }
 
 std::function<void()> HybridAuth::onTokensRefreshed(const std::function<void(const AuthTokens&)>& callback) {
-  std::lock_guard<std::recursive_mutex> lock(_mutex);
-  uint64_t id = _nextTokenListenerId++;
-  _tokenListeners[id] = callback;
-
-  auto weak = weak_from_this();
-  return [weak, id]() {
-    auto self = weak.lock();
-    if (!self) return;
-    auto* auth = dynamic_cast<HybridAuth*>(self.get());
-    if (!auth) return;
-    std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
-    auth->_tokenListeners.erase(id);
-  };
+  return subscribe(&HybridAuth::_tokenListeners, callback);
 }
 
 std::function<void()> HybridAuth::onAuthEvent(const std::function<void(const AuthEvent&)>& callback) {
-  std::lock_guard<std::recursive_mutex> lock(_mutex);
-  uint64_t id = _nextEventListenerId++;
-  _eventListeners[id] = callback;
-
-  auto weak = weak_from_this();
-  return [weak, id]() {
-    auto self = weak.lock();
-    if (!self) return;
-    auto* auth = dynamic_cast<HybridAuth*>(self.get());
-    if (!auth) return;
-    std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
-    auth->_eventListeners.erase(id);
-  };
+  return subscribe(&HybridAuth::_eventListeners, callback);
 }
 
 void HybridAuth::emitAuthEvent(AuthEventType type, std::optional<AuthProvider> provider, std::optional<AuthErrorCode> errorCode) {
   std::vector<std::function<void(const AuthEvent&)>> listeners;
   {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
-    listeners.reserve(_eventListeners.size());
-    for (auto const& [id, listener] : _eventListeners) {
-      listeners.push_back(listener);
-    }
+    listeners = _eventListeners.snapshot();
   }
   AuthEvent event(type, provider, errorCode);
   invokeListenersSafely(listeners, event);
+}
+
+void HybridAuth::setUserScopesLocked() {
+  if (!_currentUser) return;
+  _currentUser->scopes = _grantedScopes.empty()
+    ? std::nullopt
+    : std::make_optional(_grantedScopes);
 }
 
 std::shared_ptr<Promise<AuthTokens>> HybridAuth::advanceSessionGenerationLocked() {
@@ -377,7 +346,6 @@ std::shared_ptr<Promise<void>> HybridAuth::silentRestore() {
       promise->reject(makeRawAuthError(AuthErrorCode::UNKNOWN, "internal_error"));
       return;
     }
-    std::shared_ptr<Promise<AuthTokens>> refreshInFlight;
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
       if (auth->_sessionGeneration != generation) {
@@ -385,7 +353,7 @@ std::shared_ptr<Promise<void>> HybridAuth::silentRestore() {
         resolveIfPending(promise);
         return;
       }
-      refreshInFlight = auth->advanceSessionGenerationLocked();
+      auth->advanceSessionGenerationLocked();
       auth->_currentUser = user;
       if (user) {
         if (user->scopes) {
@@ -396,8 +364,8 @@ std::shared_ptr<Promise<void>> HybridAuth::silentRestore() {
       } else {
         auth->_grantedScopes.clear();
       }
+      auth->setUserScopesLocked();
     }
-    rejectIfPending(refreshInFlight, AuthErrorCode::CANCELLED);
     auth->notifyAuthStateChanged();
     auth->log(user ? "silentRestore resolved with session" : "silentRestore resolved without session");
     resolveIfPending(promise);
@@ -443,7 +411,6 @@ std::shared_ptr<Promise<void>> HybridAuth::loginImpl(AuthProvider provider, cons
       rejectIfPending(promise, makeRawAuthError(AuthErrorCode::UNKNOWN, "internal_error"));
       return;
     }
-    std::shared_ptr<Promise<AuthTokens>> refreshInFlight;
     AuthUser completedUser = user;
     {
       std::lock_guard<std::recursive_mutex> lock(auth->_mutex);
@@ -452,7 +419,7 @@ std::shared_ptr<Promise<void>> HybridAuth::loginImpl(AuthProvider provider, cons
         rejectIfPending(promise, AuthErrorCode::CANCELLED);
         return;
       }
-      refreshInFlight = auth->advanceSessionGenerationLocked();
+      auth->advanceSessionGenerationLocked();
       auth->_currentUser = user;
       if (user.scopes && !user.scopes->empty()) {
         auth->_grantedScopes = *user.scopes;
@@ -461,14 +428,9 @@ std::shared_ptr<Promise<void>> HybridAuth::loginImpl(AuthProvider provider, cons
       } else {
         auth->_grantedScopes.clear();
       }
-      if (auth->_currentUser) {
-        auth->_currentUser->scopes = auth->_grantedScopes.empty()
-          ? std::nullopt
-          : std::make_optional(auth->_grantedScopes);
-        completedUser = *auth->_currentUser;
-      }
+      auth->setUserScopesLocked();
+      if (auth->_currentUser) completedUser = *auth->_currentUser;
     }
-    rejectIfPending(refreshInFlight, AuthErrorCode::CANCELLED);
     // Resolve from this operation's value before callbacks can replace the session.
     if (result && result->isPending()) {
       result->resolve(completedUser);
@@ -521,7 +483,7 @@ std::shared_ptr<Promise<void>> HybridAuth::requestScopes(const std::vector<std::
       }
       auth->_currentUser = user;
       mergeGrantedScopes(auth->_grantedScopes, scopes);
-      if (auth->_currentUser) auth->_currentUser->scopes = auth->_grantedScopes;
+      auth->setUserScopesLocked();
     }
     auth->notifyAuthStateChanged();
     auth->log("requestScopes resolved");
@@ -556,7 +518,7 @@ std::shared_ptr<Promise<ScopeRevocationResult>> HybridAuth::revokeScopesWithResu
     const std::unordered_set<std::string> requested(scopes.begin(), scopes.end());
     for (const auto& scope : _grantedScopes) if (requested.count(scope)) result.revokedScopes.push_back(scope);
     removeGrantedScopes(_grantedScopes, scopes);
-    if (_currentUser) _currentUser->scopes = _grantedScopes;
+    setUserScopesLocked();
   }
   notifyAuthStateChanged();
   auto promise = Promise<ScopeRevocationResult>::create();
@@ -686,6 +648,7 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
   log("refreshToken start");
   std::shared_ptr<Promise<AuthTokens>> promise;
   uint64_t generation;
+  std::optional<AuthProvider> sessionProvider;
   {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
     if (_currentUser && _currentUser->provider == AuthProvider::APPLE) {
@@ -700,6 +663,7 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
       return rejected<AuthTokens>(AuthErrorCode::OPERATION_IN_PROGRESS);
     }
     generation = _sessionGeneration;
+    if (_currentUser) sessionProvider = _currentUser->provider;
     promise = Promise<AuthTokens>::create();
     _refreshInFlight = promise;
   }
@@ -753,7 +717,7 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
     promise->resolve(tokens);
   });
 
-  refreshPromise->addOnRejectedListener([self, promise, generation](const std::exception_ptr& error) {
+  refreshPromise->addOnRejectedListener([self, promise, generation, sessionProvider](const std::exception_ptr& error) {
     auto* auth = dynamic_cast<HybridAuth*>(self.get());
     if (!auth) {
       promise->reject(makeRawAuthError(AuthErrorCode::UNKNOWN, "internal_error"));
@@ -776,7 +740,7 @@ std::shared_ptr<Promise<AuthTokens>> HybridAuth::refreshToken() {
       rejectIfPending(promise, AuthErrorCode::CANCELLED);
       return;
     }
-    auth->emitAuthEvent(AuthEventType::REFRESH_FAILED, std::nullopt, errorCodeOf(error));
+    auth->emitAuthEvent(AuthEventType::REFRESH_FAILED, sessionProvider, errorCodeOf(error));
     auth->log("refreshToken rejected");
     promise->reject(error);
   });
@@ -885,10 +849,7 @@ void HybridAuth::notifyTokensRefreshed(const AuthTokens& tokens) {
   std::vector<std::function<void(const AuthTokens&)>> listeners;
   {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
-    listeners.reserve(_tokenListeners.size());
-    for (auto const& [id, listener] : _tokenListeners) {
-      listeners.push_back(listener);
-    }
+    listeners = _tokenListeners.snapshot();
   }
   invokeListenersSafely(listeners, tokens);
 }

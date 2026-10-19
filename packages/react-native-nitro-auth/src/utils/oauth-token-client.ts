@@ -1,4 +1,5 @@
 import { mapOAuthErrorCode, type OAuthErrorContext } from "./oauth-error";
+import { isJsonObject } from "./web-json";
 import type { AuthErrorCode, AuthTokens } from "../Auth.nitro";
 
 /**
@@ -85,6 +86,13 @@ export async function postTokenRequest(
       underlyingMessage: String(error),
     };
   }
+  if (!response.ok && !hasProviderError(json)) {
+    return {
+      ok: false,
+      errorCode: context === "refresh" ? "refresh_failed" : "network_error",
+      underlyingMessage: `Token endpoint responded with HTTP ${response.status}`,
+    };
+  }
   return parseTokenResponse(json, context);
 }
 
@@ -122,8 +130,10 @@ export type TokenResponseParseResult =
       underlyingMessage?: string;
     };
 
-const isJsonObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+const hasProviderError = (value: unknown): boolean =>
+  isJsonObject(value) &&
+  typeof value.error === "string" &&
+  value.error.length > 0;
 
 /**
  * Parses a token-endpoint JSON response. Provider `error` fields map through

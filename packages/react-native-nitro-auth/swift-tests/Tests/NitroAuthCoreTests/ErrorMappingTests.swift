@@ -150,4 +150,16 @@ final class ErrorMappingTests: XCTestCase {
     XCTAssertEqual(mapProvider(described("", domain: "Other", code: 0)), .unknown)
     XCTAssertEqual(mapProvider(described(String(repeating: "x", count: 1_000_000), domain: "Other")), .unknown)
   }
+
+  func testOutcomeFailureCarriesCode() {
+    for (code, _) in wireNames {
+      XCTAssertEqual(ProviderOutcome.failure(code, "detail").failureCode, code)
+      XCTAssertNil(ProviderOutcome.failure(code, "detail").userData)
+    }
+    XCTAssertEqual(ProviderOutcome.cancelled.failureCode, .cancelled)
+    XCTAssertEqual(ProviderOutcome.failure(.notSignedIn), .failure(.notSignedIn, nil))
+    let data: NSDictionary = ["provider": "google"]
+    XCTAssertNil(ProviderOutcome.success(data).failureCode)
+    XCTAssertEqual(ProviderOutcome.success(data).userData, data)
+  }
 }

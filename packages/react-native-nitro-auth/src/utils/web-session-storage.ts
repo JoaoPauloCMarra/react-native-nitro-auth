@@ -169,8 +169,16 @@ export class WebSessionStorage {
   private saveValue(key: string, value: string): void {
     const storage = this.getBrowserStorage();
     if (storage) {
-      storage.setItem(key, value);
-      return;
+      try {
+        storage.setItem(key, value);
+        inMemoryWebStorage.delete(key);
+        return;
+      } catch (error) {
+        logger.warn("Failed to write browser storage; using in-memory value", {
+          key,
+          error: getSafeErrorCategory(error),
+        });
+      }
     }
     inMemoryWebStorage.set(key, value);
   }
@@ -178,18 +186,25 @@ export class WebSessionStorage {
   private loadValue(key: string): string | undefined {
     const storage = this.getBrowserStorage();
     if (storage) {
-      return storage.getItem(key) ?? undefined;
+      return storage.getItem(key) ?? inMemoryWebStorage.get(key);
     }
     return inMemoryWebStorage.get(key);
   }
 
   private removeValue(key: string): void {
+    inMemoryWebStorage.delete(key);
     const storage = this.getBrowserStorage();
-    if (storage) {
-      storage.removeItem(key);
+    if (!storage) {
       return;
     }
-    inMemoryWebStorage.delete(key);
+    try {
+      storage.removeItem(key);
+    } catch (error) {
+      logger.warn("Failed to remove browser storage value", {
+        key,
+        error: getSafeErrorCategory(error),
+      });
+    }
   }
 
   private removePersistedBrowserValue(key: string): void {
@@ -321,17 +336,6 @@ export class WebSessionStorage {
     return safeUser;
   }
 
-  private removeInvalidCacheValue(key: string): void {
-    try {
-      this.removeValue(key);
-    } catch (error) {
-      logger.warn("Failed to remove invalid cached auth data", {
-        key,
-        error: getSafeErrorCategory(error),
-      });
-    }
-  }
-
   saveRefreshToken(refreshToken: string): void {
     if (this.shouldPersistTokens()) {
       this.saveValue(MS_REFRESH_TOKEN_KEY, refreshToken);
@@ -389,14 +393,7 @@ export class WebSessionStorage {
         const safeRecord = this.sanitizeUserForPersistence(parsedValue);
         const sanitizedCache = JSON.stringify(safeRecord);
         if (sanitizedCache !== cached) {
-          try {
-            this.saveValue(CACHE_KEY, sanitizedCache);
-          } catch (error) {
-            logger.warn(
-              "Failed to sanitize cached auth user; keeping the in-memory session safe",
-              { error: getSafeErrorCategory(error) },
-            );
-          }
+          this.saveValue(CACHE_KEY, sanitizedCache);
         }
 
         restored.user = this.sanitizeUserForPersistence(parsedUser);
@@ -404,7 +401,7 @@ export class WebSessionStorage {
         logger.warn("Failed to parse cached auth user; clearing cache", {
           error: getSafeErrorCategory(error),
         });
-        this.removeInvalidCacheValue(CACHE_KEY);
+        this.removeValue(CACHE_KEY);
       }
     }
 
@@ -421,7 +418,7 @@ export class WebSessionStorage {
         logger.warn("Failed to parse cached scopes; clearing cache", {
           error: getSafeErrorCategory(error),
         });
-        this.removeInvalidCacheValue(SCOPES_KEY);
+        this.removeValue(SCOPES_KEY);
       }
     }
 
@@ -434,7 +431,6 @@ export class WebSessionStorage {
 
     if (!this.shouldPersistTokens()) {
       this.removePersistedBrowserValue(MS_REFRESH_TOKEN_KEY);
-      inMemoryWebStorage.delete(MS_REFRESH_TOKEN_KEY);
     }
 
     return restored;

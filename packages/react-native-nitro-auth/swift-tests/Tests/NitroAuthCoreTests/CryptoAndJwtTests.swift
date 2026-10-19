@@ -4,7 +4,6 @@ import NitroAuthCryptoC
 @testable import NitroAuthCore
 
 final class CryptoAndJwtTests: XCTestCase {
-  private let sha256Hex: AuthCore.Sha256Hex = { NitroAuthSha256Hex($0, $1, $2, $3) }
   private let payloadJson: AuthCore.JwtPayloadJson = { NitroAuthJwtPayloadJson($0, $1, $2) }
   private let systemRandom: AuthCore.RandomSource = { bytes in
     SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess
@@ -40,21 +39,28 @@ final class CryptoAndJwtTests: XCTestCase {
     XCTAssertEqual(AuthCore.base64Url(Data([0xff, 0xff])), "__8")
   }
 
+  func testCreateNonceHashMatchesCCSHA256() throws {
+    let zero = try XCTUnwrap(AuthCore.createNonce(random: fixedRandom(0)))
+    XCTAssertEqual(zero.raw, String(repeating: "A", count: 43))
+    XCTAssertEqual(zero.hashed, "0f007385b6f9d4b7eeb2748605afe1a984a0a3bfa3f014d09e2a784ce9e5cd1a")
+
+    let ones = try XCTUnwrap(AuthCore.createNonce(random: fixedRandom(0xff)))
+    XCTAssertEqual(ones.hashed, "225f7e75329dd45aa354975d73987319309393af3a4c6733bc13601a4f1b8796")
+    XCTAssertNil(AuthCore.createNonce(random: { _ in false }))
+  }
+
   func testNonceIsUrlSafeRandomAndHashedWithSha256() throws {
-    let zero = try XCTUnwrap(AuthCore.createNonce(random: fixedRandom(0), sha256Hex: sha256Hex))
+    let zero = try XCTUnwrap(AuthCore.createNonce(random: fixedRandom(0)))
     XCTAssertEqual(zero.raw, String(repeating: "A", count: 43))
     XCTAssertTrue(zero.hashed.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil)
 
-    let ones = try XCTUnwrap(AuthCore.createNonce(random: fixedRandom(0xff), sha256Hex: sha256Hex))
+    let ones = try XCTUnwrap(AuthCore.createNonce(random: fixedRandom(0xff)))
     XCTAssertEqual(ones.raw, String(repeating: "_", count: 42) + "8")
     XCTAssertNotEqual(ones.hashed, zero.hashed)
+    XCTAssertEqual(ones.hashed, AuthCore.sha256Hex(Data(ones.raw.utf8)))
 
-    var expected = [CChar](repeating: 0, count: 65)
-    XCTAssertEqual(ones.raw.withCString { NitroAuthSha256Hex($0, ones.raw.utf8.count, &expected, expected.count) }, 0)
-    XCTAssertEqual(ones.hashed, String(cString: expected))
-
-    let first = try XCTUnwrap(AuthCore.createNonce(random: systemRandom, sha256Hex: sha256Hex))
-    let second = try XCTUnwrap(AuthCore.createNonce(random: systemRandom, sha256Hex: sha256Hex))
+    let first = try XCTUnwrap(AuthCore.createNonce(random: systemRandom))
+    let second = try XCTUnwrap(AuthCore.createNonce(random: systemRandom))
     for nonce in [first, second] {
       XCTAssertTrue(isBase64Url(nonce.raw, length: 43), nonce.raw)
       XCTAssertTrue(nonce.hashed.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil)
@@ -62,34 +68,15 @@ final class CryptoAndJwtTests: XCTestCase {
     XCTAssertNotEqual(first.raw, second.raw)
   }
 
-  func testKnownSha256VectorFlowsThroughTheNonceHash() throws {
-    var hex = [CChar](repeating: 0, count: 65)
-    XCTAssertEqual("abc".withCString { NitroAuthSha256Hex($0, 3, &hex, hex.count) }, 0)
-    XCTAssertEqual(String(cString: hex), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+  func testKnownSha256VectorsFlowThroughTheNonceHash() {
+    XCTAssertEqual(AuthCore.sha256Hex(Data("abc".utf8)), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    XCTAssertEqual(AuthCore.sha256Hex(Data()), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
   }
 
-  func testRandomOrHashFailureProducesNoNonceAndNoVerifier() {
-    var hashCalls = 0
+  func testRandomFailureProducesNoNonceAndNoVerifier() {
     let failingRandom: AuthCore.RandomSource = { _ in false }
-    XCTAssertNil(AuthCore.createNonce(random: failingRandom, sha256Hex: { _, _, _, _ in
-      hashCalls += 1
-      return 0
-    }))
-    XCTAssertEqual(hashCalls, 0)
+    XCTAssertNil(AuthCore.createNonce(random: failingRandom))
     XCTAssertNil(AuthCore.generateCodeVerifier(random: failingRandom))
-
-    XCTAssertNil(AuthCore.createNonce(random: fixedRandom(1), sha256Hex: { _, _, _, _ in -1 }))
-    XCTAssertNil(AuthCore.createNonce(random: fixedRandom(1), sha256Hex: { _, _, _, _ in 1 }))
-
-    var capacity = 0
-    var length = 0
-    XCTAssertNotNil(AuthCore.createNonce(random: fixedRandom(1), sha256Hex: { _, inputLength, _, outputCapacity in
-      length = inputLength
-      capacity = outputCapacity
-      return 0
-    }))
-    XCTAssertEqual(length, 43)
-    XCTAssertEqual(capacity, 65)
   }
 
   func testPkceVerifierAndChallengeFollowRfc7636() throws {

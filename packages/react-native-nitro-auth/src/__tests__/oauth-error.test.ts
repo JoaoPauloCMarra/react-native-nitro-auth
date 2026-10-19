@@ -74,6 +74,15 @@ describe("mapOAuthErrorCode", () => {
     expect(mapOAuthErrorCode("some_vendor_error", "refresh")).toBe("unknown");
   });
 
+  it.each(["constructor", "__proto__", "hasOwnProperty", "toString"])(
+    "inherited property names map to unknown (%s)",
+    (name) => {
+      for (const context of ["authorize", "token", "refresh"] as const) {
+        expect(mapOAuthErrorCode(name, context)).toBe("unknown");
+      }
+    },
+  );
+
   it("treats every fixture value as a valid public code", () => {
     for (const [, code] of AUTHORIZE_FIXTURES) {
       expect(isAuthErrorCode(code)).toBe(true);

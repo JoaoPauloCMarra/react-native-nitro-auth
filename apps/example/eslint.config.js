@@ -8,13 +8,13 @@ module.exports = defineConfig([
     plugins: {
       "compiler-bailout": {
         rules: {
-          "no-try-without-catch": {
+          "no-try-finally": {
             meta: {
               type: "problem",
               schema: [],
               messages: {
                 bailout:
-                  'Never write try/finally without catch inside a React component or hook. The compiler cannot lower it ("Handle TryStatement without a catch clause") and skips the whole function. Use promise.finally() for async cleanup, or a real catch that handles or reports the error. try/catch/finally is not this bailout.',
+                  'Never write a finally clause inside a React component or hook. The compiler cannot lower it ("Handle TryStatement with a finalizer") and skips the whole function. Use promise.finally() for async cleanup, or reset state after a try/catch.',
               },
             },
             create(context) {
@@ -68,11 +68,7 @@ module.exports = defineConfig([
               }
 
               return {
-                "TryStatement[handler=null]"(node) {
-                  if (!node.finalizer) {
-                    return;
-                  }
-
+                "TryStatement[finalizer]"(node) {
                   let current = node.parent;
                   let insideCompiledFunction = false;
                   while (current) {
@@ -100,7 +96,7 @@ module.exports = defineConfig([
       },
     },
     rules: {
-      "compiler-bailout/no-try-without-catch": "error",
+      "compiler-bailout/no-try-finally": "error",
     },
   },
 ]);

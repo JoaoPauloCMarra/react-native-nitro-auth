@@ -43,25 +43,25 @@ extension AuthAdapter {
     ]
   }
 
-  static func handleGoogleResult(_ result: GIDSignInResult?, error: Error?, operation: AuthAdapter.AuthOperationToken, expectedNonce: String? = nil, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
+  static func handleGoogleResult(_ result: GIDSignInResult?, error: Error?, operation: AuthAdapter.AuthOperationToken, expectedNonce: String? = nil, completion: @escaping (ProviderOutcome) -> Void) {
     if let error = error {
-      completion(nil, NSNumber(value: mapError(error).rawValue), error.localizedDescription)
+      completion(.failure(mapError(error), error.localizedDescription))
       return
     }
 
     guard let user = result?.user else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.unknown.rawValue), nil)
+      completion(.failure(.unknown))
       return
     }
 
     let idToken = user.idToken?.tokenString
     if let expectedNonce = expectedNonce {
       guard let idToken = idToken, !idToken.isEmpty else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.noIdToken.rawValue), nil)
+        completion(.failure(.noIdToken))
         return
       }
       guard AuthAdapter.decodeJwt(idToken)["nonce"] == expectedNonce else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.invalidNonce.rawValue), nil)
+        completion(.failure(.invalidNonce))
         return
       }
     }
@@ -71,66 +71,65 @@ extension AuthAdapter {
       activateSession(.google)
       inMemoryGoogleServerAuthCode = serverAuthCode.isEmpty ? nil : serverAuthCode
     }) else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+      completion(.cancelled)
       return
     }
     guard isCurrentOperation(operation) else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+      completion(.cancelled)
       return
     }
 
     let data = googleUserData(user, idToken: idToken ?? "", serverAuthCode: serverAuthCode)
-    completion(data as NSDictionary, nil, nil)
+    completion(.success(data as NSDictionary))
   }
 
   static func completeGoogleScopesAlreadyGranted(
     _ user: GIDGoogleUser,
     operation: AuthAdapter.AuthOperationToken,
-    completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void
+    completion: @escaping (ProviderOutcome) -> Void
   ) {
     var serverAuthCode = ""
     guard commitCurrentOperation(operation, {
       activateSession(.google)
       serverAuthCode = inMemoryGoogleServerAuthCode ?? ""
     }) else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+      completion(.cancelled)
       return
     }
     let data = googleUserData(user, idToken: user.idToken?.tokenString ?? "", serverAuthCode: serverAuthCode)
-    completion(data as NSDictionary, nil, nil)
+    completion(.success(data as NSDictionary))
   }
 
-  @objc
-  public static func revokeAccess(
+  static func revokeAccess(
     provider: String,
-    completion: @escaping (NSNumber?, String?) -> Void
+    completion: @escaping (ProviderOutcome) -> Void
   ) {
-    let operation = beginOperation()
+    let operation = advanceOperation()
     guard provider == "google" else {
-      completion(NSNumber(value: PlatformAuthErrorCode.unsupportedProvider.rawValue), nil)
+      completion(.failure(.unsupportedProvider))
       return
     }
     guard GIDSignIn.sharedInstance.currentUser != nil else {
-      completion(NSNumber(value: PlatformAuthErrorCode.notSignedIn.rawValue), nil)
+      completion(.failure(.notSignedIn))
       return
     }
 
     GIDSignIn.sharedInstance.disconnect { error in
       guard self.isCurrentOperation(operation) else {
-        completion(NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+        completion(.cancelled)
         return
       }
       if let error = error {
-        completion(NSNumber(value: mapError(error).rawValue), error.localizedDescription)
+        completion(.failure(mapError(error), error.localizedDescription))
         return
       }
       guard self.commitCurrentOperation(operation, {
         inMemoryGoogleServerAuthCode = nil
       }) else {
-        completion(NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+        completion(.cancelled)
         return
       }
-      completion(nil, nil)
+      completion(.success([:]))
     }
   }
 

@@ -37,10 +37,10 @@ const appConfig = {
         "expo-build-properties",
         {
           android: {
-            compileSdkVersion: 36,
+            compileSdkVersion: 37,
             targetSdkVersion: 36,
             minSdkVersion: 24,
-            buildToolsVersion: "36.0.0",
+            buildToolsVersion: "37.0.0",
             usePrecompiledHeaders: true,
             ...(androidArchitectures.length > 0
               ? { buildArchs: androidArchitectures }

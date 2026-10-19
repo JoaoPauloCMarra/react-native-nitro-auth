@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [0.14.1] - 2026-10-15
+
+### Breaking changes
+
+- None.
+
+### Compatibility
+
+- Tested with Expo SDK 58 (React Native 0.88.0, React 19.3.0).
+
+### Fixed
+
+- Web: `silentRestore()` no longer deletes the in-memory Microsoft refresh token in the default configuration. `refreshToken()` and the `getAccessToken()` auto-refresh used to fail with `refresh_failed` after any silent restore.
+- Web: a browser-storage write or delete that fails after the provider signed the user in falls back to memory. The login used to reject with `unknown` and leave the user signed out.
+- Web: sign-in in an insecure context (for example plain `http://` on a LAN address) rejects with `configuration_error` instead of a raw `TypeError` or `unknown`.
+- Web: `requestScopes` and the Google refresh pass the signed-in account as `login_hint` and reject with `invalid_state` if the provider returns a different account. The session could switch users before.
+- Web: a token endpoint HTTP error without an `error` field is reported as `network_error` (`refresh_failed` during refresh) instead of a success with empty tokens.
+- Web: OAuth `error` values such as `constructor` or `__proto__` map to `unknown` instead of an object-prototype value.
+- Web: `AuthService.grantedScopes` returns a copy, so changing it no longer changes the scopes of the next default login.
+- Microsoft refresh, silent restore and scope upgrades use the tenant of the original login on web, Android and iOS. They used the configured tenant, which could fail and drop the refresh token for a single-tenant or B2C login with a per-login tenant.
+- iOS: Apple sign-in clears the Google and Microsoft session, so `silentRestore()` no longer replaces an Apple session with an older provider's user.
+- Native `refresh_failed` events carry the provider, as web and `tokens_refreshed` events do.
+- `user.scopes` is `undefined` after revoking every scope, as it is after a login without scopes. It was `[]`.
+- Android: a Microsoft login with an empty `access_token` gives `accessToken` `undefined`, as refresh already did.
+- The Expo config plugin removes the Sign in with Apple entitlement when `ios.appleSignIn` is set to `false`, and warns when `ios.googleClientId` does not produce a URL scheme.
+
+### Changed
+
+- The Microsoft `SocialButton` supports `appearance` (`light` gives the Microsoft light palette) and `shape` (`pill` gives a rounded button). `variant` keeps working.
+- iOS hashes the sign-in nonce with CommonCrypto instead of a bundled SHA-256 implementation.
+
 ## [0.14.0] - 2026-10-13
 
 ### Breaking changes

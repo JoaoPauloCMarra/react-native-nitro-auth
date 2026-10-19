@@ -5,7 +5,7 @@ import kotlinx.coroutines.Deferred
 
 internal data class GooglePickerOperation(
     val identity: Any,
-    val origin: String,
+    val origin: Origin,
     val generation: Long,
     val stateEpoch: Long,
     val launchClaimed: Boolean = false,
@@ -44,13 +44,13 @@ internal class GooglePickerOperationState(
     private var sdkStateClean = false
 
     @Synchronized
-    fun register(identity: Any, origin: String, generation: Long, stateEpoch: Long): Boolean {
+    fun register(identity: Any, origin: Origin, generation: Long, stateEpoch: Long): Boolean {
         activeOperation = GooglePickerOperation(identity, origin, generation, stateEpoch)
         return true
     }
 
     @Synchronized
-    fun claimLaunch(identity: Any, origin: String, generation: Long, stateEpoch: Long): Boolean {
+    fun claimLaunch(identity: Any, origin: Origin, generation: Long, stateEpoch: Long): Boolean {
         val operation = activeOperation ?: return false
         if (
             operation.identity !== identity ||
@@ -68,7 +68,7 @@ internal class GooglePickerOperationState(
     @Synchronized
     fun beginSignOut(
         identity: Any,
-        origin: String,
+        origin: Origin,
         generation: Long,
         stateEpoch: Long,
         targetAccountId: String? = null,
@@ -84,53 +84,19 @@ internal class GooglePickerOperationState(
         }
 
         val cleanup = signOutCleanup
-        if (cleanup != null) {
-            if (cleanup.inFlight || nowMillis() < cleanup.retryAtMillis) {
-                return GooglePickerSignOutDecision.WAIT
-            }
-            cleanup.owner = identity
-            cleanup.targetAccountId = targetAccountId ?: cleanup.targetAccountId
-            cleanup.attempt += 1
-            cleanup.inFlight = true
-            return GooglePickerSignOutDecision.START
-        }
+        if (cleanup != null) return restartSignOut(cleanup, identity, targetAccountId)
         if (sdkStateClean) return GooglePickerSignOutDecision.READY
 
-        signOutCleanup = SignOutCleanup(
-            owner = identity,
-            targetAccountId = targetAccountId,
-            attempt = 1,
-            retryAtMillis = 0L,
-            inFlight = true,
-            completion = CompletableDeferred(),
-        )
-        return GooglePickerSignOutDecision.START
+        return startSignOut(identity, targetAccountId)
     }
 
     @Synchronized
     fun beginTargetedSignOut(owner: Any, targetAccountId: String): GooglePickerSignOutDecision {
         val cleanup = signOutCleanup
-        if (cleanup != null) {
-            if (cleanup.inFlight || nowMillis() < cleanup.retryAtMillis) {
-                return GooglePickerSignOutDecision.WAIT
-            }
-            cleanup.owner = owner
-            cleanup.targetAccountId = targetAccountId
-            cleanup.attempt += 1
-            cleanup.inFlight = true
-            return GooglePickerSignOutDecision.START
-        }
+        if (cleanup != null) return restartSignOut(cleanup, owner, targetAccountId)
 
         sdkStateClean = false
-        signOutCleanup = SignOutCleanup(
-            owner = owner,
-            targetAccountId = targetAccountId,
-            attempt = 1,
-            retryAtMillis = 0L,
-            inFlight = true,
-            completion = CompletableDeferred(),
-        )
-        return GooglePickerSignOutDecision.START
+        return startSignOut(owner, targetAccountId)
     }
 
     @Synchronized
@@ -153,19 +119,39 @@ internal class GooglePickerOperationState(
     @Synchronized
     fun retrySignOut(owner: Any): GooglePickerSignOutDecision {
         val cleanup = signOutCleanup ?: return GooglePickerSignOutDecision.REJECT
-        if (cleanup.owner !== owner || cleanup.inFlight || nowMillis() < cleanup.retryAtMillis) {
+        if (cleanup.owner !== owner) return GooglePickerSignOutDecision.WAIT
+        return restartSignOut(cleanup, owner, null)
+    }
+
+    private fun restartSignOut(
+        cleanup: SignOutCleanup,
+        owner: Any,
+        targetAccountId: String?,
+    ): GooglePickerSignOutDecision {
+        if (cleanup.inFlight || nowMillis() < cleanup.retryAtMillis) {
             return GooglePickerSignOutDecision.WAIT
         }
+        cleanup.owner = owner
+        cleanup.targetAccountId = targetAccountId ?: cleanup.targetAccountId
         cleanup.attempt += 1
         cleanup.inFlight = true
         return GooglePickerSignOutDecision.START
     }
 
-    @Synchronized
-    fun cleanupBarrier(): Deferred<Unit>? = signOutCleanup?.completion
+    private fun startSignOut(owner: Any, targetAccountId: String?): GooglePickerSignOutDecision {
+        signOutCleanup = SignOutCleanup(
+            owner = owner,
+            targetAccountId = targetAccountId,
+            attempt = 1,
+            retryAtMillis = 0L,
+            inFlight = true,
+            completion = CompletableDeferred(),
+        )
+        return GooglePickerSignOutDecision.START
+    }
 
     @Synchronized
-    fun activeIdentity(): Any? = activeOperation?.identity
+    fun cleanupBarrier(): Deferred<Unit>? = signOutCleanup?.completion
 
     @Synchronized
     fun cleanupTargetAccountId(): String? = signOutCleanup?.targetAccountId
@@ -186,7 +172,7 @@ internal class GooglePickerOperationState(
     }
 
     @Synchronized
-    fun unregister(identity: Any, origin: String, generation: Long) {
+    fun unregister(identity: Any, origin: Origin, generation: Long) {
         val operation = activeOperation ?: return
         if (
             operation.identity === identity &&
@@ -196,12 +182,6 @@ internal class GooglePickerOperationState(
             activeOperation = null
         }
     }
-
-    @Synchronized
-    fun isActive(origin: String, generation: Long): Boolean =
-        activeOperation?.let {
-            it.origin == origin && it.generation == generation
-        } == true
 }
 
 internal fun isOwnedLegacyGoogleAccount(

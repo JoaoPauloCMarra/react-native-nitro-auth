@@ -150,13 +150,12 @@ class MicrosoftAuthConfigHardeningTest {
         val second = AuthAdapter.createNonce()
 
         for (nonce in listOf(first, second)) {
-            assertEquals(2, nonce.size)
-            assertTrue(Regex("^[A-Za-z0-9_-]{43}$").matches(nonce[0]))
-            assertEquals(32, Base64.decode(nonce[0], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP).size)
-            assertTrue(Regex("^[a-f0-9]{64}$").matches(nonce[1]))
-            assertEquals(sha256Hex(nonce[0]), nonce[1])
+            assertTrue(Regex("^[A-Za-z0-9_-]{43}$").matches(nonce.raw))
+            assertEquals(32, Base64.decode(nonce.raw, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP).size)
+            assertTrue(Regex("^[a-f0-9]{64}$").matches(nonce.hashed))
+            assertEquals(sha256Hex(nonce.raw), nonce.hashed)
         }
-        assertNotEquals(first[0], second[0])
+        assertNotEquals(first.raw, second.raw)
     }
 
     private fun encode(payload: String): String = Base64.encodeToString(

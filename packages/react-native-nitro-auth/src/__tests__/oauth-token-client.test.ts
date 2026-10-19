@@ -162,6 +162,7 @@ describe("postTokenRequest", () => {
 
   it("POSTs the form body to tokenUrl and parses tokens", async () => {
     const fetchMock = jest.fn(async () => ({
+      ok: true,
       json: async () => ({ id_token: "id", access_token: "access" }),
     }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -180,7 +181,10 @@ describe("postTokenRequest", () => {
   });
 
   it("builds a refresh body when no code is given", async () => {
-    const fetchMock = jest.fn(async () => ({ json: async () => ({}) }));
+    const fetchMock = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({}),
+    }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     await postTokenRequest(
       {
@@ -217,6 +221,31 @@ describe("postTokenRequest", () => {
     await expect(
       postTokenRequest(REQUEST_FIXTURES, "token"),
     ).resolves.toMatchObject({ ok: false, errorCode: "parse_error" });
+  });
+
+  it("HTTP error without an error field is a failure", async () => {
+    globalThis.fetch = jest.fn(async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({ message: "upstream unavailable" }),
+    })) as unknown as typeof fetch;
+    await expect(
+      postTokenRequest(REQUEST_FIXTURES, "token"),
+    ).resolves.toMatchObject({ ok: false, errorCode: "network_error" });
+    await expect(
+      postTokenRequest(REQUEST_FIXTURES, "refresh"),
+    ).resolves.toMatchObject({ ok: false, errorCode: "refresh_failed" });
+  });
+
+  it("keeps the provider error code of an HTTP error response", async () => {
+    globalThis.fetch = jest.fn(async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "invalid_grant" }),
+    })) as unknown as typeof fetch;
+    await expect(
+      postTokenRequest(REQUEST_FIXTURES, "token"),
+    ).resolves.toMatchObject({ ok: false, errorCode: "token_error" });
   });
 
   it("maps provider errors with the given context", async () => {

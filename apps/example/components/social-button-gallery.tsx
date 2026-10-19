@@ -115,9 +115,7 @@ export function SocialButtonGallery() {
       <View
         style={[
           styles.stage,
-          {
-            backgroundColor: appearance === "light" ? "#FFFFFF" : "#0B0B0C",
-          },
+          appearance === "light" ? styles.stageLight : styles.stageDark,
         ]}
       >
         <GalleryButton
@@ -314,6 +312,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E5E7EB",
   },
+  stageLight: { backgroundColor: "#FFFFFF" },
+  stageDark: { backgroundColor: "#0B0B0C" },
   control: {
     minHeight: 44,
     paddingHorizontal: 16,

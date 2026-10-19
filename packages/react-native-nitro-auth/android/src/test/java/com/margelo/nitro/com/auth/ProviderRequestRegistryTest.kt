@@ -1,5 +1,6 @@
 package com.margelo.nitro.com.auth
 
+import com.auth.Origin
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -23,13 +24,13 @@ class ProviderRequestRegistryTest {
         ProviderRequestRegistry.cancelAll()
     }
 
-    private fun registerUser(origin: String = "login"): Long =
+    private fun registerUser(origin: Origin = Origin.LOGIN): Long =
         ProviderRequestRegistry.registerUser(origin) { users.add(it) }
 
     private fun success(
         id: Long,
-        origin: String = "login",
-        provider: String = "google",
+        origin: Origin = Origin.LOGIN,
+        provider: AuthProvider = AuthProvider.GOOGLE,
         serverAuthCode: String? = "server-code",
         scopes: Array<String>? = arrayOf("email"),
         expirationTime: Long? = 1_789_500_000_000L,
@@ -54,7 +55,7 @@ class ProviderRequestRegistryTest {
     fun everyErrorCodeIntegerReachesTheTypedFailure() {
         for (code in AuthErrorCode.entries) {
             val login = registerUser()
-            assertTrue(ProviderRequestRegistry.loginError("login", code.value, "detail-${code.value}", login))
+            assertTrue(ProviderRequestRegistry.loginError(Origin.LOGIN, code.value, "detail-${code.value}", login))
             assertEquals(ProviderUserResult(null, ProviderFailure(code, "detail-${code.value}")), users.last())
 
             val refresh = ProviderRequestRegistry.registerTokens { tokens.add(it) }
@@ -74,7 +75,7 @@ class ProviderRequestRegistryTest {
         for ((index, code) in listOf(-1, 16, 17, 255, Int.MAX_VALUE, Int.MIN_VALUE).withIndex()) {
             val detail = details[index % details.size]
             val id = registerUser()
-            assertTrue(ProviderRequestRegistry.loginError("login", code, detail, id))
+            assertTrue(ProviderRequestRegistry.loginError(Origin.LOGIN, code, detail, id))
             assertEquals(AuthErrorCode.UNKNOWN, users.last().failure?.code)
             assertEquals(detail, users.last().failure?.detail)
             assertNull(users.last().user)
@@ -84,8 +85,8 @@ class ProviderRequestRegistryTest {
     @Test
     fun userRequestSettlesExactlyOnce() {
         val id = registerUser()
-        assertTrue(ProviderRequestRegistry.loginError("login", AuthErrorCode.CANCELLED.value, null, id))
-        assertFalse(ProviderRequestRegistry.loginError("login", AuthErrorCode.NETWORK_ERROR.value, null, id))
+        assertTrue(ProviderRequestRegistry.loginError(Origin.LOGIN, AuthErrorCode.CANCELLED.value, null, id))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, AuthErrorCode.NETWORK_ERROR.value, null, id))
         assertFalse(success(id))
         ProviderRequestRegistry.cancelAll()
         assertEquals(1, users.size)
@@ -94,27 +95,26 @@ class ProviderRequestRegistryTest {
         val succeeded = registerUser()
         assertTrue(success(succeeded))
         assertFalse(success(succeeded))
-        assertFalse(ProviderRequestRegistry.loginError("login", AuthErrorCode.TIMEOUT.value, null, succeeded))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, AuthErrorCode.TIMEOUT.value, null, succeeded))
         assertEquals(2, users.size)
         assertNull(users.last().failure)
     }
 
     @Test
     fun callbackFromAnotherOriginOrUnknownGenerationIsIgnoredWithoutConsumingTheRequest() {
-        val id = registerUser("scopes")
-        assertFalse(ProviderRequestRegistry.loginError("login", AuthErrorCode.CANCELLED.value, null, id))
-        assertFalse(success(id, origin = "silent"))
-        assertFalse(ProviderRequestRegistry.loginError("", AuthErrorCode.CANCELLED.value, null, id))
+        val id = registerUser(Origin.SCOPES)
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, AuthErrorCode.CANCELLED.value, null, id))
+        assertFalse(success(id, origin = Origin.SILENT))
         for (unknown in listOf(0L, -1L, id + 1_000_000L, Long.MAX_VALUE, Long.MIN_VALUE)) {
-            assertFalse(ProviderRequestRegistry.loginError("scopes", AuthErrorCode.CANCELLED.value, null, unknown))
-            assertFalse(success(unknown, origin = "scopes"))
+            assertFalse(ProviderRequestRegistry.loginError(Origin.SCOPES, AuthErrorCode.CANCELLED.value, null, unknown))
+            assertFalse(success(unknown, origin = Origin.SCOPES))
             assertFalse(ProviderRequestRegistry.refreshError(AuthErrorCode.CANCELLED.value, null, unknown))
             assertFalse(ProviderRequestRegistry.refreshSuccess("id", "access", null, unknown))
             assertFalse(ProviderRequestRegistry.revokeResult(null, null, unknown))
         }
         assertTrue(users.isEmpty())
 
-        assertTrue(success(id, origin = "scopes"))
+        assertTrue(success(id, origin = Origin.SCOPES))
         assertEquals(1, users.size)
     }
 
@@ -127,7 +127,7 @@ class ProviderRequestRegistryTest {
 
         assertFalse(ProviderRequestRegistry.refreshError(AuthErrorCode.UNKNOWN.value, null, user))
         assertFalse(ProviderRequestRegistry.revokeResult(null, null, token))
-        assertFalse(ProviderRequestRegistry.loginError("login", AuthErrorCode.UNKNOWN.value, null, revocation))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, AuthErrorCode.UNKNOWN.value, null, revocation))
         assertTrue(users.isEmpty() && tokens.isEmpty() && revocations.isEmpty())
 
         assertTrue(ProviderRequestRegistry.revokeResult(null, "ignored", revocation))
@@ -160,7 +160,7 @@ class ProviderRequestRegistryTest {
         assertNull(user.underlyingError)
 
         val apple = registerUser()
-        assertTrue(success(apple, provider = "apple", scopes = null, expirationTime = null))
+        assertTrue(success(apple, provider = AuthProvider.APPLE, scopes = null, expirationTime = null))
         assertEquals(AuthProvider.APPLE, users.last().user?.provider)
         assertEquals("server-code", users.last().user?.authorizationCode)
         assertEquals("server-code", users.last().user?.serverAuthCode)
@@ -168,7 +168,7 @@ class ProviderRequestRegistryTest {
         assertNull(users.last().user?.expirationTime)
 
         val microsoft = registerUser()
-        assertTrue(success(microsoft, provider = "microsoft", serverAuthCode = null))
+        assertTrue(success(microsoft, provider = AuthProvider.MICROSOFT, serverAuthCode = null))
         assertEquals(AuthProvider.MICROSOFT, users.last().user?.provider)
         assertNull(users.last().user?.authorizationCode)
     }
@@ -185,16 +185,6 @@ class ProviderRequestRegistryTest {
             assertFalse(success(id, expirationTime = invalid))
             assertEquals(ProviderUserResult(null, ProviderFailure(AuthErrorCode.PARSE_ERROR, null)), users.last())
             assertFalse(success(id))
-        }
-    }
-
-    @Test
-    fun unknownProviderNamesAreAParseErrorAndStillConsumeTheRequest() {
-        for (provider in listOf("", " ", "GOOGLE", "Google", "facebook", "google ", "apple\u0000", "x".repeat(100_000))) {
-            val id = registerUser()
-            assertFalse(success(id, provider = provider))
-            assertEquals(ProviderUserResult(null, ProviderFailure(AuthErrorCode.PARSE_ERROR, null)), users.last())
-            assertFalse(ProviderRequestRegistry.loginError("login", AuthErrorCode.CANCELLED.value, null, id))
         }
     }
 
@@ -225,9 +215,9 @@ class ProviderRequestRegistryTest {
 
     @Test
     fun cancelAllSettlesEveryPendingRequestOnceAndLateCallbacksAreIgnored() {
-        val login = registerUser("login")
-        val scopes = registerUser("scopes")
-        val silent = registerUser("silent")
+        val login = registerUser(Origin.LOGIN)
+        val scopes = registerUser(Origin.SCOPES)
+        val silent = registerUser(Origin.SILENT)
         val refresh = ProviderRequestRegistry.registerTokens { tokens.add(it) }
         val revoke = ProviderRequestRegistry.registerRevocation { revocations.add(it) }
 
@@ -240,8 +230,8 @@ class ProviderRequestRegistryTest {
         assertEquals(listOf(ProviderVoidResult(cancelled)), revocations)
 
         assertFalse(success(login))
-        assertFalse(ProviderRequestRegistry.loginError("scopes", AuthErrorCode.NETWORK_ERROR.value, null, scopes))
-        assertFalse(success(silent, origin = "silent"))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.SCOPES, AuthErrorCode.NETWORK_ERROR.value, null, scopes))
+        assertFalse(success(silent, origin = Origin.SILENT))
         assertFalse(ProviderRequestRegistry.refreshSuccess("id", "access", null, refresh))
         assertFalse(ProviderRequestRegistry.revokeResult(null, null, revoke))
         assertEquals(3, users.size)
@@ -256,21 +246,21 @@ class ProviderRequestRegistryTest {
     @Test
     fun aSinkMayReenterTheRegistryWithoutDeadlock() {
         var nested = 0L
-        val outer = ProviderRequestRegistry.registerUser("login") { result ->
+        val outer = ProviderRequestRegistry.registerUser(Origin.LOGIN) { result ->
             users.add(result)
-            nested = registerUser("scopes")
+            nested = registerUser(Origin.SCOPES)
             ProviderRequestRegistry.cancelAll()
         }
-        assertTrue(ProviderRequestRegistry.loginError("login", AuthErrorCode.TIMEOUT.value, null, outer))
+        assertTrue(ProviderRequestRegistry.loginError(Origin.LOGIN, AuthErrorCode.TIMEOUT.value, null, outer))
         assertEquals(listOf(AuthErrorCode.TIMEOUT, AuthErrorCode.CANCELLED), users.map { it.failure?.code })
-        assertFalse(ProviderRequestRegistry.loginError("scopes", AuthErrorCode.UNKNOWN.value, null, nested))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.SCOPES, AuthErrorCode.UNKNOWN.value, null, nested))
     }
 
     @Test
     fun racingCallbacksAndCancellationSettleEachRequestExactlyOnce() {
         val requests = 400
         val counts = List(requests) { AtomicInteger(0) }
-        val ids = counts.map { count -> ProviderRequestRegistry.registerUser("login") { count.incrementAndGet() } }
+        val ids = counts.map { count -> ProviderRequestRegistry.registerUser(Origin.LOGIN) { count.incrementAndGet() } }
         val accepted = AtomicInteger(0)
         val start = CountDownLatch(1)
         val pool = Executors.newFixedThreadPool(8)
@@ -280,9 +270,9 @@ class ProviderRequestRegistryTest {
                     start.await()
                     for ((index, id) in ids.withIndex()) {
                         val settled = when ((index + worker) % 3) {
-                            0 -> ProviderRequestRegistry.loginError("login", AuthErrorCode.NETWORK_ERROR.value, null, id)
+                            0 -> ProviderRequestRegistry.loginError(Origin.LOGIN, AuthErrorCode.NETWORK_ERROR.value, null, id)
                             1 -> ProviderRequestRegistry.loginSuccess(
-                                "login", "google", null, null, null, null, null, null, null, null, null, null, null,
+                                Origin.LOGIN, AuthProvider.GOOGLE, null, null, null, null, null, null, null, null, null, null, null,
                                 null, null, id,
                             )
                             else -> {

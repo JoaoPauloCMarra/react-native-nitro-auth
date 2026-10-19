@@ -3222,6 +3222,33 @@ describe("AuthModule (web)", () => {
       });
     });
 
+    it("refresh posts to the login tenant", async () => {
+      jest.useFakeTimers();
+      installMicrosoftLogin([
+        {
+          id_token: idToken(),
+          access_token: "a",
+          refresh_token: "r1",
+          expires_in: 3600,
+        },
+        { id_token: idToken(), access_token: "b", expires_in: 3600 },
+      ]);
+      const fetchMock = globalThis.fetch as unknown as jest.Mock;
+      const auth = await loadAuthModule({
+        microsoftClientId: "test-client-id",
+        microsoftTenant: "common",
+      });
+      await Promise.all([
+        auth.login("microsoft", { tenant: "contoso.onmicrosoft.com" }),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      await auth.refreshToken();
+
+      const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+      expect(urls[1]).toContain("/contoso.onmicrosoft.com/oauth2/v2.0/token");
+    });
+
     it("does not keep the previous account's refresh token after a login without one", async () => {
       jest.useFakeTimers();
       installMicrosoftLogin([
@@ -3247,6 +3274,34 @@ describe("AuthModule (web)", () => {
 
       await expect(auth.refreshToken()).rejects.toMatchObject({
         code: "refresh_failed",
+      });
+    });
+
+    it("silentRestore keeps the in-memory Microsoft refresh token", async () => {
+      jest.useFakeTimers();
+      installMicrosoftLogin([
+        {
+          id_token: idToken(),
+          access_token: "a",
+          refresh_token: "r1",
+          expires_in: 3600,
+        },
+        { id_token: idToken(), access_token: "b", expires_in: 3600 },
+      ]);
+      const auth = await loadAuthModule({
+        microsoftClientId: "test-client-id",
+      });
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+      localStorage.setItem(MS_REFRESH_TOKEN_KEY, "persisted-from-opt-in");
+
+      await auth.silentRestore();
+
+      expect(localStorage.getItem(MS_REFRESH_TOKEN_KEY)).toBeNull();
+      await expect(auth.refreshToken()).resolves.toMatchObject({
+        accessToken: "b",
       });
     });
 
@@ -3455,6 +3510,7 @@ describe("AuthModule (web)", () => {
       );
       installFetch(
         jest.fn(async () => ({
+          ok: true,
           json: async () => ({ access_token: "a" }),
         })),
       );
@@ -3505,6 +3561,217 @@ describe("AuthModule (web)", () => {
 
       expect(await settleLogin(auth.login("apple"))).toMatchObject({
         code: "not_signed_in",
+      });
+    });
+  });
+
+  describe("web hardening (audit 78, 79, 82)", () => {
+    const microsoftConfig = { microsoftClientId: "test-client-id" };
+    const googleConfig = {
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+    };
+    const msIdToken = () => createJwtWithPayload({ nonce: "test-random-uuid" });
+
+    const installMicrosoftPopup = () => {
+      const popup = createPopupWindow();
+      installWindowOpen(
+        jest.fn((url: string) => {
+          const state = new URL(url).searchParams.get("state");
+          popup.location.href = `${window.location.origin}?code=auth-code&state=${state}`;
+          return popup;
+        }),
+      );
+      installFetch(
+        jest.fn(
+          async () =>
+            ({
+              ok: true,
+              json: async () => ({
+                id_token: msIdToken(),
+                access_token: "a",
+                expires_in: 3600,
+              }),
+            }) as unknown as Response,
+        ),
+      );
+    };
+
+    const installGooglePopup = (urls: string[]) => {
+      const popup = createPopupWindow();
+      installWindowOpen(
+        jest.fn((url: string) => {
+          urls.push(url);
+          const params = new URL(url).searchParams;
+          const token = createJwtWithPayload({
+            nonce: params.get("nonce"),
+            email: "g@example.com",
+          });
+          popup.location.href = `${window.location.origin}#id_token=${token}&state=${params.get("state")}&expires_in=3600`;
+          return popup;
+        }),
+      );
+    };
+
+    it("a storage write failure after provider success falls back to memory", async () => {
+      jest.useFakeTimers();
+      installMicrosoftPopup();
+      const auth = await loadAuthModule(microsoftConfig);
+      const events: { type: string }[] = [];
+      auth.onAuthEvent((event) => events.push(event));
+      const originalSetItem = Storage.prototype.setItem;
+      const originalRemoveItem = Storage.prototype.removeItem;
+      jest.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+        this: Storage,
+        key: string,
+        value,
+      ) {
+        if (key === "__nitro_auth_storage_probe__") {
+          originalSetItem.call(this, key, value);
+          return;
+        }
+        throw new DOMException("quota", "QuotaExceededError");
+      });
+      jest.spyOn(Storage.prototype, "removeItem").mockImplementation(function (
+        this: Storage,
+        key: string,
+      ) {
+        if (key === "__nitro_auth_storage_probe__") {
+          originalRemoveItem.call(this, key);
+          return;
+        }
+        throw new DOMException("denied", "SecurityError");
+      });
+
+      await Promise.all([
+        expect(auth.login("microsoft")).resolves.toBeUndefined(),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      expect(auth.currentUser?.provider).toBe("microsoft");
+      expect(events.map((event) => event.type)).not.toContain("login_failed");
+      expect(() => {
+        auth.logout();
+      }).not.toThrow();
+      expect(auth.currentUser).toBeUndefined();
+    });
+
+    it("grantedScopes returns a copy", async () => {
+      jest.useFakeTimers();
+      const urls: string[] = [];
+      installGooglePopup(urls);
+      const auth = await loadAuthModule(googleConfig);
+
+      await Promise.all([
+        auth.login("google"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+      auth.grantedScopes.push("evil");
+      auth.logout();
+      await Promise.all([
+        auth.login("google"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      expect(new URL(urls[1] as string).searchParams.get("scope")).toBe(
+        "openid email profile",
+      );
+      expect(auth.grantedScopes).toEqual(["openid", "email", "profile"]);
+    });
+
+    it("requestScopes sends login_hint and rejects a different account", async () => {
+      jest.useFakeTimers();
+      const urls: string[] = [];
+      let sub = "user-A";
+      const popup = createPopupWindow();
+      installWindowOpen(
+        jest.fn((url: string) => {
+          urls.push(url);
+          const params = new URL(url).searchParams;
+          const token = createJwtWithPayload({
+            nonce: params.get("nonce"),
+            email: `${sub}@example.com`,
+            sub,
+          });
+          popup.location.href = `${window.location.origin}#id_token=${token}&state=${params.get("state")}&expires_in=3600`;
+          return popup;
+        }),
+      );
+      const auth = await loadAuthModule(googleConfig);
+      await Promise.all([
+        auth.login("google"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      sub = "user-B";
+      const [rejection] = await Promise.all([
+        auth.requestScopes(["calendar"]).then(
+          () => undefined,
+          (e: unknown) => e,
+        ),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      expect(new URL(urls[1] as string).searchParams.get("login_hint")).toBe(
+        "user-A@example.com",
+      );
+      expect(rejection).toMatchObject({ code: "invalid_state" });
+      expect(auth.currentUser?.userId).toBe("user-A");
+      expect(auth.grantedScopes).toEqual(["openid", "email", "profile"]);
+    });
+
+    it("google refreshToken re-authenticates for the signed-in account", async () => {
+      jest.useFakeTimers();
+      const urls: string[] = [];
+      let accessToken = "access-1";
+      const popup = createPopupWindow();
+      installWindowOpen(
+        jest.fn((url: string) => {
+          urls.push(url);
+          const params = new URL(url).searchParams;
+          const token = createJwtWithPayload({
+            nonce: params.get("nonce"),
+            email: "user-A@example.com",
+            sub: "user-A",
+          });
+          popup.location.href = `${window.location.origin}#id_token=${token}&access_token=${accessToken}&state=${params.get("state")}&expires_in=3600`;
+          return popup;
+        }),
+      );
+      const auth = await loadAuthModule(googleConfig);
+      const events: string[] = [];
+      auth.onAuthEvent((event) => events.push(event.type));
+      await Promise.all([
+        auth.login("google"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      accessToken = "access-2";
+      const [tokens] = await Promise.all([
+        auth.refreshToken(),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+
+      expect(new URL(urls[1] as string).searchParams.get("login_hint")).toBe(
+        "user-A@example.com",
+      );
+      expect(tokens.accessToken).toBe("access-2");
+      expect(auth.currentUser?.accessToken).toBe("access-2");
+      expect(events).toContain("tokens_refreshed");
+    });
+
+    it("insecure context rejects with configuration_error", async () => {
+      installMicrosoftPopup();
+      const auth = await loadAuthModule(microsoftConfig);
+      Object.defineProperty(globalThis.crypto, "subtle", {
+        configurable: true,
+        value: undefined,
+      });
+
+      await expect(auth.login("microsoft")).rejects.toMatchObject({
+        code: "configuration_error",
+      });
+      await expect(auth.createNonce()).rejects.toMatchObject({
+        code: "configuration_error",
       });
     });
   });

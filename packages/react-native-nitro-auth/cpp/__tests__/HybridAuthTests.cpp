@@ -690,6 +690,39 @@ void testRefreshFailedEventCarriesTypedErrorCode() {
   assert(failedCode == AuthErrorCode::NETWORK_ERROR);
 }
 
+void testRefreshFailedCarriesTheProvider() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  std::optional<AuthProvider> failedProvider;
+
+  auto loginPromise = auth->login(AuthProvider::MICROSOFT, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}, "old", expiredTimestampMs()));
+  assert(loginPromise->isResolved());
+
+  auth->onAuthEvent([&](const AuthEvent& event) {
+    if (event.type == AuthEventType::REFRESH_FAILED) failedProvider = event.provider;
+  });
+
+  auto refreshPromise = auth->refreshToken();
+  lastRefreshPromise->reject(makeAuthError(AuthErrorCode::REFRESH_FAILED, "invalid_grant"));
+  assert(refreshPromise->isRejected());
+  assert(failedProvider.has_value());
+}
+
+void testRevokingEveryScopeLeavesScopesUnset() {
+  resetPlatformMocks();
+  auto auth = std::make_shared<HybridAuth>();
+  auto loginPromise = auth->login(AuthProvider::GOOGLE, std::nullopt);
+  lastLoginPromise->resolve(makeUser(std::vector<std::string>{"profile"}));
+  assert(loginPromise->isResolved());
+  assert(auth->getCurrentUser()->scopes.has_value());
+
+  auto revoked = auth->revokeScopesWithResult({"profile"});
+  assert(revoked->isResolved());
+  assert(auth->getGrantedScopes().empty());
+  assert(!auth->getCurrentUser()->scopes.has_value());
+}
+
 void testDisposeRejectsPendingLoginAndClearsListeners() {
   resetPlatformMocks();
   auto auth = std::make_shared<HybridAuth>();
@@ -1431,6 +1464,8 @@ int main() {
   testTypedAuthEventsAcrossLoginRefreshLogout();
   testLoginFailedEventCarriesTypedErrorCode();
   testRefreshFailedEventCarriesTypedErrorCode();
+  testRefreshFailedCarriesTheProvider();
+  testRevokingEveryScopeLeavesScopesUnset();
   testAuthErrorEnvelopeIsByteIdentical();
   testDisposeRejectsPendingLoginAndClearsListeners();
   testDisposeRejectsPendingSilentRestore();
