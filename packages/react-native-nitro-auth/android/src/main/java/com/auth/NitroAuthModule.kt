@@ -12,7 +12,6 @@ class NitroAuthModule(reactContext: ReactApplicationContext) :
 
     init {
         try {
-            // Load the native library first so that AuthAdapter's JNI methods are resolvable.
             NitroAuthOnLoad.initializeNative()
             AuthAdapter.initialize(reactContext)
             Log.d("NitroAuthModule", "NitroAuth initialized")

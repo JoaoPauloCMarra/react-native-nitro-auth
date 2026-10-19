@@ -1,8 +1,18 @@
 package com.auth
 
+import com.margelo.nitro.com.auth.ProviderFailure
+import com.margelo.nitro.com.auth.ProviderRequestRegistry
+import com.margelo.nitro.com.auth.ProviderVoidResult
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+import com.margelo.nitro.com.auth.AuthErrorCode as NativeAuthErrorCode
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class GoogleRevokeStateTest {
 
     @Test
@@ -46,70 +56,27 @@ class GoogleRevokeStateTest {
     }
 
     @Test
-    fun delayedCleanupRunsOnlyForTheSameRevokeAndEpoch() {
-        assertEquals(
-            GoogleCredentialCleanupDecision.RUN,
-            decideGoogleCredentialCleanup(11L, 11L, 4L, 4L, externalCallStarted = false),
-        )
-        assertEquals(
-            GoogleCredentialCleanupDecision.SKIP,
-            decideGoogleCredentialCleanup(11L, 12L, 4L, 4L, externalCallStarted = false),
-        )
-        assertEquals(
-            GoogleCredentialCleanupDecision.SKIP,
-            decideGoogleCredentialCleanup(11L, 11L, 4L, 5L, externalCallStarted = false),
-        )
-    }
-
-    @Test
-    fun aNewEpochWaitsForAnAlreadyStartedExternalClear() {
-        assertEquals(
-            GoogleCredentialCleanupDecision.WAIT_FOR_COMPLETION,
-            decideGoogleCredentialCleanup(11L, 11L, 4L, 5L, externalCallStarted = true),
-        )
-    }
-
-    @Test
     fun productionSettlementClearsStaleRevokeAndLeavesReplacementOwnedByB() {
-        val callbacks = mutableListOf<Triple<Int?, String?, Long>>()
-        AuthAdapter.nativeRevokeResultSink = { code, detail, generation ->
-            callbacks += Triple(code, detail, generation)
-        }
-
-        val authClass = AuthAdapter::class.java
-        val begin = authClass.getDeclaredMethod("beginGoogleRevoke", Long::class.javaPrimitiveType)
-        val advance = authClass.getDeclaredMethod("advanceGoogleAuthStateLocked")
-        val settle = authClass.getDeclaredMethod(
-            "settleGoogleRevoke",
-            android.content.Context::class.java,
-            Long::class.javaPrimitiveType,
-            AuthErrorCode::class.java,
-            String::class.java,
-            Boolean::class.javaPrimitiveType,
-        )
-        begin.isAccessible = true
-        advance.isAccessible = true
-        settle.isAccessible = true
+        val results = mutableListOf<ProviderVoidResult>()
+        val first = ProviderRequestRegistry.registerRevocation { results += it }
+        val second = ProviderRequestRegistry.registerRevocation { results += it }
+        val context = RuntimeEnvironment.getApplication()
 
         try {
-            begin.invoke(AuthAdapter, 11L)
-            advance.invoke(AuthAdapter)
-            settle.invoke(AuthAdapter, null, 11L, AuthErrorCode.NETWORK_ERROR, "stale", false)
+            AuthAdapter.beginGoogleRevoke(first)
+            AuthAdapter.advanceGoogleAuthStateLocked()
+            AuthAdapter.settleGoogleRevoke(context, first, AuthErrorCode.NETWORK_ERROR, "stale", false)
 
-            begin.invoke(AuthAdapter, 12L)
-            settle.invoke(AuthAdapter, null, 11L, AuthErrorCode.NETWORK_ERROR, "late-a", false)
-            settle.invoke(AuthAdapter, null, 12L, AuthErrorCode.NETWORK_ERROR, "current-b", false)
+            AuthAdapter.beginGoogleRevoke(second)
+            AuthAdapter.settleGoogleRevoke(context, first, AuthErrorCode.NETWORK_ERROR, "late-a", false)
+            AuthAdapter.settleGoogleRevoke(context, second, AuthErrorCode.NETWORK_ERROR, "current-b", false)
 
-            assertEquals(
-                listOf(
-                    Triple(AuthErrorCode.NETWORK_ERROR.code, "stale", 11L),
-                    Triple(AuthErrorCode.NETWORK_ERROR.code, "current-b", 12L),
-                ),
-                callbacks,
-            )
+            fun failure(detail: String) =
+                ProviderVoidResult(ProviderFailure(NativeAuthErrorCode.NETWORK_ERROR, detail))
+            assertEquals(listOf(failure("stale"), failure("current-b")), results)
         } finally {
-            AuthAdapter.nativeRevokeResultSink = null
             AuthAdapter.cancelPendingOperations()
+            ProviderRequestRegistry.cancelAll()
         }
     }
 }

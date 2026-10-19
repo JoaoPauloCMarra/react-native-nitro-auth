@@ -37,8 +37,9 @@ const GOOGLE_BUTTON_FONT_ANDROID_PATH = path.join(
 const GOOGLE_BUTTON_FONT_ANDROID_FILENAME = "NitroAuthGoogleSans-Medium.ttf";
 const GOOGLE_BUTTON_FONT_ANDROID_LICENSE_FILENAME =
   "NitroAuthGoogleSans-OFL.txt";
-const GOOGLE_BUTTON_FONT_IOS_FILENAME = "NitroAuthGoogleSans-Medium.ttf";
-const GOOGLE_BUTTON_FONT_IOS_LICENSE_FILENAME = "NitroAuthGoogleSans-OFL.txt";
+const GOOGLE_BUTTON_FONT_IOS_FILENAME = GOOGLE_BUTTON_FONT_ANDROID_FILENAME;
+const GOOGLE_BUTTON_FONT_IOS_LICENSE_FILENAME =
+  GOOGLE_BUTTON_FONT_ANDROID_LICENSE_FILENAME;
 
 const googleSignInIosPods = [
   { name: "AppCheckCore", modular_headers: true },
@@ -92,14 +93,18 @@ function getNitroAuthIosExtraPods(extraPods = []) {
   return pods;
 }
 
+const ANDROID_STRING_OPTIONS = [
+  ["nitro_auth_google_client_id", "googleClientId"],
+  ["nitro_auth_microsoft_client_id", "microsoftClientId"],
+  ["nitro_auth_microsoft_tenant", "microsoftTenant"],
+  ["nitro_auth_microsoft_b2c_domain", "microsoftB2cDomain"],
+];
 const MANAGED_ANDROID_STRINGS = [
   "nitro_auth_apple_android_broker_url",
   "nitro_auth_apple_android_callback_scheme",
-  "nitro_auth_google_client_id",
-  "nitro_auth_microsoft_client_id",
-  "nitro_auth_microsoft_tenant",
-  "nitro_auth_microsoft_b2c_domain",
+  ...ANDROID_STRING_OPTIONS.map(([name]) => name),
 ];
+const APPLE_SIGN_IN_ENTITLEMENT = "com.apple.developer.applesignin";
 const MANAGED_IOS_MARKER_KEY = "NitroAuthManaged";
 const MICROSOFT_AUTH_ACTIVITY = "com.auth.MicrosoftAuthActivity";
 // Manifest merge replaces the placeholder with the final applicationId, so
@@ -453,6 +458,11 @@ const withNitroAuth = (config, props) => {
     const googleUrlScheme = resolveGoogleUrlScheme(ios);
     if (googleUrlScheme) {
       addScheme(googleUrlScheme);
+    } else if (ios.googleClientId) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[react-native-nitro-auth] ios.googleClientId does not end in .apps.googleusercontent.com, so no Google URL scheme was added. Set ios.googleUrlScheme or fix the client ID.",
+      );
     }
     const bundleIdentifier = config.ios?.bundleIdentifier;
     if (ios.microsoftClientId && !bundleIdentifier) {
@@ -479,9 +489,16 @@ const withNitroAuth = (config, props) => {
     return config;
   });
 
-  if (ios.appleSignIn === true) {
+  const userOwnsAppleEntitlement =
+    config.ios?.usesAppleSignIn === true ||
+    config.ios?.entitlements?.[APPLE_SIGN_IN_ENTITLEMENT] !== undefined;
+  if (typeof ios.appleSignIn === "boolean") {
     config = withEntitlementsPlist(config, (config) => {
-      config.modResults["com.apple.developer.applesignin"] = ["Default"];
+      if (ios.appleSignIn === true) {
+        config.modResults[APPLE_SIGN_IN_ENTITLEMENT] = ["Default"];
+      } else if (!userOwnsAppleEntitlement) {
+        delete config.modResults[APPLE_SIGN_IN_ENTITLEMENT];
+      }
       return config;
     });
   }
@@ -493,69 +510,28 @@ const withNitroAuth = (config, props) => {
           (entry) => !MANAGED_ANDROID_STRINGS.includes(entry.$?.name),
         );
     }
-    if (appleAndroid) {
+    const entries = [
+      ...(appleAndroid
+        ? [
+            [
+              "nitro_auth_apple_android_broker_url",
+              appleAndroid.brokerUrl,
+              { translatable: "false", formatted: "false" },
+            ],
+            [
+              "nitro_auth_apple_android_callback_scheme",
+              appleAndroid.callbackScheme,
+              { translatable: "false" },
+            ],
+          ]
+        : []),
+      ...ANDROID_STRING_OPTIONS.flatMap(([name, option]) =>
+        android[option] ? [[name, android[option], {}]] : [],
+      ),
+    ];
+    for (const [name, value, attributes] of entries) {
       config.modResults = AndroidConfig.Strings.setStringItem(
-        [
-          {
-            $: {
-              name: "nitro_auth_apple_android_broker_url",
-              translatable: "false",
-              formatted: "false",
-            },
-            _: appleAndroid.brokerUrl,
-          },
-          {
-            $: {
-              name: "nitro_auth_apple_android_callback_scheme",
-              translatable: "false",
-            },
-            _: appleAndroid.callbackScheme,
-          },
-        ],
-        config.modResults,
-      );
-    }
-    if (android.googleClientId) {
-      config.modResults = AndroidConfig.Strings.setStringItem(
-        [
-          {
-            $: { name: "nitro_auth_google_client_id" },
-            _: android.googleClientId,
-          },
-        ],
-        config.modResults,
-      );
-    }
-    if (android.microsoftClientId) {
-      config.modResults = AndroidConfig.Strings.setStringItem(
-        [
-          {
-            $: { name: "nitro_auth_microsoft_client_id" },
-            _: android.microsoftClientId,
-          },
-        ],
-        config.modResults,
-      );
-    }
-    if (android.microsoftTenant) {
-      config.modResults = AndroidConfig.Strings.setStringItem(
-        [
-          {
-            $: { name: "nitro_auth_microsoft_tenant" },
-            _: android.microsoftTenant,
-          },
-        ],
-        config.modResults,
-      );
-    }
-    if (android.microsoftB2cDomain) {
-      config.modResults = AndroidConfig.Strings.setStringItem(
-        [
-          {
-            $: { name: "nitro_auth_microsoft_b2c_domain" },
-            _: android.microsoftB2cDomain,
-          },
-        ],
+        [{ $: { name, ...attributes }, _: value }],
         config.modResults,
       );
     }

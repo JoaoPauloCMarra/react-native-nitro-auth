@@ -52,12 +52,6 @@ internal class GoogleRevokeState {
     }
 }
 
-internal enum class GoogleCredentialCleanupDecision {
-    RUN,
-    WAIT_FOR_COMPLETION,
-    SKIP,
-}
-
 internal fun decideGoogleRevokeCallback(
     activeOperationGeneration: Long?,
     callbackGeneration: Long,
@@ -75,29 +69,5 @@ internal fun decideGoogleRevokeCallback(
         GoogleRevokeCallbackDecision.APPLY_SUCCESS
     } else {
         GoogleRevokeCallbackDecision.SETTLE_FAILURE
-    }
-}
-
-internal fun decideGoogleCredentialCleanup(
-    cleanupGeneration: Long?,
-    expectedGeneration: Long,
-    cleanupStateEpoch: Long?,
-    currentStateEpoch: Long,
-    externalCallStarted: Boolean,
-): GoogleCredentialCleanupDecision {
-    if (cleanupGeneration != expectedGeneration || cleanupStateEpoch == null) {
-        return GoogleCredentialCleanupDecision.SKIP
-    }
-    if (cleanupStateEpoch != currentStateEpoch) {
-        return if (externalCallStarted) {
-            GoogleCredentialCleanupDecision.WAIT_FOR_COMPLETION
-        } else {
-            GoogleCredentialCleanupDecision.SKIP
-        }
-    }
-    return if (externalCallStarted) {
-        GoogleCredentialCleanupDecision.WAIT_FOR_COMPLETION
-    } else {
-        GoogleCredentialCleanupDecision.RUN
     }
 }

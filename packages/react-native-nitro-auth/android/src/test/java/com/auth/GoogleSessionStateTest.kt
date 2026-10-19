@@ -10,13 +10,13 @@ class GoogleSessionStateTest {
     fun returnedHostedDomainIsTheRequestedConfiguration() {
         assertEquals(
             "company.example",
-            GoogleSessionState("company.example").returnedHostedDomain(),
+            GoogleSessionState("company.example", accountId = "account-a").returnedHostedDomainForAccount("account-a"),
         )
     }
 
     @Test
     fun missingConfigurationDoesNotInferAHostedDomain() {
-        assertNull(GoogleSessionState(null).returnedHostedDomain())
+        assertNull(GoogleSessionState(null, accountId = "account-a").returnedHostedDomainForAccount("account-a"))
     }
 
     @Test
@@ -26,8 +26,8 @@ class GoogleSessionStateTest {
             accountId = "account-a",
             kind = GoogleSessionKind.LEGACY,
         )
-        assertEquals("company.example", state.returnedHostedDomain("account-a"))
-        assertNull(state.returnedHostedDomain("account-b"))
+        assertEquals("company.example", state.returnedHostedDomainForAccount("account-a"))
+        assertNull(state.returnedHostedDomainForAccount("account-b"))
         assertNull(state.returnedHostedDomainForAccount(null))
     }
 

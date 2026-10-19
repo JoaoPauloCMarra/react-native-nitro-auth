@@ -1,3 +1,14 @@
+jest.mock("expo/config-plugins", () => {
+  const actual = jest.requireActual("expo/config-plugins");
+  return {
+    ...actual,
+    IOSConfig: {
+      ...actual.IOSConfig,
+      XcodeUtils: { ...actual.IOSConfig.XcodeUtils },
+    },
+  };
+});
+
 const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
@@ -810,6 +821,114 @@ describe("Microsoft Expo configuration", () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("ios.bundleIdentifier"),
     );
+  });
+
+  it("removes the Apple entitlement it added when appleSignIn turns off", async () => {
+    const modOptions = {
+      projectRoot: "/tmp/example",
+      platformProjectRoot: "/tmp/example/ios",
+    };
+    const apply = (options, entitlements) =>
+      applyExpoMod(
+        withNitroAuth({ name: "Example", slug: "example" }, options),
+        "ios",
+        "entitlements",
+        entitlements,
+        modOptions,
+      );
+    const enabled = await apply(
+      { ios: { appleSignIn: true } },
+      {
+        "aps-environment": "development",
+      },
+    );
+    expect(enabled["com.apple.developer.applesignin"]).toEqual(["Default"]);
+    const disabled = await apply({ ios: { appleSignIn: false } }, enabled);
+    expect(disabled).toEqual({ "aps-environment": "development" });
+  });
+
+  it("keeps a user-owned Apple entitlement", async () => {
+    const modOptions = {
+      projectRoot: "/tmp/example",
+      platformProjectRoot: "/tmp/example/ios",
+    };
+    const userOwned = { "com.apple.developer.applesignin": ["Default"] };
+    const apply = (appConfig, options, entitlements) =>
+      applyExpoMod(
+        withNitroAuth(
+          { name: "Example", slug: "example", ...appConfig },
+          options,
+        ),
+        "ios",
+        "entitlements",
+        entitlements,
+        modOptions,
+      );
+    const off = { ios: { appleSignIn: false } };
+    expect(
+      await apply({ ios: { usesAppleSignIn: true } }, off, { ...userOwned }),
+    ).toEqual(userOwned);
+    expect(
+      await apply({ ios: { entitlements: { ...userOwned } } }, off, {
+        ...userOwned,
+      }),
+    ).toEqual(userOwned);
+    for (const options of [{}, { ios: {} }]) {
+      const config = withNitroAuth(
+        { name: "Example", slug: "example" },
+        options,
+      );
+      expect(config.mods.ios.entitlements).toBeUndefined();
+    }
+  });
+
+  it("warns when ios.googleClientId yields no URL scheme", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const modOptions = {
+      projectRoot: "/tmp/example",
+      platformProjectRoot: "/tmp/example/ios",
+    };
+    const plist = await applyExpoMod(
+      withNitroAuth(
+        { name: "Example", slug: "example" },
+        { ios: { googleClientId: "111-typo.apps.googleusercontent.co" } },
+      ),
+      "ios",
+      "infoPlist",
+      {},
+      modOptions,
+    );
+    expect(plist.CFBundleURLTypes).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("ios.googleClientId"),
+    );
+    warn.mockClear();
+    await applyExpoMod(
+      withNitroAuth(
+        { name: "Example", slug: "example" },
+        {
+          ios: {
+            googleClientId: "111-typo.apps.googleusercontent.co",
+            googleUrlScheme: "com.googleusercontent.apps.111-typo",
+          },
+        },
+      ),
+      "ios",
+      "infoPlist",
+      {},
+      modOptions,
+    );
+    await applyExpoMod(
+      withNitroAuth(
+        { name: "Example", slug: "example" },
+        { ios: { googleClientId: "111-ok.apps.googleusercontent.com" } },
+      ),
+      "ios",
+      "infoPlist",
+      {},
+      modOptions,
+    );
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("removes stale iOS provider keys and URL schemes when their options change or disappear", async () => {

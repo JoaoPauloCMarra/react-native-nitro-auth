@@ -1,35 +1,40 @@
 import type { AuthErrorCode } from "../Auth.nitro";
 
-const AUTH_ERROR_CODES: ReadonlySet<string> = new Set<AuthErrorCode>([
-  "cancelled",
-  "interaction_required",
-  "timeout",
-  "popup_blocked",
-  "network_error",
-  "configuration_error",
-  "not_signed_in",
-  "operation_in_progress",
-  "unsupported_provider",
-  "invalid_state",
-  "invalid_nonce",
-  "token_error",
-  "no_id_token",
-  "parse_error",
-  "refresh_failed",
-  "unknown",
-]);
+export const AUTH_ERROR_CODES: Readonly<Record<AuthErrorCode, true>> = {
+  cancelled: true,
+  interaction_required: true,
+  timeout: true,
+  popup_blocked: true,
+  network_error: true,
+  configuration_error: true,
+  not_signed_in: true,
+  operation_in_progress: true,
+  unsupported_provider: true,
+  invalid_state: true,
+  invalid_nonce: true,
+  token_error: true,
+  no_id_token: true,
+  parse_error: true,
+  refresh_failed: true,
+  unknown: true,
+};
 
 const LEGACY_AUTH_ERROR_CODES: Readonly<Record<string, AuthErrorCode>> = {
   no_window: "configuration_error",
   disposed: "cancelled",
 };
 
+const hasOwn = (table: object, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(table, key);
+
 export function isAuthErrorCode(value: string): value is AuthErrorCode {
-  return AUTH_ERROR_CODES.has(value);
+  return hasOwn(AUTH_ERROR_CODES, value);
 }
 
 export function toAuthErrorCode(raw: string): AuthErrorCode {
-  const normalized = LEGACY_AUTH_ERROR_CODES[raw];
+  const normalized = hasOwn(LEGACY_AUTH_ERROR_CODES, raw)
+    ? LEGACY_AUTH_ERROR_CODES[raw]
+    : undefined;
   if (normalized) {
     return normalized;
   }
@@ -39,7 +44,10 @@ export function toAuthErrorCode(raw: string): AuthErrorCode {
   }
 
   const prefix = raw.split(":", 1)[0]?.trim();
-  const normalizedPrefix = prefix ? LEGACY_AUTH_ERROR_CODES[prefix] : undefined;
+  const normalizedPrefix =
+    prefix && hasOwn(LEGACY_AUTH_ERROR_CODES, prefix)
+      ? LEGACY_AUTH_ERROR_CODES[prefix]
+      : undefined;
   if (normalizedPrefix) {
     return normalizedPrefix;
   }

@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 
 const { execSync } = require("child_process");
-const fs = require("fs");
 const path = require("path");
-const https = require("https");
 
 const colors = {
   green: (text) => `\x1b[32m${text}\x1b[0m`,
@@ -42,12 +40,6 @@ function commandExists(command) {
     return true;
   } catch {
     return false;
-  }
-}
-
-function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
   }
 }
 

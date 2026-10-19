@@ -312,7 +312,11 @@ export function FeatureDemo() {
       try {
         setNotice(label, "working");
         const message = await action();
-        setNotice(message ?? "Done", "success");
+        let doneNotice = "Done";
+        if (typeof message === "string") {
+          doneNotice = message;
+        }
+        setNotice(doneNotice, "success");
       } catch (e) {
         const error = AuthError.from(e);
         if (error.code === "cancelled") {
@@ -320,9 +324,8 @@ export function FeatureDemo() {
         } else {
           setNotice(getErrorStatus(error), "error");
         }
-      } finally {
-        actionInFlightRef.current = false;
       }
+      actionInFlightRef.current = false;
     },
     [auth.loading, setNotice],
   );

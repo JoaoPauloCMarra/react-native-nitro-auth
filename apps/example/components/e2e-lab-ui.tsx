@@ -1,4 +1,11 @@
-import { Pressable, Text } from "react-native";
+import type { ReactNode } from "react";
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type TextProps,
+} from "react-native";
 
 export function LabButton({
   testID,
@@ -15,14 +22,30 @@ export function LabButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      style={labStyles.button}
+      style={styles.button}
     >
-      <Text style={labStyles.buttonText}>{label}</Text>
+      <Text style={styles.buttonText}>{label}</Text>
     </Pressable>
   );
 }
 
-export const labStyles = {
+export function LabTitle(props: TextProps) {
+  return <Text {...props} style={styles.title} />;
+}
+
+export function LabSubtitle(props: TextProps) {
+  return <Text {...props} style={styles.subtitle} />;
+}
+
+export function LabResult(props: TextProps) {
+  return <Text {...props} style={styles.result} />;
+}
+
+export function LabRow({ children }: { children: ReactNode }) {
+  return <View style={styles.row}>{children}</View>;
+}
+
+const styles = StyleSheet.create({
   title: {
     color: "#0f172a",
     fontSize: 18,
@@ -53,4 +76,4 @@ export const labStyles = {
     fontFamily: "Menlo",
     fontSize: 11,
   },
-} as const;
+});

@@ -154,18 +154,14 @@ class AuthAdapterFlowTest {
         configuredStrings["nitro_auth_apple_android_callback_scheme"] = APPLE_SCHEME
     }
 
-    private fun registerUser(origin: String = "login"): Long =
+    private fun registerUser(origin: Origin = Origin.LOGIN): Long =
         ProviderRequestRegistry.registerUser(origin) { users.add(it) }
 
-    private fun login(provider: String, nonce: String? = null, scopes: Array<String>? = null): Long {
+    private fun login(provider: AuthProvider, nonce: String? = null, scopes: Array<String>? = null): Long {
         val id = registerUser()
         AuthAdapter.loginSync(
             context = configuredApp,
-            provider = provider,
-            scopes = scopes,
-            loginHint = null,
-            nonce = nonce,
-            useOneTap = false,
+            request = LoginRequest(provider = provider, scopes = scopes, nonce = nonce),
             generation = id,
         )
         return id
@@ -218,16 +214,12 @@ class AuthAdapterFlowTest {
 
     @Test
     fun unsupportedProviderAndMissingConfigurationSettleOnceWithoutOpeningAnything() {
-        val unsupported = login("facebook")
-        assertEquals(NitroErrorCode.UNSUPPORTED_PROVIDER to "Unsupported provider: facebook", failureOf(users.single()))
-        assertFalse(ProviderRequestRegistry.loginError("login", 1, null, unsupported))
-
-        for (provider in listOf("microsoft", "google", "apple")) {
+        for (provider in listOf(AuthProvider.MICROSOFT, AuthProvider.GOOGLE, AuthProvider.APPLE)) {
             users.clear()
             val id = login(provider)
             idleMain()
-            assertEquals(provider, NitroErrorCode.CONFIGURATION_ERROR, users.single().failure?.code)
-            assertFalse(provider, ProviderRequestRegistry.loginError("login", 1, null, id))
+            assertEquals(provider.name, NitroErrorCode.CONFIGURATION_ERROR, users.single().failure?.code)
+            assertFalse(provider.name, ProviderRequestRegistry.loginError(Origin.LOGIN, 1, null, id))
         }
         assertNull(shadowOf(app).nextStartedActivity)
     }
@@ -235,7 +227,7 @@ class AuthAdapterFlowTest {
     @Test
     fun invalidMicrosoftTenantAndInvalidAppleNonceAreRejectedBeforeAnyBrowserOrNetworkUse() {
         configureMicrosoft(tenant = "../evil")
-        login("microsoft")
+        login(AuthProvider.MICROSOFT)
         assertEquals(
             NitroErrorCode.CONFIGURATION_ERROR to "Invalid Microsoft tenant or B2C domain",
             failureOf(users.single()),
@@ -251,7 +243,7 @@ class AuthAdapterFlowTest {
         }
         for (nonce in listOf("", "not-hex", "A".repeat(64), "a".repeat(63), "a".repeat(65))) {
             users.clear()
-            login("apple", nonce = nonce)
+            login(AuthProvider.APPLE, nonce = nonce)
             assertEquals(nonce, NitroErrorCode.INVALID_NONCE, users.single().failure?.code)
         }
         assertFalse(brokerCreated)
@@ -260,7 +252,7 @@ class AuthAdapterFlowTest {
     @Test
     fun microsoftLoginWithoutAForegroundActivityFallsBackToAPlainBrowserIntent() {
         configureMicrosoft()
-        val id = login("microsoft", scopes = arrayOf("openid", "User.Read"))
+        val id = login(AuthProvider.MICROSOFT, scopes = arrayOf("openid", "User.Read"))
 
         val intent = shadowOf(app).nextStartedActivity
         assertEquals(Intent.ACTION_VIEW, intent.action)
@@ -285,14 +277,14 @@ class AuthAdapterFlowTest {
 
         ProviderRequestRegistry.cancelAll()
         assertEquals(NitroErrorCode.CANCELLED, users.single().failure?.code)
-        assertFalse(ProviderRequestRegistry.loginError("login", 1, null, id))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, 1, null, id))
     }
 
     @Test
     fun microsoftLoginFromAResumedActivityUsesCustomTabs() {
         configureMicrosoft(tenant = null)
         val host = resumedHost()
-        login("microsoft")
+        login(AuthProvider.MICROSOFT)
 
         val intent = shadowOf(host.get()).nextStartedActivity
         assertEquals(Intent.ACTION_VIEW, intent.action)
@@ -307,19 +299,19 @@ class AuthAdapterFlowTest {
         configureMicrosoft()
         shadowOf(app).checkActivities(true)
 
-        login("microsoft")
+        login(AuthProvider.MICROSOFT)
         assertEquals(NitroErrorCode.UNKNOWN, users.single().failure?.code)
         assertFalse(users.single().failure?.detail.isNullOrEmpty())
 
         users.clear()
         val host = resumedHost()
-        login("microsoft")
+        login(AuthProvider.MICROSOFT)
         assertEquals(NitroErrorCode.UNKNOWN, users.single().failure?.code)
         assertNull(shadowOf(host.get()).nextStartedActivity)
 
         users.clear()
         shadowOf(app).checkActivities(false)
-        login("microsoft")
+        login(AuthProvider.MICROSOFT)
         assertNotNull(shadowOf(host.get()).nextStartedActivity)
         assertTrue(users.isEmpty())
     }
@@ -327,7 +319,7 @@ class AuthAdapterFlowTest {
     @Test
     fun microsoftRedirectWithTheWrongStateIsRejectedOnceAndEndsTheFlow() {
         configureMicrosoft()
-        val id = login("microsoft")
+        val id = login(AuthProvider.MICROSOFT)
         val state = startedMicrosoftUrl().getQueryParameter("state")!!
 
         AuthAdapter.handleMicrosoftRedirect(redirect("state=forged&code=abc"))
@@ -339,7 +331,7 @@ class AuthAdapterFlowTest {
         AuthAdapter.handleMicrosoftRedirect(redirect("state=$state&error=access_denied"))
         AuthAdapter.handleMicrosoftRedirect(redirect("state=forged&code=abc"))
         assertEquals(1, users.size)
-        assertFalse(ProviderRequestRegistry.loginError("login", 1, null, id))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, 1, null, id))
     }
 
     @Test
@@ -356,7 +348,7 @@ class AuthAdapterFlowTest {
         )
         for ((query, expected) in cases) {
             users.clear()
-            login("microsoft")
+            login(AuthProvider.MICROSOFT)
             val state = startedMicrosoftUrl().getQueryParameter("state")!!
             val suffix = if (query.isEmpty()) "" else "&$query"
             AuthAdapter.handleMicrosoftRedirect(redirect("state=$state$suffix"))
@@ -382,7 +374,7 @@ class AuthAdapterFlowTest {
         )
         for (uri in malformed) {
             users.clear()
-            login("microsoft")
+            login(AuthProvider.MICROSOFT)
             assertNotNull(shadowOf(app).nextStartedActivity)
             AuthAdapter.handleMicrosoftRedirect(Uri.parse(uri))
             assertEquals(uri.take(80), NitroErrorCode.INVALID_STATE, users.single().failure?.code)
@@ -392,9 +384,9 @@ class AuthAdapterFlowTest {
     @Test
     fun redirectForAReplacedOrCancelledFlowIsIgnoredAndTheCurrentFlowStaysPending() {
         configureMicrosoft()
-        val first = login("microsoft")
+        val first = login(AuthProvider.MICROSOFT)
         val firstState = startedMicrosoftUrl().getQueryParameter("state")!!
-        val second = login("microsoft")
+        val second = login(AuthProvider.MICROSOFT)
         val secondState = startedMicrosoftUrl().getQueryParameter("state")!!
         assertNotEquals(firstState, secondState)
 
@@ -403,18 +395,18 @@ class AuthAdapterFlowTest {
 
         AuthAdapter.handleMicrosoftRedirect(redirect("state=$secondState&error=access_denied"))
         assertEquals(NitroErrorCode.CANCELLED, users.single().failure?.code)
-        assertFalse(ProviderRequestRegistry.loginError("login", 1, null, second))
-        assertTrue(ProviderRequestRegistry.loginError("login", NitroErrorCode.CANCELLED.value, null, first))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, 1, null, second))
+        assertTrue(ProviderRequestRegistry.loginError(Origin.LOGIN, NitroErrorCode.CANCELLED.value, null, first))
 
         users.clear()
-        val third = login("microsoft")
+        val third = login(AuthProvider.MICROSOFT)
         val thirdState = startedMicrosoftUrl().getQueryParameter("state")!!
         AuthAdapter.cancelPendingOperations()
         AuthAdapter.handleMicrosoftRedirect(redirect("state=$thirdState&error=access_denied"))
         assertTrue(users.isEmpty())
         ProviderRequestRegistry.cancelAll()
         assertEquals(NitroErrorCode.CANCELLED, users.single().failure?.code)
-        assertFalse(ProviderRequestRegistry.loginError("login", 1, null, third))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, 1, null, third))
     }
 
     @Test
@@ -439,7 +431,7 @@ class AuthAdapterFlowTest {
         assertFalse(AuthAdapter.handleAppleRedirect(appleIntent.data!!))
 
         val pickerIntent = GoogleSignInActivity.createIntent(
-            app, "google-client-id", arrayOf("email"), null, origin = "login", generation = 42L,
+            app, "google-client-id", arrayOf("email"), null, origin = Origin.LOGIN, generation = 42L,
         )
         val restored = Bundle().apply {
             putBoolean("launch_started", true)
@@ -458,7 +450,7 @@ class AuthAdapterFlowTest {
     fun redirectDeliveredThroughTheActivitySettlesOnceAndTheHostResumeDoesNotCancelAgain() {
         configureMicrosoft()
         val host = resumedHost()
-        val id = login("microsoft")
+        val id = login(AuthProvider.MICROSOFT)
         val state = startedMicrosoftUrl(host.get()).getQueryParameter("state")!!
         host.pause()
 
@@ -470,14 +462,14 @@ class AuthAdapterFlowTest {
         redirectActivity.pause().stop().destroy()
         host.resume()
         assertEquals(1, users.size)
-        assertFalse(ProviderRequestRegistry.loginError("login", 1, null, id))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, 1, null, id))
     }
 
     @Test
     fun returningFromTheBrowserWithoutARedirectCancelsTheMicrosoftLoginOnce() {
         configureMicrosoft()
         val host = resumedHost()
-        login("microsoft")
+        login(AuthProvider.MICROSOFT)
         val state = startedMicrosoftUrl(host.get()).getQueryParameter("state")!!
         assertTrue(users.isEmpty())
 
@@ -507,7 +499,7 @@ class AuthAdapterFlowTest {
                 ScriptedConnection(url, 500, "{}")
             }, requestTimeoutMs = 3_600_000)
         }
-        val id = login("apple", nonce = "a".repeat(64))
+        val id = login(AuthProvider.APPLE, nonce = "a".repeat(64))
         assertTrue(brokerStarted.await(10, TimeUnit.SECONDS))
 
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(179_999))
@@ -519,7 +511,7 @@ class AuthAdapterFlowTest {
         releaseBroker.countDown()
         idleMain()
         assertEquals(1, users.size)
-        assertFalse(ProviderRequestRegistry.loginError("login", 1, null, id))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, 1, null, id))
         assertFalse(AuthAdapter.handleAppleRedirect(Uri.parse("$APPLE_SCHEME://apple/callback?attemptId=$ATTEMPT_ID")))
     }
 
@@ -539,7 +531,7 @@ class AuthAdapterFlowTest {
                 ScriptedConnection(url, 500, "{}")
             }, requestTimeoutMs = 3_600_000)
         }
-        val id = login("apple", nonce = "a".repeat(64))
+        val id = login(AuthProvider.APPLE, nonce = "a".repeat(64))
         assertTrue(brokerStarted.await(10, TimeUnit.SECONDS))
 
         AuthAdapter.cancelPendingOperations()
@@ -548,14 +540,14 @@ class AuthAdapterFlowTest {
 
         ProviderRequestRegistry.cancelAll()
         assertEquals(NitroErrorCode.CANCELLED, users.single().failure?.code)
-        assertFalse(ProviderRequestRegistry.loginError("login", 1, null, id))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, 1, null, id))
     }
 
     @Test
     fun appleSignInWithoutAnActivityIsAConfigurationError() {
         configureApple()
         brokerReturning(startResponse())
-        login("apple", nonce = "a".repeat(64))
+        login(AuthProvider.APPLE, nonce = "a".repeat(64))
 
         awaitUsers(1)
         assertEquals(
@@ -570,7 +562,7 @@ class AuthAdapterFlowTest {
         val host = resumedHost()
         shadowOf(app).checkActivities(true)
         brokerReturning(startResponse())
-        login("apple", nonce = "a".repeat(64))
+        login(AuthProvider.APPLE, nonce = "a".repeat(64))
 
         awaitUsers(1)
         assertEquals(
@@ -595,7 +587,7 @@ class AuthAdapterFlowTest {
         for ((response, expected) in cases) {
             users.clear()
             brokerReturning(response)
-            login("apple", nonce = "a".repeat(64))
+            login(AuthProvider.APPLE, nonce = "a".repeat(64))
             awaitUsers(1)
             assertEquals(response.second, expected, users.single().failure?.code)
         }
@@ -609,7 +601,7 @@ class AuthAdapterFlowTest {
             startResponse(),
             200 to """{"data":{"idToken":"id-token","authorizationCode":"auth-code","user":{"id":"user-id","email":"user@example.test","name":"Ada Lovelace","firstName":"Ada","lastName":"Lovelace"}}}""",
         )
-        val id = login("apple", nonce = "a".repeat(64), scopes = arrayOf("email"))
+        val id = login(AuthProvider.APPLE, nonce = "a".repeat(64), scopes = arrayOf("email"))
 
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
         var launched: Intent? = null
@@ -643,7 +635,7 @@ class AuthAdapterFlowTest {
 
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMinutes(10))
         assertEquals(1, users.size)
-        assertFalse(ProviderRequestRegistry.loginError("login", 1, null, id))
+        assertFalse(ProviderRequestRegistry.loginError(Origin.LOGIN, 1, null, id))
         assertFalse(AuthAdapter.handleAppleRedirect(callback))
     }
 
@@ -652,7 +644,7 @@ class AuthAdapterFlowTest {
         configureApple()
         val host = resumedHost()
         brokerReturning(startResponse())
-        login("apple", nonce = "a".repeat(64))
+        login(AuthProvider.APPLE, nonce = "a".repeat(64))
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
         var launched: Intent? = null
         while (launched == null && System.nanoTime() < deadline) {
@@ -674,11 +666,11 @@ class AuthAdapterFlowTest {
 
     @Test
     fun providersWithoutASessionOrSupportSettleTokenAndRevocationRequestsOnce() {
-        for (provider in listOf("microsoft", "apple", "facebook", "")) {
+        for (provider in listOf(AuthProvider.MICROSOFT, AuthProvider.APPLE)) {
             revocations.clear()
             val id = ProviderRequestRegistry.registerRevocation { revocations.add(it) }
             AuthAdapter.revokeAccessSync(configuredApp, provider, id)
-            assertEquals(provider, NitroErrorCode.UNSUPPORTED_PROVIDER, revocations.single().failure?.code)
+            assertEquals(provider.name, NitroErrorCode.UNSUPPORTED_PROVIDER, revocations.single().failure?.code)
             assertFalse(ProviderRequestRegistry.revokeResult(null, null, id))
         }
         assertTrue(tokens.isEmpty())

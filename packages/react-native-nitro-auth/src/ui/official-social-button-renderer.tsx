@@ -23,11 +23,8 @@ export function selectImageArtwork(
 }
 
 /** Width divided by height of the official artwork for the active platform. */
-export function getArtworkAspect(
-  provider: BrandedProvider,
-  iconOnly: boolean,
-): number {
-  const art = selectImageArtwork(provider, "light", "pill", iconOnly);
+export function getArtworkAspect(provider: BrandedProvider): number {
+  const art = selectImageArtwork(provider, "light", "pill", false);
   return art.width / art.height;
 }
 

@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { flowIdPattern, readValidatedSuites } = require("./replay-manifest");
 
 const projectRoot = path.resolve(__dirname, "..");
 const coveragePath = path.join(projectRoot, "e2e", "auth-replay-coverage.json");
@@ -32,7 +33,7 @@ function parseArgs(argv) {
       throw new Error(`${flag} requires a value\n${usage()}`);
     }
     if (flag === "--flow") {
-      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)) {
+      if (!flowIdPattern.test(value)) {
         throw new Error(`Invalid replay flow id: ${value}`);
       }
       if (flows.includes(value)) {
@@ -72,34 +73,6 @@ function parseArgs(argv) {
   return { platform, targetFlag, target: target.trim(), flowIds: flows };
 }
 
-function inside(root, relativePath) {
-  const absolute = path.resolve(root, relativePath);
-  const relative = path.relative(path.resolve(root), absolute);
-  if (
-    relative === ".." ||
-    relative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relative)
-  ) {
-    throw new Error(`Replay path escapes the repository: ${relativePath}`);
-  }
-  if (fs.existsSync(absolute)) {
-    const resolved = path.relative(
-      fs.realpathSync(root),
-      fs.realpathSync(absolute),
-    );
-    if (
-      resolved === ".." ||
-      resolved.startsWith(`..${path.sep}`) ||
-      path.isAbsolute(resolved)
-    ) {
-      throw new Error(
-        `Replay path escapes the repository through a symlink: ${relativePath}`,
-      );
-    }
-  }
-  return absolute;
-}
-
 function readSuites(manifestFile = coveragePath, selectedFlowIds = []) {
   const root = path.resolve(path.dirname(manifestFile), "..");
   const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
@@ -113,35 +86,10 @@ function readSuites(manifestFile = coveragePath, selectedFlowIds = []) {
       "Auth replay coverage manifest must list at least one flow",
     );
   }
-  const ids = new Set();
-  const paths = new Set();
-  const suites = manifest.suites.map((suite) => {
-    if (
-      !suite ||
-      typeof suite.id !== "string" ||
-      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(suite.id) ||
-      ids.has(suite.id) ||
-      typeof suite.path !== "string" ||
-      !suite.path.startsWith("e2e/") ||
-      suite.path.includes("..") ||
-      suite.path.includes("\\") ||
-      !suite.path.endsWith(".ad") ||
-      paths.has(suite.path) ||
-      typeof suite.purpose !== "string" ||
-      suite.purpose.trim() === ""
-    ) {
-      throw new Error(
-        "Auth replay manifest contains an invalid or duplicate flow",
-      );
-    }
-    ids.add(suite.id);
-    paths.add(suite.path);
-    const suiteFile = inside(root, suite.path);
-    if (!fs.existsSync(suiteFile) || !fs.lstatSync(suiteFile).isFile()) {
-      throw new Error(`Replay flow is missing: ${suite.path}`);
-    }
-    return suite;
-  });
+  const suites = readValidatedSuites(root, manifest.suites).map(
+    ({ suite }) => suite,
+  );
+  const ids = new Set(suites.map((suite) => suite.id));
   const unknownFlow = selectedFlowIds.find((id) => !ids.has(id));
   if (unknownFlow) {
     throw new Error(`Unknown replay flow: ${unknownFlow}`);
@@ -196,10 +144,7 @@ function runExampleReplay({
     throw new Error("Replay session id source returned an unsafe value");
   }
   const session = `nitro-auth-replay-${runId}`;
-  const targetArgs = [
-    options.targetFlag,
-    options.target,
-  ];
+  const targetArgs = [options.targetFlag, options.target];
   const args = [
     "test",
     ...suites.map((suite) => suite.path),

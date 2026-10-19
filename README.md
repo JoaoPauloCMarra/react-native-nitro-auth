@@ -4,8 +4,8 @@
 [![npm downloads](https://img.shields.io/npm/dm/react-native-nitro-auth?color=22c55e&label=downloads)](https://www.npmjs.com/package/react-native-nitro-auth)
 [![CI](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/react-native-nitro-auth?color=007ec6)](https://github.com/JoaoPauloCMarra/react-native-nitro-auth/blob/main/LICENSE)
-[![React Native](https://img.shields.io/badge/react--native-0.86.3-61dafb)](https://reactnative.dev/docs/0.86/getting-started-without-a-framework)
-[![Expo](https://img.shields.io/badge/expo-SDK%2057%20%28RN%200.86.3%29-000020)](https://docs.expo.dev/versions/v57.0.0/)
+[![React Native](https://img.shields.io/badge/react--native-0.88.0-61dafb)](https://reactnative.dev/docs/0.88/getting-started-without-a-framework)
+[![Expo](https://img.shields.io/badge/expo-SDK%2058%20%28RN%200.88.0%29-000020)](https://docs.expo.dev/versions/v58.0.0/)
 [![Nitro Modules](https://img.shields.io/badge/nitro--modules-%3E%3D0.37.0%20%3C0.38.0-black)](https://nitro.margelo.com/)
 [![TypeScript](https://img.shields.io/badge/typescript-6.0-3178c6)](https://www.typescriptlang.org/)
 
@@ -59,16 +59,16 @@ Optional peers:
 | React                      | Any version your React Native release supports                          |
 | React Native Nitro Modules | `>=0.37.0 <0.38.0`                                                      |
 | Expo                       | SDK `>=53` development builds                                           |
-| iOS                        | React Native's `min_ios_version_supported` (`15.1` on RN `0.77`–`0.86`) |
+| iOS                        | React Native's `min_ios_version_supported` (`15.1` on RN `0.77`–`0.88`) |
 | Android                    | compileSdk `35`, Android Gradle Plugin `8.6`, and Kotlin `2.0` or later |
 
 ### Compatibility
 
 The package supports React Native `0.77` or later and Expo SDK `53` or later,
 the minimum that `react-native-nitro-modules` `0.37` builds on. It is tested on
-React Native `0.86.3` with Expo SDK `57`: the example app and the release gate
+React Native `0.88.0` with Expo SDK `58`: the example app and the release gate
 use that version. Older supported versions are not built by the release gate;
-the example app's compileSdk `36` and iOS `16.4` settings are its own choices,
+the example app's compileSdk `37` and iOS `16.4` settings are its own choices,
 not package requirements.
 
 On Android the library compiles with your app's `compileSdkVersion`,
@@ -525,7 +525,10 @@ provider-aware React Native content. `custom` is its only `renderMode`. Its
 import does not bundle the official button artwork or `react-native-svg`.
 `appearance` accepts `light` or `dark`; `shape` accepts `pill` or
 `rectangular`. For Google and Apple, the deprecated `variant` values `primary`,
-`outline`, and `white` map to `light`; `black` maps to `dark`.
+`outline`, and `white` map to `light`; `black` maps to `dark`. The Microsoft
+button maps `appearance` to the Microsoft light and dark palettes and `shape` to
+its corner radius (`borderRadius` still wins). When `appearance` is set it takes
+precedence over `variant`; without it, `variant` keeps its previous colors.
 
 Set `iconOnly` to render the provider's official square icon without cropping
 the full button. It defaults to `false`; icon-only buttons remain 48 × 48 dp
@@ -785,13 +788,13 @@ do not forward raw details automatically.
 | Web      | Google, Apple, and Microsoft OAuth through Expo web config.       |
 | Expo     | Development builds with the config plugin.                        |
 
-The native package gate and Expo example use React Native `0.86.3`. The
+The native package gate and Expo example use React Native `0.88.0`. The
 `check:ci` workflow also compiles the public source against React Native
 `0.87.0`'s Strict TypeScript API. It then type-checks an installed tarball
 consumer against React Native `0.87.0`'s default type entry. The consumer
 checks import and require declarations for the root and both button subpaths;
 that compatibility check does not change the runtime baseline. Expo SDK
-`57.0.26` selects React Native `0.86.3`; do not override it in an Expo app.
+`58.0.16` selects React Native `0.88.0`; do not override it in an Expo app.
 
 Package peer ranges: `react-native >=0.77.0`,
 `react-native-nitro-modules >=0.37.0 <0.38.0`, and optional `expo >=53.0.0`,

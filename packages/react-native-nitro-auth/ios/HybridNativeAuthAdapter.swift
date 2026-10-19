@@ -20,10 +20,9 @@ final class HybridNativeAuthAdapter: HybridNativeAuthAdapterSpec {
     return promise
   }
 
-  private static func failure(_ code: NSNumber?, _ detail: String?) -> ProviderFailure? {
-    guard let code else { return nil }
+  private static func failure(_ code: PlatformAuthErrorCode, _ detail: String?) -> ProviderFailure {
     let mapped: AuthErrorCode
-    switch PlatformAuthErrorCode.fromRawValue(code.intValue) {
+    switch code {
     case .refreshFailed: mapped = .refreshFailed
     case .cancelled: mapped = .cancelled
     case .interactionRequired: mapped = .interactionRequired
@@ -48,9 +47,13 @@ final class HybridNativeAuthAdapter: HybridNativeAuthAdapterSpec {
     AuthCore.text(value)
   }
 
-  private static func userResult(_ data: NSDictionary?, _ code: NSNumber?, _ detail: String?) -> ProviderUserResult {
-    if let failure = failure(code, detail) { return ProviderUserResult(user: nil, failure: failure) }
-    guard let data, let providerName = data["provider"] as? String,
+  private static func userResult(_ outcome: ProviderOutcome) -> ProviderUserResult {
+    let data: NSDictionary
+    switch outcome {
+    case .failure(let code, let detail): return ProviderUserResult(user: nil, failure: failure(code, detail))
+    case .success(let payload): data = payload
+    }
+    guard let providerName = data["provider"] as? String,
           let provider = AuthProvider(fromString: providerName) else {
       return ProviderUserResult(user: nil, failure: ProviderFailure(code: .parseError, detail: nil))
     }
@@ -82,27 +85,27 @@ final class HybridNativeAuthAdapter: HybridNativeAuthAdapterSpec {
         scopes: AuthCore.effectiveLoginScopes(provider: providerName, scopes: options?.scopes), loginHint: options?.loginHint,
         nonce: options?.nonce, useSheet: options?.useSheet ?? false, forceAccountPicker: options?.forceAccountPicker ?? false,
         tenant: options?.tenant, prompt: options?.prompt?.stringValue, hostedDomain: options?.hostedDomain,
-        openIDRealm: options?.openIDRealm) { finish(Self.userResult($0, $1, $2)) }
+        openIDRealm: options?.openIDRealm) { finish(Self.userResult($0)) }
     }
   }
   func requestScopes(scopes: [String]) throws -> Promise<ProviderUserResult> {
     request(cancelled: ProviderUserResult(user: nil, failure: ProviderFailure(code: .cancelled, detail: nil))) { finish in
-      AuthAdapter.addScopes(scopes: scopes) { finish(Self.userResult($0, $1, $2)) }
+      AuthAdapter.addScopes(scopes: scopes) { finish(Self.userResult($0)) }
     }
   }
   func silentRestore() throws -> Promise<ProviderUserResult> {
     request(cancelled: ProviderUserResult(user: nil, failure: ProviderFailure(code: .cancelled, detail: nil))) { finish in
-      AuthAdapter.initialize { data, code, detail in
-        if data == nil && code == nil { finish(ProviderUserResult(user: nil, failure: nil)) }
-        else { finish(Self.userResult(data, code, detail)) }
-      }
+      AuthAdapter.initialize { finish(Self.userResult($0)) }
     }
   }
   func refreshToken() throws -> Promise<ProviderTokenResult> {
     request(cancelled: ProviderTokenResult(tokens: nil, failure: ProviderFailure(code: .cancelled, detail: nil))) { finish in
-      AuthAdapter.refreshToken { data, code, detail in
-        if let failure = Self.failure(code, detail) { finish(ProviderTokenResult(tokens: nil, failure: failure)); return }
-        guard let data else { finish(ProviderTokenResult(tokens: nil, failure: ProviderFailure(code: .parseError, detail: nil))); return }
+      AuthAdapter.refreshToken { outcome in
+        let data: NSDictionary
+        switch outcome {
+        case .failure(let code, let detail): finish(ProviderTokenResult(tokens: nil, failure: Self.failure(code, detail))); return
+        case .success(let payload): data = payload
+        }
         finish(ProviderTokenResult(tokens: AuthTokens(accessToken: Self.text(data["accessToken"]),
           idToken: Self.text(data["idToken"]), refreshToken: Self.text(data["refreshToken"]),
           expirationTime: AuthCore.expirationTime(data["expirationTime"])), failure: nil))
@@ -111,7 +114,10 @@ final class HybridNativeAuthAdapter: HybridNativeAuthAdapterSpec {
   }
   func revokeAccess(provider: AuthProvider) throws -> Promise<ProviderVoidResult> {
     request(cancelled: ProviderVoidResult(failure: ProviderFailure(code: .cancelled, detail: nil))) { finish in
-      AuthAdapter.revokeAccess(provider: provider.stringValue) { finish(ProviderVoidResult(failure: Self.failure($0, $1))) }
+      AuthAdapter.revokeAccess(provider: provider.stringValue) { outcome in
+        guard case .failure(let code, let detail) = outcome else { finish(ProviderVoidResult(failure: nil)); return }
+        finish(ProviderVoidResult(failure: Self.failure(code, detail)))
+      }
     }
   }
   func hasPlayServices() throws -> Bool { true }

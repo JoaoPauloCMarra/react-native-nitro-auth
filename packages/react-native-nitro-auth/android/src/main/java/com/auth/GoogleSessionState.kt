@@ -11,13 +11,6 @@ internal data class GoogleSessionState(
     val accountId: String? = null,
     val kind: GoogleSessionKind = GoogleSessionKind.NONE,
 ) {
-    fun returnedHostedDomain(restoredAccountId: String? = null): String? {
-        if (restoredAccountId != null && accountId != restoredAccountId) {
-            return null
-        }
-        return requestedHostedDomain
-    }
-
     fun returnedHostedDomainForAccount(restoredAccountId: String?): String? {
         if (accountId == null || restoredAccountId == null || accountId != restoredAccountId) {
             return null

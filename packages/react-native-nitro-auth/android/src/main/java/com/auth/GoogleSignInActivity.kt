@@ -32,7 +32,7 @@ class GoogleSignInActivity : ComponentActivity() {
         private const val STATE_SIGN_OUT_IN_PROGRESS = "sign_out_in_progress"
         private const val STATE_LAUNCH_DEFERRED = "launch_deferred"
 
-        fun createIntent(context: Context, clientId: String, scopes: Array<String>, loginHint: String?, forcePicker: Boolean = false, forceCodeForRefreshToken: Boolean = false, hostedDomain: String? = null, origin: String = "login", generation: Long = 0L): Intent {
+        internal fun createIntent(context: Context, clientId: String, scopes: Array<String>, loginHint: String?, forcePicker: Boolean = false, forceCodeForRefreshToken: Boolean = false, hostedDomain: String? = null, origin: Origin = Origin.LOGIN, generation: Long = 0L): Intent {
             return Intent(context, GoogleSignInActivity::class.java).apply {
                 putExtra(EXTRA_CLIENT_ID, clientId)
                 putExtra(EXTRA_SCOPES, scopes)
@@ -40,20 +40,21 @@ class GoogleSignInActivity : ComponentActivity() {
                 putExtra(EXTRA_FORCE_PICKER, forcePicker)
                 putExtra(EXTRA_FORCE_CODE_FOR_REFRESH_TOKEN, forceCodeForRefreshToken)
                 putExtra(EXTRA_HOSTED_DOMAIN, hostedDomain)
-                putExtra(EXTRA_ORIGIN, origin)
+                putExtra(EXTRA_ORIGIN, origin.name)
                 putExtra(EXTRA_GENERATION, generation)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         }
     }
     
+    private val origin by lazy { Origin.fromExtra(intent.getStringExtra(EXTRA_ORIGIN)) }
+    private val generation by lazy { intent.getLongExtra(EXTRA_GENERATION, 0L) }
+
     private val signInLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (resultDelivered) return@registerForActivityResult
         resultDelivered = true
-        val origin = intent.getStringExtra(EXTRA_ORIGIN) ?: "login"
-        val generation = intent.getLongExtra(EXTRA_GENERATION, 0L)
         try {
             val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
             val account = task.getResult(ApiException::class.java)
@@ -89,8 +90,6 @@ class GoogleSignInActivity : ComponentActivity() {
         launchToken = savedInstanceState?.getLong(STATE_LAUNCH_TOKEN, 1L) ?: 1L
         signOutInProgress = savedInstanceState?.getBoolean(STATE_SIGN_OUT_IN_PROGRESS) ?: false
         launchDeferred = savedInstanceState?.getBoolean(STATE_LAUNCH_DEFERRED) ?: false
-        val origin = intent.getStringExtra(EXTRA_ORIGIN) ?: "login"
-        val generation = intent.getLongExtra(EXTRA_GENERATION, 0L)
         if (!resultDelivered && !AuthAdapter.registerGooglePickerActivity(this, origin, generation)) {
             resultDelivered = true
             finish()
@@ -143,11 +142,7 @@ class GoogleSignInActivity : ComponentActivity() {
         signInClient = client
         
         if (forcePicker) {
-            if (signOutInProgress) {
-                startForcePickerSignOut(client)
-            } else if (!launchDeferred) {
-                startForcePickerSignOut(client)
-            }
+            if (signOutInProgress || !launchDeferred) startForcePickerSignOut(client)
         } else {
             launchSignIn(client, launchToken)
         }
@@ -160,8 +155,6 @@ class GoogleSignInActivity : ComponentActivity() {
     }
 
     private fun startForcePickerSignOut(client: GoogleSignInClient) {
-        val origin = intent.getStringExtra(EXTRA_ORIGIN) ?: "login"
-        val generation = intent.getLongExtra(EXTRA_GENERATION, 0L)
         when (AuthAdapter.beginGooglePickerSignOut(this, origin, generation)) {
             GooglePickerSignOutDecision.START -> {
                 signOutInProgress = true
@@ -234,8 +227,6 @@ class GoogleSignInActivity : ComponentActivity() {
         ) != GoogleSignInLaunchDecision.LAUNCH) {
             return
         }
-        val origin = intent.getStringExtra(EXTRA_ORIGIN) ?: "login"
-        val generation = intent.getLongExtra(EXTRA_GENERATION, 0L)
         if (!AuthAdapter.claimGooglePickerLaunch(this, origin, generation)) {
             launchDeferred = false
             resultDelivered = true
@@ -265,8 +256,8 @@ class GoogleSignInActivity : ComponentActivity() {
         launchToken = if (launchToken == Long.MAX_VALUE) 1L else launchToken + 1L
         AuthAdapter.unregisterGooglePickerActivity(
             this,
-            intent.getStringExtra(EXTRA_ORIGIN) ?: "login",
-            intent.getLongExtra(EXTRA_GENERATION, 0L),
+            origin,
+            generation,
         )
         if (shouldSettleGoogleSignInCancellation(resultDelivered, isFinishing)) {
             launchDeferred = false
@@ -278,12 +269,11 @@ class GoogleSignInActivity : ComponentActivity() {
     private fun settleCancellationIfNeeded() {
         if (!resultDelivered) {
             resultDelivered = true
-            val origin = intent.getStringExtra(EXTRA_ORIGIN) ?: "login"
             AuthAdapter.onSignInError(
                 12501,
                 "Google sign-in was dismissed before completing",
                 origin,
-                intent.getLongExtra(EXTRA_GENERATION, 0L),
+                generation,
             )
         }
     }

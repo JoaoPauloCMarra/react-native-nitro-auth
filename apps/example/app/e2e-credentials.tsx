@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { AuthService } from "react-native-nitro-auth";
 import {
   authErrorCode,
   capabilityMatrixMatches,
   currentPlatform,
 } from "../components/e2e-auth-checks";
-import { LabButton, labStyles } from "../components/e2e-lab-ui";
+import {
+  LabButton,
+  LabResult,
+  LabRow,
+  LabSubtitle,
+  LabTitle,
+} from "../components/e2e-lab-ui";
 
 async function runCredentialsSweep(): Promise<{
   nonce: string;
@@ -80,28 +86,22 @@ export default function CredentialsLabScreen() {
       style={styles.screen}
       accessibilityLabel="Credentials lab"
     >
-      <Text style={labStyles.title}>Credentials lab</Text>
-      <Text style={labStyles.subtitle}>
+      <LabTitle>Credentials lab</LabTitle>
+      <LabSubtitle>
         Auto-runs only nonce shape, provider capability, and signed-out snapshot
         checks. No provider credentials or token values are rendered.
-      </Text>
-      <Text testID="e2e-credentials-ready" style={labStyles.result}>
-        e2e-ready
-      </Text>
-      <Text testID="e2e-credentials-deeplink" style={labStyles.result}>
+      </LabSubtitle>
+      <LabResult testID="e2e-credentials-ready">e2e-ready</LabResult>
+      <LabResult testID="e2e-credentials-deeplink">
         auth://e2e-credentials
-      </Text>
-      <Text testID="e2e-credentials-nonce" style={labStyles.result}>
-        {nonceStatus}
-      </Text>
-      <Text testID="e2e-credentials-capabilities" style={labStyles.result}>
+      </LabResult>
+      <LabResult testID="e2e-credentials-nonce">{nonceStatus}</LabResult>
+      <LabResult testID="e2e-credentials-capabilities">
         {capabilityStatus}
-      </Text>
-      <Text testID="e2e-credentials-snapshot" style={labStyles.result}>
-        {snapshotStatus}
-      </Text>
+      </LabResult>
+      <LabResult testID="e2e-credentials-snapshot">{snapshotStatus}</LabResult>
 
-      <View style={labStyles.row}>
+      <LabRow>
         <LabButton
           testID="e2e-credentials-nonce-run"
           label="Re-run all"
@@ -112,7 +112,7 @@ export default function CredentialsLabScreen() {
             applySweep();
           }}
         />
-      </View>
+      </LabRow>
     </View>
   );
 }

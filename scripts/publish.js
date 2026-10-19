@@ -3,7 +3,6 @@
 const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const readline = require("readline");
 const { securitySupportsVersion } = require("./assert-security-support");
 
 const colors = {
@@ -11,50 +10,13 @@ const colors = {
   yellow: (text) => `\x1b[33m${text}\x1b[0m`,
   red: (text) => `\x1b[31m${text}\x1b[0m`,
   cyan: (text) => `\x1b[36m${text}\x1b[0m`,
-  dim: (text) => `\x1b[2m${text}\x1b[0m`,
   bold: (text) => `\x1b[1m${text}\x1b[0m`,
 };
 
 const projectRoot = path.resolve(__dirname, "..");
 const packageDir = path.join(projectRoot, "packages/react-native-nitro-auth");
-const exampleDir = path.join(projectRoot, "apps/example");
 const packageJsonPath = path.join(packageDir, "package.json");
-const docsSyncScript = path.join(projectRoot, "scripts/sync-package-docs.ts");
 const startedAt = Date.now();
-
-const args = process.argv.slice(2);
-const dryRun = hasFlag("--dry-run");
-const skipChecks = hasFlag("--skip-checks");
-const skipGitCheck = hasFlag("--skip-git-check");
-const skipExpoDoctor = hasFlag("--skip-expo-doctor");
-const skipPublishDryRun =
-  dryRun &&
-  (hasFlag("--skip-publish-dry-run") ||
-    process.env.NITRO_AUTH_SKIP_PUBLISH_DRY_RUN === "1");
-const quick = hasFlag("--quick");
-const tag = getArgValue("--tag") || "latest";
-const otp = getArgValue("--otp");
-
-function validateNpmTag(tag) {
-  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(tag)) {
-    throw new Error(`Invalid npm dist tag: ${tag}`);
-  }
-
-  if (/^v?\d+\.\d+\.\d+/.test(tag)) {
-    throw new Error(
-      `Invalid npm dist tag "${tag}": use a release channel like latest or next.`,
-    );
-  }
-}
-
-function hasFlag(name) {
-  return args.includes(name);
-}
-
-function getArgValue(name) {
-  const prefix = `${name}=`;
-  return args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
-}
 
 function formatDuration(ms) {
   if (ms < 1000) {
@@ -68,12 +30,11 @@ function log(message, color = "green") {
   console.log(colors[color](message));
 }
 
-function run(command, options = {}) {
-  const started = Date.now();
+function run(command) {
   const result = spawnSync(command, {
-    cwd: options.cwd || projectRoot,
+    cwd: projectRoot,
     shell: true,
-    stdio: options.capture ? "pipe" : "inherit",
+    stdio: "pipe",
     encoding: "utf8",
     env: {
       ...process.env,
@@ -81,48 +42,19 @@ function run(command, options = {}) {
     },
   });
 
-  const output = {
+  return {
     ok: result.status === 0,
     stdout: (result.stdout || "").trim(),
     stderr: (result.stderr || "").trim(),
-    durationMs: Date.now() - started,
   };
-
-  return output;
-}
-
-function must(command, options = {}) {
-  const label = options.label || command;
-  log(`  • ${label}`, "cyan");
-  const result = run(command, options);
-
-  if (!result.ok) {
-    throw new Error(`Command failed: ${command}`);
-  }
-
-  console.log(colors.dim(`    done in ${formatDuration(result.durationMs)}`));
-  return result;
-}
-
-function runPackWithDocs(command, label) {
-  try {
-    must(`bun ${docsSyncScript} prepare`, {
-      label: "Prepare package documents",
-    });
-    return must(command, { cwd: packageDir, label });
-  } finally {
-    must(`bun ${docsSyncScript} cleanup`, {
-      label: "Restore package documents",
-    });
-  }
 }
 
 function readPackageJson() {
   return JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 }
 
-function requireCleanGitStatus() {
-  const status = run("git status --porcelain", { capture: true });
+function reportGitStatus() {
+  const status = run("git status --porcelain");
 
   if (!status.ok) {
     throw new Error("Unable to read git status.");
@@ -133,38 +65,20 @@ function requireCleanGitStatus() {
     return;
   }
 
-  if (skipGitCheck) {
-    console.log("  ✓ Git working directory check skipped");
-    return;
-  }
-
-  if (dryRun) {
-    console.log(
-      "  • Git working directory has changes; continuing for validation only",
-    );
-    return;
-  }
-
-  throw new Error(
-    "Git working directory has changes. Commit or pass --skip-git-check.",
+  console.log(
+    "  • Git working directory has changes; continuing for validation only",
   );
 }
 
 function checkRegistryVersion(packageName, version) {
-  const result = run(`bun pm view ${packageName}@${version} version`, {
-    capture: true,
-  });
+  const result = run(`bun pm view ${packageName}@${version} version`);
 
   if (result.ok && result.stdout === version) {
-    if (dryRun) {
-      log(
-        `  ! ${packageName}@${version} already exists on npm; continuing dry-run validation`,
-        "yellow",
-      );
-      return;
-    }
-
-    throw new Error(`${packageName}@${version} already exists on npm.`);
+    log(
+      `  ! ${packageName}@${version} already exists on npm; continuing dry-run validation`,
+      "yellow",
+    );
+    return;
   }
 
   const registryMessage = `${result.stdout}\n${result.stderr}`;
@@ -182,12 +96,7 @@ function checkRegistryVersion(packageName, version) {
 }
 
 function recordCurrentRegistryState(packageName) {
-  // Read-only registry snapshot (X10): record the current dist-tags without
-  // mutating the registry. New-version provenance stays PENDING until an
-  // authorized publish completes.
-  const result = run(`bun pm view ${packageName} dist-tags --json`, {
-    capture: true,
-  });
+  const result = run(`bun pm view ${packageName} dist-tags --json`);
   if (!result.ok || result.stdout === "") {
     log(
       `  ! Could not read current dist-tags for ${packageName}; continuing`,
@@ -203,53 +112,24 @@ function recordCurrentRegistryState(packageName) {
   }
 }
 
-function checkPublishAuth() {
-  if (dryRun) {
-    console.log("  ✓ npm auth not required for dry run");
-    return;
-  }
-
-  const whoami = run("bun pm whoami", { capture: true });
-  if (!whoami.ok || whoami.stdout === "") {
-    throw new Error("Not logged in to npm. Run: bunx npm login");
-  }
-
-  console.log(`  ✓ Logged in to npm as ${whoami.stdout}`);
-}
-
-function getExactReleaseTag(version) {
-  const result = run(`git tag --points-at HEAD`, { capture: true });
+function assertReleaseTag(version) {
+  const expected = `v${version}`;
+  const result = run("git tag --points-at HEAD");
   const tags = result.ok
     ? result.stdout
         .split("\n")
         .map((entry) => entry.trim())
         .filter(Boolean)
     : [];
-  return tags.includes(`v${version}`) ? `v${version}` : null;
-}
 
-function assertReleaseTag(version) {
-  const expected = `v${version}`;
-  const exactTag = getExactReleaseTag(version);
-
-  if (dryRun) {
-    if (exactTag) {
-      console.log(`  ✓ HEAD is exactly tagged ${expected}`);
-      return;
-    }
-    log(
-      `  ! HEAD is not tagged ${expected}; release existence/provenance stays PENDING in dry run`,
-      "yellow",
-    );
+  if (tags.includes(expected)) {
+    console.log(`  ✓ HEAD is exactly tagged ${expected}`);
     return;
   }
-
-  if (!exactTag) {
-    throw new Error(
-      `HEAD is not exactly tagged ${expected}. Create the release before publishing.`,
-    );
-  }
-  console.log(`  ✓ Release tag ${expected} exists at HEAD`);
+  log(
+    `  ! HEAD is not tagged ${expected}; release existence/provenance stays PENDING in dry run`,
+    "yellow",
+  );
 }
 
 function assertSecurityPolicySupports(version) {
@@ -275,7 +155,7 @@ function assertChangelogCovers(version) {
     return;
   }
 
-  if (dryRun && topEntry === "Unreleased") {
+  if (topEntry === "Unreleased") {
     log(
       "  ! CHANGELOG.md top entry is Unreleased; rename it to the release version before publishing",
       "yellow",
@@ -288,161 +168,32 @@ function assertChangelogCovers(version) {
   );
 }
 
-function buildPublishArgs() {
-  const publishArgs = [`--tag ${tag}`, "--access public", "--ignore-scripts"];
-
-  if (dryRun) {
-    publishArgs.push("--dry-run");
-  }
-
-  if (otp) {
-    publishArgs.push(`--otp ${otp}`);
-  }
-
-  return publishArgs;
-}
-
-function buildPublishCommand(publishArgs) {
-  if (dryRun) {
-    return "bun pm pack --dry-run --ignore-scripts";
-  }
-
-  return `bun publish ${publishArgs.join(" ")}`;
-}
-
-function getReleaseSteps() {
-  const steps = [
-    [
-      "bun install --frozen-lockfile",
-      { label: "Install with frozen lockfile" },
-    ],
-    ["bun run verify:core-versions", { label: "Verify pinned core versions" }],
-    ["bun run codegen", { label: "Generate Nitro specs" }],
-    ["bun run build", { label: "Build package outputs" }],
-    ["bun run check", { label: "Run lint, typecheck, and Jest" }],
-    ["bun run test:cpp", { label: "Run C++ tests" }],
-  ];
-
-  if (!quick) {
-    steps.push(
-      [
-        "bun run --cwd packages/react-native-nitro-auth test:coverage -- --runInBand",
-        { label: "Run JS coverage gate" },
-      ],
-      [
-        "bun run --cwd packages/react-native-nitro-auth test:cpp:coverage",
-        { label: "Run C++ coverage gate" },
-      ],
-    );
-  }
-
-  if (!skipExpoDoctor) {
-    steps.push([
-      "bunx expo-doctor",
-      { cwd: exampleDir, label: "Run Expo Doctor" },
-    ]);
-  }
-
-  return steps;
-}
-
-function ask(question) {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase());
-    });
-  });
-}
-
-async function main() {
+function main() {
   const packageJson = readPackageJson();
-  const publishArgs = buildPublishArgs();
-  validateNpmTag(tag);
 
   console.log("");
-  log("Publishing react-native-nitro-auth", "bold");
+  log("Publish dry run: react-native-nitro-auth", "bold");
   log(`Version: ${packageJson.version}`, "cyan");
-  log(`Tag: ${tag}`, "cyan");
-  log(`Mode: ${dryRun ? "dry run" : "publish"}`, dryRun ? "yellow" : "cyan");
-  if (quick) log("Coverage checks: skipped by --quick", "yellow");
+  log(
+    "Live publishing runs only in .github/workflows/npm-publish.yml; pack contents are checked by audit:package.",
+    "cyan",
+  );
   console.log("");
 
-  requireCleanGitStatus();
+  reportGitStatus();
   assertReleaseTag(packageJson.version);
   assertChangelogCovers(packageJson.version);
   assertSecurityPolicySupports(packageJson.version);
   checkRegistryVersion(packageJson.name, packageJson.version);
   recordCurrentRegistryState(packageJson.name);
-  checkPublishAuth();
 
-  if (!skipChecks) {
-    log("Running release checks...", "cyan");
-    for (const [command, options] of getReleaseSteps()) {
-      must(command, options);
-    }
-  } else {
-    log("Skipping release checks by request", "yellow");
-  }
-
-  // Preflight must never write tracked files (X5): dry runs compare the
-  // package docs, the real publish flow syncs them.
-  log(
-    dryRun ? "Checking package docs are in sync..." : "Syncing package docs...",
-    "cyan",
-  );
-  must(
-    dryRun
-      ? "bun scripts/sync-package-docs.ts --check"
-      : "bun scripts/sync-package-docs.ts",
-    { label: "Sync or verify README, CHANGELOG, and LICENSE" },
-  );
-
-  log("Checking package contents...", "cyan");
-  must("bun scripts/check-pack-contents.js", { label: "Pack content audit" });
-
-  if (skipPublishDryRun) {
-    log("Publish dry run skipped by environment", "yellow");
-    console.log(
-      colors.dim(`Finished in ${formatDuration(Date.now() - startedAt)}`),
-    );
-    return;
-  }
-
-  if (!dryRun) {
-    const answer = await ask(
-      `Publish ${packageJson.name}@${packageJson.version} to npm with tag "${tag}"? (yes/no): `,
-    );
-
-    if (answer !== "yes") {
-      log("Publish cancelled", "yellow");
-      return;
-    }
-  }
-
-  log(dryRun ? "Running publish dry run..." : "Publishing to npm...", "cyan");
-  runPackWithDocs(
-    buildPublishCommand(publishArgs),
-    dryRun ? "Publish dry run" : "Publish package",
-  );
-
-  log(
-    dryRun
-      ? "Dry run complete. Package is publishable."
-      : `Published ${packageJson.name}@${packageJson.version}.`,
-    "green",
-  );
-  console.log(
-    colors.dim(`Finished in ${formatDuration(Date.now() - startedAt)}`),
-  );
+  log("Dry run complete. Release metadata is consistent.", "green");
+  console.log(`Finished in ${formatDuration(Date.now() - startedAt)}`);
 }
 
-main().catch((error) => {
+try {
+  main();
+} catch (error) {
   log(error.message, "red");
   process.exit(1);
-});
+}

@@ -8,6 +8,7 @@ import type {
   AuthUser,
   AuthProvider,
   LoginOptions,
+  MicrosoftPrompt,
   AuthTokens,
   AuthErrorCode,
   AuthEvent,
@@ -34,6 +35,7 @@ import {
   STORAGE_MODE_MEMORY,
   STORAGE_MODE_SESSION,
   WebSessionStorage,
+  type WebSessionStorageConfig,
 } from "./utils/web-session-storage";
 
 const DEFAULT_SCOPES = ["openid", "email", "profile"];
@@ -88,15 +90,33 @@ type AppleAuthResponse = {
   };
 };
 
-type AuthWebExtraConfig = {
+type AuthWebExtraConfig = WebSessionStorageConfig & {
   googleWebClientId?: string;
   microsoftClientId?: string;
   microsoftTenant?: string;
   microsoftB2cDomain?: string;
   appleWebClientId?: string;
-  nitroAuthWebStorage?: "session" | "local" | "memory";
-  nitroAuthPersistTokensOnWeb?: boolean;
-  nitroAuthPersistProfileOnWeb?: boolean;
+};
+
+type MicrosoftLoginRequest = {
+  scopes: string[];
+  loginHint?: string;
+  tenant?: string;
+  prompt?: MicrosoftPrompt;
+  keepRefreshToken?: boolean;
+  generation: number;
+};
+
+type MicrosoftCodeExchange = {
+  code: string;
+  codeVerifier: string;
+  clientId: string;
+  redirectUri: string;
+  tenant: string;
+  expectedNonce: string;
+  scopes: string[];
+  keepRefreshToken: boolean;
+  generation: number;
 };
 
 type AppleAuthInitConfig = Parameters<
@@ -213,6 +233,7 @@ class AuthWeb implements Auth {
   private readonly _config: AuthWebExtraConfig;
   private _currentUser: AuthUser | undefined;
   private _grantedScopes: string[] = [];
+  private _microsoftTenant: string | undefined;
   private _listeners: ((user: AuthUser | undefined) => void)[] = [];
   private _tokenListeners: ((tokens: AuthTokens) => void)[] = [];
   private _eventListeners: ((event: AuthEvent) => void)[] = [];
@@ -220,7 +241,6 @@ class AuthWeb implements Auth {
   private _refreshPromise: Promise<AuthTokens> | undefined;
   private _refreshReject: ((error: unknown) => void) | undefined;
   private _loginReject: ((error: unknown) => void) | undefined;
-  private _pendingGoogleNonce: string | undefined;
   private _credentialOnlyLogin = false;
   private _captureLoginUser: ((user: AuthUser) => void) | undefined;
   private _snapshotRevision = 0;
@@ -280,7 +300,7 @@ class AuthWeb implements Auth {
   }
 
   get grantedScopes(): string[] {
-    return this._grantedScopes;
+    return [...this._grantedScopes];
   }
 
   get hasPlayServices(): boolean {
@@ -432,7 +452,22 @@ class AuthWeb implements Auth {
     }
   }
 
+  private assertSecureContext(): void {
+    if (
+      typeof crypto === "undefined" ||
+      typeof crypto.getRandomValues !== "function" ||
+      typeof crypto.randomUUID !== "function" ||
+      !crypto.subtle
+    ) {
+      throw new AuthWebError(
+        "configuration_error",
+        "Web login requires a secure context (HTTPS or localhost)",
+      );
+    }
+  }
+
   async createNonce(): Promise<AuthNonce> {
+    this.assertSecureContext();
     const randomBytes = crypto.getRandomValues(new Uint8Array(32));
     const raw = this.base64UrlEncode(randomBytes);
     const hash = await crypto.subtle.digest(
@@ -467,16 +502,13 @@ class AuthWeb implements Auth {
         nonce: nonce.hashed,
         scopes:
           options?.scopes ??
-          (provider === "google"
-            ? ["openid", "email", "profile"]
-            : ["email", "fullName"]),
+          (provider === "google" ? DEFAULT_SCOPES : ["email", "fullName"]),
       };
       delete loginOptions.useLegacyGoogleSignIn;
       const user = await this.runLoginOperation(() =>
         provider === "google"
           ? this.loginGoogle(
               loginOptions.scopes ?? [],
-              loginOptions.loginHint,
               loginOptions,
               generation,
             )
@@ -488,7 +520,6 @@ class AuthWeb implements Auth {
       return { provider, idToken: user.idToken, nonce: nonce.raw, user };
     } finally {
       this._credentialOnlyLogin = false;
-      this._pendingGoogleNonce = undefined;
     }
   }
 
@@ -512,19 +543,23 @@ class AuthWeb implements Auth {
           this.emitEvent("login_started", provider);
           if (provider === "google") {
             const scopes = options?.scopes ?? DEFAULT_SCOPES;
-            await this.loginGoogle(scopes, loginHint, options, generation);
+            await this.loginGoogle(scopes, options, generation);
             return;
           }
 
           if (provider === "microsoft") {
             const scopes = options?.scopes ?? MS_DEFAULT_SCOPES;
-            await this.loginMicrosoft(
+            await this.loginMicrosoft({
               scopes,
-              loginHint,
-              options?.tenant,
-              options?.prompt,
+              ...(loginHint !== undefined ? { loginHint } : {}),
+              ...(options?.tenant !== undefined
+                ? { tenant: options.tenant }
+                : {}),
+              ...(options?.prompt !== undefined
+                ? { prompt: options.prompt }
+                : {}),
               generation,
-            );
+            });
             return;
           }
 
@@ -573,18 +608,24 @@ class AuthWeb implements Auth {
       await this.runLoginOperation(
         async () => {
           if (provider === "google") {
-            await this.loginGoogle(newScopes, undefined, undefined, generation);
+            const email = this._currentUser?.email;
+            await this.loginGoogle(
+              newScopes,
+              email !== undefined ? { loginHint: email } : undefined,
+              generation,
+              this._currentUser?.userId,
+            );
             return;
           }
 
-          await this.loginMicrosoft(
-            newScopes,
-            undefined,
-            undefined,
-            undefined,
+          await this.loginMicrosoft({
+            scopes: newScopes,
+            ...(this._microsoftTenant !== undefined
+              ? { tenant: this._microsoftTenant }
+              : {}),
+            keepRefreshToken: true,
             generation,
-            true,
-          );
+          });
         },
         () => {
           generation = this.beginSessionChange();
@@ -615,7 +656,7 @@ class AuthWeb implements Auth {
     );
     this._storage.saveScopes(this._grantedScopes);
     if (this._currentUser) {
-      this._currentUser.scopes = this._grantedScopes;
+      this._currentUser.scopes = [...this._grantedScopes];
       this.updateUser(this._currentUser);
     }
     return { revokedAtProvider: false, revokedScopes };
@@ -665,12 +706,9 @@ class AuthWeb implements Auth {
 
   async getAccessToken(): Promise<string | undefined> {
     this.assertNoCredential();
-    if (this._currentUser?.expirationTime) {
-      const now = Date.now();
-      if (now + 300000 > this._currentUser.expirationTime) {
-        logger.log("Token about to expire, refreshing...");
-        await this.refreshToken();
-      }
+    if (this._currentUser && this.isAccessTokenExpiring(this._currentUser)) {
+      logger.log("Token about to expire, refreshing...");
+      await this.refreshToken();
     }
     return this._currentUser?.accessToken;
   }
@@ -736,7 +774,8 @@ class AuthWeb implements Auth {
           "Microsoft Client ID not configured. Add 'microsoftClientId' to expo.extra in your app.config.js",
         );
       }
-      const tenant = this._config.microsoftTenant ?? "common";
+      const tenant =
+        this._microsoftTenant ?? this._config.microsoftTenant ?? "common";
       const b2cDomain = this._config.microsoftB2cDomain;
 
       const authBaseUrl = this.getMicrosoftAuthBaseUrl(tenant, b2cDomain);
@@ -768,18 +807,12 @@ class AuthWeb implements Auth {
       }
 
       const currentUser = this._currentUser;
-      if (!currentUser) {
-        throw new AuthWebError("cancelled", "Auth operation was cancelled");
-      }
-      const effectiveIdToken = idToken ?? currentUser.idToken;
-      const claims = effectiveIdToken
-        ? this.decodeMicrosoftJwt(effectiveIdToken)
-        : {};
+      const claims = this.decodeMicrosoftJwt(idToken);
       const user: AuthUser = {
         ...currentUser,
         ...claims,
       };
-      setOrDelete(user, "idToken", effectiveIdToken);
+      setOrDelete(user, "idToken", idToken);
       setOrDelete(user, "accessToken", accessToken);
       setOrDelete(
         user,
@@ -791,7 +824,7 @@ class AuthWeb implements Auth {
 
       const tokens: AuthTokens = {};
       setIfDefined(tokens, "accessToken", accessToken);
-      setIfDefined(tokens, "idToken", effectiveIdToken);
+      setIfDefined(tokens, "idToken", idToken);
       setIfDefined(tokens, "refreshToken", newRefreshToken);
       setIfDefined(tokens, "expirationTime", expirationTime);
       this.notifyTokenListeners(tokens);
@@ -811,9 +844,11 @@ class AuthWeb implements Auth {
       () =>
         this.loginGoogle(
           this._grantedScopes.length > 0 ? this._grantedScopes : DEFAULT_SCOPES,
-          undefined,
-          undefined,
+          this._currentUser?.email !== undefined
+            ? { loginHint: this._currentUser.email }
+            : undefined,
           generation,
+          this._currentUser?.userId,
         ),
       undefined,
       "refresh",
@@ -990,11 +1025,52 @@ class AuthWeb implements Auth {
     });
   }
 
+  private openAuthPopup(authUrl: URL, name: string): Window {
+    const width = 500;
+    const height = 600;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
+    const popup = window.open(
+      authUrl.toString(),
+      name,
+      `width=${width},height=${height},left=${left},top=${top}`,
+    );
+
+    if (!popup) {
+      throw new AuthWebError(
+        "popup_blocked",
+        "Popup blocked. Please allow popups for this site.",
+      );
+    }
+    return popup;
+  }
+
+  private assertAuthorizeResponse(
+    params: URLSearchParams,
+    expectedState: string,
+  ): void {
+    if (params.get("state") !== expectedState) {
+      throw new AuthWebError(
+        "invalid_state",
+        "State mismatch - possible CSRF attack",
+      );
+    }
+
+    const error = params.get("error");
+    if (error) {
+      throw new AuthWebError(
+        mapOAuthErrorCode(error, "authorize"),
+        params.get("error_description") ?? error,
+      );
+    }
+  }
+
   private async loginGoogle(
     scopes: string[],
-    loginHint?: string,
-    options?: LoginOptions,
-    generation?: number,
+    options: LoginOptions | undefined,
+    generation: number,
+    expectedUserId?: string,
   ): Promise<void> {
     const clientId = this._config.googleWebClientId;
 
@@ -1005,125 +1081,89 @@ class AuthWeb implements Auth {
       );
     }
 
+    this.assertSecureContext();
     const nonce = options?.nonce ?? crypto.randomUUID();
     const state = crypto.randomUUID();
-    this._pendingGoogleNonce = nonce;
-    return new Promise((resolve, reject) => {
-      const redirectUri = window.location.origin;
-      const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-      authUrl.searchParams.set("client_id", clientId);
-      authUrl.searchParams.set("redirect_uri", redirectUri);
-      authUrl.searchParams.set("response_type", "id_token token code");
-      authUrl.searchParams.set("scope", scopes.join(" "));
-      authUrl.searchParams.set("nonce", nonce);
-      authUrl.searchParams.set("state", state);
-      authUrl.searchParams.set("access_type", "offline");
-      authUrl.searchParams.set(
-        "prompt",
-        options?.forceAccountPicker ? "select_account consent" : "consent",
-      );
+    const redirectUri = window.location.origin;
+    const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    authUrl.searchParams.set("client_id", clientId);
+    authUrl.searchParams.set("redirect_uri", redirectUri);
+    authUrl.searchParams.set("response_type", "id_token token code");
+    authUrl.searchParams.set("scope", scopes.join(" "));
+    authUrl.searchParams.set("nonce", nonce);
+    authUrl.searchParams.set("state", state);
+    authUrl.searchParams.set("access_type", "offline");
+    authUrl.searchParams.set(
+      "prompt",
+      options?.forceAccountPicker ? "select_account consent" : "consent",
+    );
 
-      if (loginHint) {
-        authUrl.searchParams.set("login_hint", loginHint);
+    if (options?.loginHint) {
+      authUrl.searchParams.set("login_hint", options.loginHint);
+    }
+    if (options?.hostedDomain) {
+      authUrl.searchParams.set("hd", options.hostedDomain);
+    }
+    if (options?.openIDRealm) {
+      authUrl.searchParams.set("openid.realm", options.openIDRealm);
+    }
+
+    const popup = this.openAuthPopup(authUrl, "google-auth");
+
+    await this.waitForPopupRedirect(popup, redirectUri, "Google", (url) => {
+      const params = new URLSearchParams(new URL(url).hash.slice(1));
+      this.assertAuthorizeResponse(params, state);
+
+      const idToken = params.get("id_token");
+      const accessToken = params.get("access_token");
+      const expiresIn = params.get("expires_in");
+      const code = params.get("code");
+
+      if (!idToken) {
+        throw new AuthWebError("no_id_token", "No id_token in response");
       }
-      if (options?.hostedDomain) {
-        authUrl.searchParams.set("hd", options.hostedDomain);
-      }
-      if (options?.openIDRealm) {
-        authUrl.searchParams.set("openid.realm", options.openIDRealm);
-      }
 
-      const width = 500;
-      const height = 600;
-      const left = window.screenX + (window.outerWidth - width) / 2;
-      const top = window.screenY + (window.outerHeight - height) / 2;
-
-      const popup = window.open(
-        authUrl.toString(),
-        "google-auth",
-        `width=${width},height=${height},left=${left},top=${top}`,
-      );
-
-      if (!popup) {
-        reject(
-          new AuthWebError(
-            "popup_blocked",
-            "Popup blocked. Please allow popups for this site.",
-          ),
+      const decoded = this.parseJwtPayload(idToken);
+      if (decoded["nonce"] !== nonce) {
+        throw new AuthWebError(
+          "invalid_nonce",
+          "Nonce mismatch - possible replay attack",
         );
-        return;
       }
 
-      void this.waitForPopupRedirect(popup, redirectUri, "Google", (url) => {
-        const hash = new URL(url).hash.slice(1);
-        const params = new URLSearchParams(hash);
-        const idToken = params.get("id_token");
-        const accessToken = params.get("access_token");
-        const expiresIn = params.get("expires_in");
-        const code = params.get("code");
-        const error = params.get("error");
-        const errorDescription = params.get("error_description");
+      this.assertActiveGeneration(generation);
 
-        if (params.get("state") !== state) {
-          throw new AuthWebError(
-            "invalid_state",
-            "State mismatch - possible CSRF attack",
-          );
-        }
-
-        if (error) {
-          throw new AuthWebError(
-            mapOAuthErrorCode(error, "authorize"),
-            errorDescription ?? error,
-          );
-        }
-
-        if (!idToken) {
-          throw new AuthWebError("no_id_token", "No id_token in response");
-        }
-
-        const decoded = this.parseJwtPayload(idToken);
-        if (decoded["nonce"] !== this._pendingGoogleNonce) {
-          this._pendingGoogleNonce = undefined;
-          throw new AuthWebError(
-            "invalid_nonce",
-            "Nonce mismatch - possible replay attack",
-          );
-        }
-        this._pendingGoogleNonce = undefined;
-
-        if (generation !== undefined) {
-          this.assertActiveGeneration(generation);
-        }
-
-        if (!this._credentialOnlyLogin) {
-          this._grantedScopes = scopes;
-          this._storage.saveScopes(scopes);
-        }
-
-        const user: AuthUser = {
-          provider: "google",
-          idToken,
-          scopes,
-          ...this.decodeGoogleJwt(idToken),
-        };
-        setIfDefined(user, "accessToken", accessToken ?? undefined);
-        setIfDefined(user, "serverAuthCode", code ?? undefined);
-        setIfDefined(user, "userId", getOptionalString(decoded, "sub"));
-        setIfDefined(user, "hostedDomain", getOptionalString(decoded, "hd"));
-        setIfDefined(
-          user,
-          "expirationTime",
-          parseExpiresInMilliseconds(expiresIn),
+      if (
+        expectedUserId !== undefined &&
+        getOptionalString(decoded, "sub") !== expectedUserId
+      ) {
+        throw new AuthWebError(
+          "invalid_state",
+          "Signed-in account changed during re-authentication",
         );
-        this.updateUser(user);
-      })
-        .then(() => {
-          resolve();
-        })
-        .catch((error: unknown) => {
-          reject(error);
-        });
+      }
+
+      if (!this._credentialOnlyLogin) {
+        this._grantedScopes = [...scopes];
+        this._storage.saveScopes(scopes);
+      }
+
+      const user: AuthUser = {
+        provider: "google",
+        idToken,
+        scopes: [...scopes],
+        ...this.decodeGoogleJwt(idToken),
+      };
+      setIfDefined(user, "accessToken", accessToken ?? undefined);
+      setIfDefined(user, "serverAuthCode", code ?? undefined);
+      setIfDefined(user, "userId", getOptionalString(decoded, "sub"));
+      setIfDefined(user, "hostedDomain", getOptionalString(decoded, "hd"));
+      setIfDefined(
+        user,
+        "expirationTime",
+        parseExpiresInMilliseconds(expiresIn),
+      );
+      this.updateUser(user);
     });
   }
 
@@ -1145,14 +1185,14 @@ class AuthWeb implements Auth {
     }
   }
 
-  private async loginMicrosoft(
-    scopes: string[],
-    loginHint?: string,
-    tenant?: string,
-    prompt?: string,
-    generation?: number,
+  private async loginMicrosoft({
+    scopes,
+    loginHint,
+    tenant,
+    prompt,
     keepRefreshToken = false,
-  ): Promise<void> {
+    generation,
+  }: MicrosoftLoginRequest): Promise<void> {
     const clientId = this._config.microsoftClientId;
 
     if (!clientId) {
@@ -1171,102 +1211,60 @@ class AuthWeb implements Auth {
 
     const effectiveScopes = scopes.length ? scopes : MS_DEFAULT_SCOPES;
 
+    this.assertSecureContext();
     const codeVerifier = this.generateCodeVerifier();
     const codeChallenge = await this.generateCodeChallenge(codeVerifier);
     const state = crypto.randomUUID();
     const nonce = crypto.randomUUID();
 
-    return new Promise((resolve, reject) => {
-      const redirectUri = window.location.origin;
-      const authUrl = new URL(`${authBaseUrl}oauth2/v2.0/authorize`);
-      authUrl.searchParams.set("client_id", clientId);
-      authUrl.searchParams.set("redirect_uri", redirectUri);
-      authUrl.searchParams.set("response_type", "code");
-      authUrl.searchParams.set("response_mode", "query");
-      authUrl.searchParams.set("scope", effectiveScopes.join(" "));
-      authUrl.searchParams.set("state", state);
-      authUrl.searchParams.set("nonce", nonce);
-      authUrl.searchParams.set("code_challenge", codeChallenge);
-      authUrl.searchParams.set("code_challenge_method", "S256");
-      authUrl.searchParams.set("prompt", prompt ?? "select_account");
+    const redirectUri = window.location.origin;
+    const authUrl = new URL(`${authBaseUrl}oauth2/v2.0/authorize`);
+    authUrl.searchParams.set("client_id", clientId);
+    authUrl.searchParams.set("redirect_uri", redirectUri);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("response_mode", "query");
+    authUrl.searchParams.set("scope", effectiveScopes.join(" "));
+    authUrl.searchParams.set("state", state);
+    authUrl.searchParams.set("nonce", nonce);
+    authUrl.searchParams.set("code_challenge", codeChallenge);
+    authUrl.searchParams.set("code_challenge_method", "S256");
+    authUrl.searchParams.set("prompt", prompt ?? "select_account");
 
-      if (loginHint) {
-        authUrl.searchParams.set("login_hint", loginHint);
-      }
+    if (loginHint) {
+      authUrl.searchParams.set("login_hint", loginHint);
+    }
 
-      const width = 500;
-      const height = 600;
-      const left = window.screenX + (window.outerWidth - width) / 2;
-      const top = window.screenY + (window.outerHeight - height) / 2;
+    const popup = this.openAuthPopup(authUrl, "microsoft-auth");
 
-      const popup = window.open(
-        authUrl.toString(),
-        "microsoft-auth",
-        `width=${width},height=${height},left=${left},top=${top}`,
-      );
+    await this.waitForPopupRedirect(
+      popup,
+      redirectUri,
+      "Microsoft",
+      async (url) => {
+        const { searchParams } = new URL(url);
+        this.assertAuthorizeResponse(searchParams, state);
 
-      if (!popup) {
-        reject(
-          new AuthWebError(
-            "popup_blocked",
-            "Popup blocked. Please allow popups for this site.",
-          ),
-        );
-        return;
-      }
-
-      void this.waitForPopupRedirect(
-        popup,
-        redirectUri,
-        "Microsoft",
-        async (url) => {
-          const urlObj = new URL(url);
-          const code = urlObj.searchParams.get("code");
-          const returnedState = urlObj.searchParams.get("state");
-          const error = urlObj.searchParams.get("error");
-          const errorDescription = urlObj.searchParams.get("error_description");
-
-          if (returnedState !== state) {
-            throw new AuthWebError(
-              "invalid_state",
-              "State mismatch - possible CSRF attack",
-            );
-          }
-
-          if (error) {
-            throw new AuthWebError(
-              mapOAuthErrorCode(error, "authorize"),
-              errorDescription ?? error,
-            );
-          }
-
-          if (!code) {
-            throw new AuthWebError(
-              "token_error",
-              "No authorization code in response",
-            );
-          }
-
-          await this.exchangeMicrosoftCodeForTokens(
-            code,
-            codeVerifier,
-            clientId,
-            redirectUri,
-            effectiveTenant,
-            nonce,
-            effectiveScopes,
-            keepRefreshToken,
-            generation,
+        const code = searchParams.get("code");
+        if (!code) {
+          throw new AuthWebError(
+            "token_error",
+            "No authorization code in response",
           );
-        },
-      )
-        .then(() => {
-          resolve();
-        })
-        .catch((error: unknown) => {
-          reject(error);
+        }
+
+        await this.exchangeMicrosoftCodeForTokens({
+          code,
+          codeVerifier,
+          clientId,
+          redirectUri,
+          tenant: effectiveTenant,
+          expectedNonce: nonce,
+          scopes: effectiveScopes,
+          keepRefreshToken,
+          generation,
         });
-    });
+      },
+    );
   }
 
   private generateCodeVerifier(): string {
@@ -1287,17 +1285,17 @@ class AuthWeb implements Auth {
     return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   }
 
-  private async exchangeMicrosoftCodeForTokens(
-    code: string,
-    codeVerifier: string,
-    clientId: string,
-    redirectUri: string,
-    tenant: string,
-    expectedNonce: string,
-    scopes: string[],
-    keepRefreshToken: boolean,
-    generation?: number,
-  ): Promise<void> {
+  private async exchangeMicrosoftCodeForTokens({
+    code,
+    codeVerifier,
+    clientId,
+    redirectUri,
+    tenant,
+    expectedNonce,
+    scopes,
+    keepRefreshToken,
+    generation,
+  }: MicrosoftCodeExchange): Promise<void> {
     const authBaseUrl = this.getMicrosoftAuthBaseUrl(
       tenant,
       this._config.microsoftB2cDomain,
@@ -1308,9 +1306,7 @@ class AuthWeb implements Auth {
       { tokenUrl, clientId, code, redirectUri, codeVerifier },
       "token",
     );
-    if (generation !== undefined) {
-      this.assertActiveGeneration(generation);
-    }
+    this.assertActiveGeneration(generation);
     if (!parsed.ok) {
       throw new AuthWebError(
         parsed.errorCode,
@@ -1341,13 +1337,14 @@ class AuthWeb implements Auth {
       this._storage.clearRefreshToken();
     }
 
-    this._grantedScopes = scopes;
+    this._grantedScopes = [...scopes];
+    this._microsoftTenant = tenant;
     this._storage.saveScopes(scopes);
 
     const user: AuthUser = {
       provider: "microsoft",
       idToken,
-      scopes,
+      scopes: [...scopes],
       ...claims,
     };
     setIfDefined(user, "accessToken", accessToken);
@@ -1549,8 +1546,8 @@ class AuthWeb implements Auth {
   }
 
   private async loginApple(
-    options?: LoginOptions,
-    generation?: number,
+    options: LoginOptions | undefined,
+    generation: number,
   ): Promise<void> {
     const clientId = this._config.appleWebClientId;
 
@@ -1562,13 +1559,12 @@ class AuthWeb implements Auth {
     }
 
     await this.ensureAppleSdkLoaded();
-    if (generation !== undefined) {
-      this.assertActiveGeneration(generation);
-    }
+    this.assertActiveGeneration(generation);
     if (!window.AppleID) {
       throw new AuthWebError("network_error", "Apple SDK not loaded");
     }
 
+    this.assertSecureContext();
     const nonce = options?.nonce ?? crypto.randomUUID();
     const appleAuthConfig: AppleAuthInitConfig = {
       clientId,
@@ -1583,9 +1579,7 @@ class AuthWeb implements Auth {
 
     try {
       const response: AppleAuthResponse = await window.AppleID.auth.signIn();
-      if (generation !== undefined) {
-        this.assertActiveGeneration(generation);
-      }
+      this.assertActiveGeneration(generation);
       const idToken = response.authorization.id_token;
       const idTokenClaims = this.parseJwtPayload(idToken);
       if (getOptionalString(idTokenClaims, "nonce") !== nonce) {
@@ -1663,7 +1657,7 @@ class AuthWeb implements Auth {
     this._sessionGeneration++;
     this._currentUser = undefined;
     this._grantedScopes = [];
-    this._pendingGoogleNonce = undefined;
+    this._microsoftTenant = undefined;
     this._loginInFlight = false;
     const rejectRefresh = this._refreshReject;
     this._refreshPromise = undefined;
@@ -1685,9 +1679,7 @@ class AuthWeb implements Auth {
     this._captureLoginUser?.(user);
     if (this._credentialOnlyLogin) return;
     this._currentUser = user;
-    if (!this._credentialOnlyLogin) {
-      this._storage.saveUser(user);
-    }
+    this._storage.saveUser(user);
     this.notify();
   }
 

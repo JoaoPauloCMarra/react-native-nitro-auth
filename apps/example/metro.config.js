@@ -44,37 +44,27 @@ config.resolver.blockList = Array.isArray(config.resolver.blockList)
       bunOldNodeModules,
     ].filter(Boolean);
 
+const webEntries = {
+  "react-native-nitro-auth": "index.web.ts",
+  "react-native-nitro-auth/official-buttons/svg": "official-buttons-svg.web.ts",
+  "react-native-nitro-auth/official-buttons": "official-buttons.web.ts",
+};
+
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (platform === "web") {
     if (moduleName === "react-native-nitro-modules") {
       return { type: "empty" };
     }
-    if (moduleName === "react-native-nitro-auth") {
+    const webEntry = Object.hasOwn(webEntries, moduleName)
+      ? webEntries[moduleName]
+      : undefined;
+    if (webEntry) {
       return context.resolveRequest(
         context,
         path.resolve(
           monorepoRoot,
-          "packages/react-native-nitro-auth/src/index.web.ts",
-        ),
-        platform,
-      );
-    }
-    if (moduleName === "react-native-nitro-auth/official-buttons/svg") {
-      return context.resolveRequest(
-        context,
-        path.resolve(
-          monorepoRoot,
-          "packages/react-native-nitro-auth/src/official-buttons-svg.web.ts",
-        ),
-        platform,
-      );
-    }
-    if (moduleName === "react-native-nitro-auth/official-buttons") {
-      return context.resolveRequest(
-        context,
-        path.resolve(
-          monorepoRoot,
-          "packages/react-native-nitro-auth/src/official-buttons.web.ts",
+          "packages/react-native-nitro-auth/src",
+          webEntry,
         ),
         platform,
       );

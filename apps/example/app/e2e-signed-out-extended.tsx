@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import {
   AuthError,
   AuthService,
@@ -8,7 +8,7 @@ import {
   type AuthPlatform,
 } from "react-native-nitro-auth";
 import { authErrorCode, currentPlatform } from "../components/e2e-auth-checks";
-import { labStyles } from "../components/e2e-lab-ui";
+import { LabResult, LabSubtitle, LabTitle } from "../components/e2e-lab-ui";
 
 const NATIVE_TIMEOUT_MS = 10000;
 const EVENT_TIMEOUT_MS = 1000;
@@ -343,17 +343,15 @@ export default function SignedOutExtendedScreen() {
         accessibilityLabel={values.join(" ")}
         style={styles.resultsProbe}
       />
-      <Text style={labStyles.title}>Signed-out extended lab</Text>
-      <Text style={labStyles.subtitle}>
+      <LabTitle>Signed-out extended lab</LabTitle>
+      <LabSubtitle>
         Auto-runs signed-out guard, error, restore, logout, scope, setup-gate,
         and dispose checks on a disposable QA target. It calls native logout and
         dispose. No provider credentials or token values are rendered.
-      </Text>
-      <Text style={labStyles.result}>auth://e2e-signed-out-extended</Text>
+      </LabSubtitle>
+      <LabResult>auth://e2e-signed-out-extended</LabResult>
       {values.map((value, index) => (
-        <Text key={CHECK_NAMES[index]} style={labStyles.result}>
-          {value}
-        </Text>
+        <LabResult key={CHECK_NAMES[index]}>{value}</LabResult>
       ))}
     </View>
   );

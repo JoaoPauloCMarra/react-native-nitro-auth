@@ -291,19 +291,13 @@ class AuthFlowHardeningTest {
                     !(suppression != null && suppression == generation)
                 assertEquals(
                     expected,
-                    shouldCancelMicrosoftAuth(inProgress, opened, received, isHandler, suppression, generation),
-                )
-                assertEquals(
-                    expected,
-                    shouldCancelAppleAuth(inProgress, opened, received, isHandler, suppression, generation),
+                    shouldCancelBrowserFlow(inProgress, opened, received, isHandler, suppression, generation),
                 )
                 if (!inProgress || !opened || received || isHandler) {
-                    assertFalse(shouldCancelMicrosoftAuth(inProgress, opened, received, isHandler, suppression, generation))
-                    assertFalse(shouldCancelAppleAuth(inProgress, opened, received, isHandler, suppression, generation))
+                    assertFalse(shouldCancelBrowserFlow(inProgress, opened, received, isHandler, suppression, generation))
                 }
                 val consumes = !isHandler && suppression != null && suppression == generation
-                assertEquals(consumes, shouldConsumeMicrosoftResumeSuppression(suppression, generation, isHandler))
-                assertEquals(consumes, shouldConsumeAppleResumeSuppression(suppression, generation, isHandler))
+                assertEquals(consumes, shouldConsumeBrowserResumeSuppression(suppression, generation, isHandler))
             }
         }
     }
@@ -386,7 +380,6 @@ class AuthFlowHardeningTest {
             val restored = restoreGoogleSessionState(kind, null, null)
             assertEquals(kind, restored.persistedKind())
             assertNull(restored.accountId)
-            assertNull(restored.returnedHostedDomain())
             assertNull(restored.returnedHostedDomainForAccount(null))
             assertNull(restored.returnedHostedDomainForAccount("account"))
         }

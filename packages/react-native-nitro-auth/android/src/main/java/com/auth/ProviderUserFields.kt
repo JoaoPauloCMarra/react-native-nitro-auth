@@ -1,7 +1,9 @@
 package com.auth
 
+import com.margelo.nitro.com.auth.AuthProvider
+
 internal class ProviderUserFields(
-    val provider: String,
+    val provider: AuthProvider,
     val email: String? = null,
     val name: String? = null,
     val firstName: String? = null,

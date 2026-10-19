@@ -3,9 +3,9 @@ import AuthenticationServices
 import Security
 
 extension AuthAdapter {
-  static func loginMicrosoft(scopes: [String], loginHint: String?, tenant: String?, prompt: String?, keepRefreshToken: Bool = false, operation: AuthAdapter.AuthOperationToken, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
+  static func loginMicrosoft(scopes: [String], loginHint: String?, tenant: String?, prompt: String?, keepRefreshToken: Bool = false, operation: AuthAdapter.AuthOperationToken, completion: @escaping (ProviderOutcome) -> Void) {
     guard let clientId = Bundle.main.object(forInfoDictionaryKey: "MSALClientID") as? String, !clientId.isEmpty else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
+      completion(.failure(.configurationError))
       return
     }
     let effectiveTenant = tenant ?? Bundle.main.object(forInfoDictionaryKey: "MSALTenant") as? String ?? "common"
@@ -15,19 +15,19 @@ extension AuthAdapter {
     let effectivePrompt = prompt ?? "select_account"
 
     guard let codeVerifier = generateCodeVerifier() else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
+      completion(.failure(.configurationError))
       return
     }
-    guard let codeChallenge = generateCodeChallenge(codeVerifier) else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
+    guard let codeChallenge = AuthCore.generateCodeChallenge(codeVerifier) else {
+      completion(.failure(.configurationError))
       return
     }
     let state = UUID().uuidString
     let nonce = UUID().uuidString
 
     let b2cDomain = Bundle.main.object(forInfoDictionaryKey: "MSALB2cDomain") as? String
-    guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: effectiveTenant, b2cDomain: b2cDomain) else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
+    guard let authBaseUrl = AuthCore.getMicrosoftAuthBaseUrl(tenant: effectiveTenant, b2cDomain: b2cDomain) else {
+      completion(.failure(.configurationError))
       return
     }
 
@@ -42,7 +42,7 @@ extension AuthAdapter {
       prompt: effectivePrompt,
       loginHint: loginHint
     ) else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
+      completion(.failure(.configurationError))
       return
     }
 
@@ -50,22 +50,22 @@ extension AuthAdapter {
 
     DispatchQueue.main.async {
       guard self.isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+        completion(.cancelled)
         return
       }
       guard self.activeMicrosoftWebAuthSession == nil else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.operationInProgress.rawValue), nil)
+        completion(.failure(.operationInProgress))
         return
       }
 
-      let completeAndClearSession = { (data: NSDictionary?, code: NSNumber?, message: String?) in
+      let completeAndClearSession = { (outcome: ProviderOutcome) in
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+          completion(.cancelled)
           return
         }
         self.activeMicrosoftWebAuthSession = nil
         self.activeMicrosoftWebAuthSessionEpoch = nil
-        completion(data, code, message)
+        completion(outcome)
       }
 
       let session = ASWebAuthenticationSession(url: authUrl, callbackURLScheme: callbackScheme) { callbackURL, error in
@@ -76,21 +76,21 @@ extension AuthAdapter {
             webAuthSessionErrorDomain: ASWebAuthenticationSessionErrorDomain,
             canceledLoginCode: ASWebAuthenticationSessionError.canceledLogin.rawValue
           )
-          completeAndClearSession(nil, NSNumber(value: mapped.rawValue), nsError.localizedDescription)
+          completeAndClearSession(.failure(mapped, nsError.localizedDescription))
           return
         }
 
         let code: String
         switch AuthCore.classifyMicrosoftCallback(callbackURL, expectedState: state) {
         case .failure(let failureCode, let detail):
-          completeAndClearSession(nil, NSNumber(value: failureCode.rawValue), detail)
+          completeAndClearSession(.failure(failureCode, detail))
           return
         case .code(let authorizationCode):
           code = authorizationCode
         }
 
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+          completion(.cancelled)
           return
         }
         self.activeMicrosoftWebAuthSession = nil
@@ -111,7 +111,7 @@ extension AuthAdapter {
       }
 
       guard let window = activeWindow() else {
-        completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
+        completeAndClearSession(.failure(.configurationError))
         return
       }
       let contextProvider = WebAuthContextProvider(anchor: window)
@@ -121,7 +121,7 @@ extension AuthAdapter {
       self.activeMicrosoftWebAuthSession = session
       self.activeMicrosoftWebAuthSessionEpoch = operation.epoch
       if !session.start() {
-        completeAndClearSession(nil, NSNumber(value: PlatformAuthErrorCode.unknown.rawValue), nil)
+        completeAndClearSession(.failure(.unknown))
       }
     }
   }
@@ -130,14 +130,6 @@ extension AuthAdapter {
     AuthCore.generateCodeVerifier { bytes in
       SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess
     }
-  }
-
-  static func generateCodeChallenge(_ verifier: String) -> String? {
-    AuthCore.generateCodeChallenge(verifier)
-  }
-
-  static func formUrlEncodedBody(_ params: [String: String]) -> Data? {
-    AuthCore.formUrlEncodedBody(params)
   }
 
   static func exchangeCodeForTokens(
@@ -151,20 +143,20 @@ extension AuthAdapter {
     scopes: [String],
     keepRefreshToken: Bool,
     operation: AuthAdapter.AuthOperationToken,
-    completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void
+    completion: @escaping (ProviderOutcome) -> Void
   ) {
     guard isCurrentOperation(operation) else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+      completion(.cancelled)
       return
     }
-    guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
+    guard let authBaseUrl = AuthCore.getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
           let tokenUrl = AuthCore.microsoftTokenUrl(authBaseUrl: authBaseUrl) else {
       DispatchQueue.main.async {
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+          completion(.cancelled)
           return
         }
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
+        completion(.failure(.configurationError))
       }
       return
     }
@@ -181,16 +173,16 @@ extension AuthAdapter {
       "code_verifier": codeVerifier
     ]
 
-    request.httpBody = formUrlEncodedBody(bodyParams)
+    request.httpBody = AuthCore.formUrlEncodedBody(bodyParams)
 
     URLSession.shared.dataTask(with: request) { data, response, error in
       DispatchQueue.main.async {
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+          completion(.cancelled)
           return
         }
         if let error = error {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), error.localizedDescription)
+          completion(.failure(PlatformAuthErrorCode.networkError, error.localizedDescription))
           return
         }
 
@@ -203,7 +195,7 @@ extension AuthAdapter {
           decodeJwt: { decodeJwt($0) }
         ) {
         case .failure(let failureCode, let detail):
-          completion(nil, NSNumber(value: failureCode.rawValue), detail)
+          completion(.failure(failureCode, detail))
           return
         case .success(let parsed):
           tokens = parsed
@@ -219,17 +211,17 @@ extension AuthAdapter {
             keepExisting: keepRefreshToken
           )
           inMemoryMicrosoftScopes = resultScopes
+          inMemoryMicrosoftTenant = tenant
         }) else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+          completion(.cancelled)
           return
         }
-        signOutGoogleOnMainQueue()
         guard self.isCurrentOperation(operation) else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+          completion(.cancelled)
           return
         }
 
-        completion(AuthCore.microsoftUserData(tokens, scopes: resultScopes) as NSDictionary, nil, nil)
+        completion(.success(AuthCore.microsoftUserData(tokens, scopes: resultScopes) as NSDictionary))
       }
     }.resume()
   }
@@ -241,28 +233,34 @@ extension AuthAdapter {
   static func requestMicrosoftTokenRefresh(
     refreshToken: String,
     operation: AuthAdapter.AuthOperationToken,
-    completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void,
+    completion: @escaping (ProviderOutcome) -> Void,
     onResponse: @escaping (Data?, URLResponse?, Error?) -> Void
   ) {
     guard isCurrentOperation(operation) else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+      completion(.cancelled)
       return
     }
     guard let clientId = Bundle.main.object(forInfoDictionaryKey: "MSALClientID") as? String, !clientId.isEmpty else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
+      completion(.failure(.configurationError))
       return
     }
-    let tenant = Bundle.main.object(forInfoDictionaryKey: "MSALTenant") as? String ?? "common"
+    tokenStoreLock.lock()
+    let loginTenant = inMemoryMicrosoftTenant
+    tokenStoreLock.unlock()
+    let tenant = AuthCore.microsoftRefreshTenant(
+      loginTenant: loginTenant,
+      configuredTenant: Bundle.main.object(forInfoDictionaryKey: "MSALTenant") as? String
+    )
     let b2cDomain = Bundle.main.object(forInfoDictionaryKey: "MSALB2cDomain") as? String
-    guard let authBaseUrl = getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
+    guard let authBaseUrl = AuthCore.getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain),
           let tokenUrl = AuthCore.microsoftTokenUrl(authBaseUrl: authBaseUrl) else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.configurationError.rawValue), nil)
+      completion(.failure(.configurationError))
       return
     }
     var request = URLRequest(url: tokenUrl)
     request.httpMethod = "POST"
     request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-    request.httpBody = formUrlEncodedBody([
+    request.httpBody = AuthCore.formUrlEncodedBody([
       "client_id": clientId,
       "grant_type": "refresh_token",
       "refresh_token": refreshToken
@@ -280,7 +278,7 @@ extension AuthAdapter {
   }
 
   static func tryMicrosoftSilentRefresh(
-    completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void,
+    completion: @escaping (ProviderOutcome) -> Void,
     operation: AuthAdapter.AuthOperationToken
   ) {
     tokenStoreLock.lock()
@@ -288,17 +286,17 @@ extension AuthAdapter {
     let currentScopes = inMemoryMicrosoftScopes
     tokenStoreLock.unlock()
     guard let refreshToken = refreshToken else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.notSignedIn.rawValue), nil)
+      completion(.failure(.notSignedIn))
       return
     }
 
     requestMicrosoftTokenRefresh(refreshToken: refreshToken, operation: operation, completion: completion) { data, response, error in
       guard self.isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+        completion(.cancelled)
         return
       }
       if let error = error {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), error.localizedDescription)
+        completion(.failure(PlatformAuthErrorCode.networkError, error.localizedDescription))
         return
       }
       let statusCode = (response as? HTTPURLResponse)?.statusCode
@@ -313,7 +311,7 @@ extension AuthAdapter {
         decodeJwt: { decodeJwt($0) }
       ) {
       case .failure(let failureCode, let detail):
-        completion(nil, NSNumber(value: failureCode.rawValue), detail)
+        completion(.failure(failureCode, detail))
         return
       case .success(let parsed):
         tokens = parsed
@@ -325,33 +323,33 @@ extension AuthAdapter {
           inMemoryMicrosoftRefreshToken = newRefreshToken
         }
       }) else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+        completion(.cancelled)
         return
       }
       guard self.isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+        completion(.cancelled)
         return
       }
 
-      completion(AuthCore.microsoftUserData(tokens, scopes: currentScopes) as NSDictionary, nil, nil)
+      completion(.success(AuthCore.microsoftUserData(tokens, scopes: currentScopes) as NSDictionary))
     }
   }
 
-  static func tryMicrosoftRefreshForTokenRefresh(completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void, operation: AuthAdapter.AuthOperationToken) {
+  static func tryMicrosoftRefreshForTokenRefresh(completion: @escaping (ProviderOutcome) -> Void, operation: AuthAdapter.AuthOperationToken) {
     tokenStoreLock.lock()
     let refreshToken = inMemoryMicrosoftRefreshToken
     tokenStoreLock.unlock()
     guard let refreshToken = refreshToken else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.notSignedIn.rawValue), nil)
+      completion(.failure(.notSignedIn))
       return
     }
     requestMicrosoftTokenRefresh(refreshToken: refreshToken, operation: operation, completion: completion) { data, response, error in
       guard self.isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+        completion(.cancelled)
         return
       }
       if let error = error {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.networkError.rawValue), error.localizedDescription)
+        completion(.failure(PlatformAuthErrorCode.networkError, error.localizedDescription))
         return
       }
       if let httpResponse = response as? HTTPURLResponse {
@@ -364,7 +362,7 @@ extension AuthAdapter {
         nowSeconds: Date().timeIntervalSince1970
       ) {
       case .failure(let failureCode, let detail):
-        completion(nil, NSNumber(value: failureCode.rawValue), detail)
+        completion(.failure(failureCode, detail))
         return
       case .success(let parsed):
         tokens = parsed
@@ -375,18 +373,14 @@ extension AuthAdapter {
           inMemoryMicrosoftRefreshToken = newRefreshToken
         }
       }) else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+        completion(.cancelled)
         return
       }
       guard self.isCurrentOperation(operation) else {
-        completion(nil, NSNumber(value: PlatformAuthErrorCode.cancelled.rawValue), nil)
+        completion(.cancelled)
         return
       }
-      completion(AuthCore.microsoftTokensData(tokens) as NSDictionary, nil, nil)
+      completion(.success(AuthCore.microsoftTokensData(tokens) as NSDictionary))
     }
-  }
-
-  static func getMicrosoftAuthBaseUrl(tenant: String, b2cDomain: String?) -> String? {
-    AuthCore.getMicrosoftAuthBaseUrl(tenant: tenant, b2cDomain: b2cDomain)
   }
 }

@@ -1,8 +1,10 @@
 import {
+  AUTH_ERROR_CODES,
   AuthError,
   isAuthErrorCode,
   toAuthErrorCode,
 } from "../utils/auth-error";
+import type { AuthErrorCode } from "../Auth.nitro";
 
 const VALID_CODES = [
   "cancelled",
@@ -36,6 +38,24 @@ describe("isAuthErrorCode", () => {
 
   it("returns false for empty string", () => {
     expect(isAuthErrorCode("")).toBe(false);
+  });
+});
+
+describe("AUTH_ERROR_CODES", () => {
+  it("lists every AuthErrorCode, checked by the compiler", () => {
+    const table: Record<AuthErrorCode, true> = AUTH_ERROR_CODES;
+    expect(Object.keys(table).sort()).toEqual([...VALID_CODES].sort());
+  });
+});
+
+describe("inherited property names", () => {
+  const INHERITED = ["constructor", "__proto__", "hasOwnProperty", "toString"];
+
+  it.each(INHERITED)("inherited property names map to unknown (%s)", (name) => {
+    expect(isAuthErrorCode(name)).toBe(false);
+    expect(toAuthErrorCode(name)).toBe("unknown");
+    expect(toAuthErrorCode(`${name}: detail`)).toBe("unknown");
+    expect(new AuthError(name).code).toBe("unknown");
   });
 });
 

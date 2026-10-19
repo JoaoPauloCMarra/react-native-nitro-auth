@@ -27,24 +27,6 @@ class MicrosoftRefreshStateTest {
     @Test
     fun staleRefreshCompletionCannotConsumeOrMutateReplacementOperation() {
         val authClass = AuthAdapter::class.java
-        val operationClass = Class.forName("com.auth.MicrosoftRefreshOperation")
-        val refreshOperation = operationClass.enumConstants
-            ?.first { (it as Enum<*>).name == "REFRESH" }
-            ?: error("REFRESH operation is unavailable")
-        val complete = authClass.getDeclaredMethod(
-            "completeMicrosoftRefreshResponse",
-            operationClass,
-            Long::class.javaPrimitiveType,
-            Int::class.javaObjectType,
-            String::class.java,
-            List::class.java,
-            String::class.java,
-            Boolean::class.javaPrimitiveType,
-        ).apply { isAccessible = true }
-        val commit = authClass.getDeclaredMethod(
-            "commitMicrosoftRefresh",
-            Class.forName("com.auth.MicrosoftRefreshCompletion"),
-        ).apply { isAccessible = true }
 
         fun setField(name: String, value: Any?) {
             authClass.getDeclaredField(name).apply {
@@ -65,15 +47,12 @@ class MicrosoftRefreshStateTest {
             pendingRefresh.begin(11L, 4L)
             setField("inMemoryMicrosoftRefreshToken", "token-a")
 
-            val completionA = complete.invoke(
-                AuthAdapter,
-                refreshOperation,
+            val completionA = AuthAdapter.completeMicrosoftRefreshResponse(
+                MicrosoftRefreshOperation.REFRESH,
                 11L,
                 200,
                 "{\"id_token\":\"id-a\",\"access_token\":\"access-a\",\"refresh_token\":\"token-a-new\"}",
                 listOf("openid"),
-                null,
-                false,
             )
             assertNotNull(completionA)
 
@@ -81,21 +60,18 @@ class MicrosoftRefreshStateTest {
             pendingRefresh.begin(12L, 5L)
             setField("inMemoryMicrosoftRefreshToken", "token-b")
 
-            assertFalse(commit.invoke(AuthAdapter, completionA) as Boolean)
+            assertFalse(AuthAdapter.commitMicrosoftRefresh(completionA!!))
             assertEquals("token-b", getField("inMemoryMicrosoftRefreshToken"))
             assertEquals(12L, pendingRefresh.generation)
 
-            val completionB = complete.invoke(
-                AuthAdapter,
-                refreshOperation,
+            val completionB = AuthAdapter.completeMicrosoftRefreshResponse(
+                MicrosoftRefreshOperation.REFRESH,
                 12L,
                 200,
                 "{\"id_token\":\"id-b\",\"access_token\":\"access-b\",\"refresh_token\":\"token-b-new\"}",
                 listOf("openid", "profile"),
-                null,
-                false,
             )
-            assertTrue(commit.invoke(AuthAdapter, completionB) as Boolean)
+            assertTrue(AuthAdapter.commitMicrosoftRefresh(completionB!!))
             assertEquals("token-b-new", getField("inMemoryMicrosoftRefreshToken"))
             assertNull(pendingRefresh.generation)
         } finally {
@@ -103,6 +79,88 @@ class MicrosoftRefreshStateTest {
             setField("inMemoryMicrosoftRefreshToken", null)
             setField("inMemoryMicrosoftScopes", listOf("openid", "email", "profile", "offline_access", "User.Read"))
             setField("googleAuthStateEpoch", 1L)
+        }
+    }
+
+    @Test
+    fun exchangeAndRefreshMapEmptyAccessTokensTheSameWay() {
+        val authClass = AuthAdapter::class.java
+
+        fun setField(name: String, value: Any?) {
+            authClass.getDeclaredField(name).apply {
+                isAccessible = true
+                set(AuthAdapter, value)
+            }
+        }
+
+        val pendingRefresh = authClass.getDeclaredField("pendingMicrosoftRefresh").let {
+            it.isAccessible = true
+            it.get(AuthAdapter) as PendingOperation
+        }
+        val payload = android.util.Base64.encodeToString(
+            "{\"nonce\":\"nonce-a\"}".toByteArray(Charsets.UTF_8),
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP,
+        )
+        val body = "{\"id_token\":\"e30.$payload.signature\",\"access_token\":\"\",\"refresh_token\":\"\"}"
+
+        try {
+            setField("googleAuthStateEpoch", 4L)
+            pendingRefresh.begin(21L, 4L)
+            val refreshed = AuthAdapter.completeMicrosoftRefreshResponse(
+                MicrosoftRefreshOperation.REFRESH,
+                21L,
+                200,
+                body,
+                listOf("openid"),
+            )
+            setField("pendingMicrosoft", PendingMicrosoftAuth(Origin.LOGIN, 22L, listOf("openid")).also { it.nonce = "nonce-a" })
+            val exchanged = AuthAdapter.completeMicrosoftTokenResponse(200, body, 22L, listOf("openid"))
+
+            assertNotNull(refreshed)
+            assertNotNull(exchanged)
+            assertNull(refreshed!!.accessToken)
+            assertEquals(refreshed.accessToken, exchanged!!.accessToken)
+            assertEquals(refreshed.refreshToken, exchanged.refreshToken)
+        } finally {
+            pendingRefresh.clear()
+            setField("pendingMicrosoft", null)
+            setField("googleAuthStateEpoch", 1L)
+        }
+    }
+
+    @Test
+    fun refreshUsesTheTenantOfTheLogin() {
+        val authClass = AuthAdapter::class.java
+
+        fun setField(name: String, value: Any?) {
+            authClass.getDeclaredField(name).apply {
+                isAccessible = true
+                set(AuthAdapter, value)
+            }
+        }
+
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        try {
+            assertEquals("common", AuthAdapter.microsoftSessionTenant(context))
+
+            setField("pendingMicrosoft", PendingMicrosoftAuth(Origin.LOGIN, 31L, listOf("openid")))
+            val completion = MicrosoftTokenCompletion(
+                origin = Origin.LOGIN,
+                generation = 31L,
+                success = true,
+                refreshToken = "refresh",
+                scopes = listOf("openid"),
+                tenant = "contoso.onmicrosoft.com",
+            )
+            assertTrue(AuthAdapter.commitMicrosoftTokenSuccess(completion))
+            assertEquals("contoso.onmicrosoft.com", AuthAdapter.microsoftSessionTenant(context))
+
+            setField("inMemoryMicrosoftTenant", null)
+            assertEquals("common", AuthAdapter.microsoftSessionTenant(context))
+        } finally {
+            setField("pendingMicrosoft", null)
+            setField("inMemoryMicrosoftRefreshToken", null)
+            setField("inMemoryMicrosoftScopes", listOf("openid", "email", "profile", "offline_access", "User.Read"))
         }
     }
 }

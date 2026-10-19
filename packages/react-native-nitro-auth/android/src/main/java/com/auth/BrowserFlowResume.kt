@@ -1,6 +1,6 @@
 package com.auth
 
-internal fun shouldCancelAppleAuth(
+internal fun shouldCancelBrowserFlow(
     authInProgress: Boolean,
     browserWasOpened: Boolean,
     callbackReceived: Boolean,
@@ -14,7 +14,7 @@ internal fun shouldCancelAppleAuth(
         !resumingActivityIsCallbackHandler &&
         !(resumeSuppressionGeneration != null && resumeSuppressionGeneration == currentGeneration)
 
-internal fun shouldConsumeAppleResumeSuppression(
+internal fun shouldConsumeBrowserResumeSuppression(
     resumeSuppressionGeneration: Long?,
     currentGeneration: Long?,
     resumingActivityIsCallbackHandler: Boolean,

@@ -2,6 +2,8 @@
 
 package com.auth
 
+import com.margelo.nitro.com.auth.AuthNonce
+import com.margelo.nitro.com.auth.AuthProvider
 import com.margelo.nitro.com.auth.ProviderRequestRegistry
 
 import android.app.Activity
@@ -16,6 +18,7 @@ import android.util.Base64
 import android.util.Log
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.Credential
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
@@ -64,7 +67,7 @@ object AuthAdapter {
     )
 
     private data class PendingAppleAuth(
-        val origin: String,
+        val origin: Origin,
         val generation: Long,
         val config: AppleAndroidBrokerConfig,
         val codeVerifier: String,
@@ -94,37 +97,13 @@ object AuthAdapter {
     private val activityTracker = AuthActivityTracker()
     private val currentActivity: Activity?
         get() = activityTracker.currentActivity()
-    private var googleSignInClient: GoogleSignInClient? = null
     private var lifecycleCallbacks: Application.ActivityLifecycleCallbacks? = null
-    private var pendingMicrosoftScopes: List<String> = emptyList()
     private val knownMicrosoftStates = LinkedHashMap<String, Long>()
 
     private var microsoftResumeSuppressionGeneration: Long? = null
 
     @Volatile
-    private var pendingOrigin: String = "login"
-    @Volatile
-    private var pendingPkceVerifier: String? = null
-    @Volatile
-    private var pendingState: String? = null
-    @Volatile
-    private var pendingNonce: String? = null
-    @Volatile
-    private var pendingMicrosoftTenant: String? = null
-    @Volatile
-    private var pendingMicrosoftClientId: String? = null
-    @Volatile
-    private var pendingMicrosoftB2cDomain: String? = null
-    @Volatile
-    private var pendingMicrosoftGeneration: Long? = null
-    @Volatile
-    private var microsoftAuthInProgress = false
-    @Volatile
-    private var microsoftBrowserWasOpened = false
-    @Volatile
-    private var microsoftRedirectReceived = false
-    @Volatile
-    private var hasLegacyGoogleSession = false
+    private var pendingMicrosoft: PendingMicrosoftAuth? = null
     @Volatile
     private var googleSessionState = GoogleSessionState(null)
     private val pendingGoogleLogin = PendingOperation()
@@ -143,8 +122,6 @@ object AuthAdapter {
     private var googleLegacyAccountNeedsRevalidation = false
     private val googleRevokeState = GoogleRevokeState()
     @JvmField
-    internal var nativeRevokeResultSink: ((Int?, String?, Long) -> Unit)? = null
-    @JvmField
     internal var appleBrokerFactory: (AppleAndroidBrokerConfig) -> AppleAndroidBroker = { AppleAndroidBroker(it) }
     private var googleCredentialCleanup: GoogleCredentialCleanup? = null
     @Volatile
@@ -152,6 +129,8 @@ object AuthAdapter {
 
     @Volatile
     private var inMemoryMicrosoftRefreshToken: String? = null
+    @Volatile
+    private var inMemoryMicrosoftTenant: String? = null
     @Volatile
     private var inMemoryMicrosoftScopes: List<String> =
         defaultMicrosoftScopes
@@ -161,19 +140,16 @@ object AuthAdapter {
     private var moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 
-    @JvmStatic
-    private fun nativeOnLoginSuccess(origin: String, user: ProviderUserFields, generation: Long): Boolean =
+    private fun nativeOnLoginSuccess(origin: Origin, user: ProviderUserFields, generation: Long): Boolean =
         ProviderRequestRegistry.loginSuccess(
             origin, user.provider, user.email, user.name, user.firstName, user.lastName, user.photo,
             user.idToken, user.accessToken, user.serverAuthCode, user.userId, user.phoneNumber,
             user.hostedDomain, user.scopes, user.expirationTime, generation,
         )
 
-    @JvmStatic
-    private fun nativeOnLoginError(origin: String, code: Int, underlyingError: String?, generation: Long): Boolean = ProviderRequestRegistry.loginError(origin, code, underlyingError, generation)
+    private fun nativeOnLoginError(origin: Origin, code: Int, underlyingError: String?, generation: Long): Boolean = ProviderRequestRegistry.loginError(origin, code, underlyingError, generation)
 
-    @JvmStatic
-    fun createNonce(): Array<String> {
+    fun createNonce(): AuthNonce {
         val randomBytes = ByteArray(32)
         nonceRandom.nextBytes(randomBytes)
         val raw = Base64.encodeToString(
@@ -181,15 +157,12 @@ object AuthAdapter {
             Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP,
         )
         val hashed = Sha256.hex(raw)
-        return arrayOf(raw, hashed)
+        return AuthNonce(raw, hashed)
     }
 
-    @JvmStatic
     private fun nativeOnRefreshSuccess(idToken: String?, accessToken: String?, expirationTime: Long?, generation: Long): Boolean = ProviderRequestRegistry.refreshSuccess(idToken, accessToken, expirationTime, generation)
 
-    @JvmStatic
     private fun nativeOnRefreshError(code: Int, underlyingError: String?, generation: Long): Boolean = ProviderRequestRegistry.refreshError(code, underlyingError, generation)
-    @JvmStatic
     private fun nativeOnRevokeAccessResult(code: Int?, underlyingError: String?, generation: Long): Boolean = ProviderRequestRegistry.revokeResult(code, underlyingError, generation)
 
     @Synchronized
@@ -215,7 +188,7 @@ object AuthAdapter {
                                 appleResumeSuppressionGeneration = generation
                                 true
                             }
-                            shouldConsumeAppleResumeSuppression(
+                            shouldConsumeBrowserResumeSuppression(
                                 resumeSuppressionGeneration = appleResumeSuppressionGeneration,
                                 currentGeneration = generation,
                                 resumingActivityIsCallbackHandler = isAppleRedirectHandler,
@@ -230,11 +203,11 @@ object AuthAdapter {
 
                     val isRedirectHandler = activity is MicrosoftAuthActivity
                     val suppressed = synchronized(this@AuthAdapter) {
-                        val generation = pendingMicrosoftGeneration
-                        if (shouldConsumeMicrosoftResumeSuppression(
+                        val generation = pendingMicrosoft?.generation
+                        if (shouldConsumeBrowserResumeSuppression(
                                 resumeSuppressionGeneration = microsoftResumeSuppressionGeneration,
                                 currentGeneration = generation,
-                                resumingActivityIsRedirectHandler = isRedirectHandler,
+                                resumingActivityIsCallbackHandler = isRedirectHandler,
                         )
                         ) {
                             microsoftResumeSuppressionGeneration = null
@@ -247,21 +220,20 @@ object AuthAdapter {
                         return
                     }
                     val cancellation = synchronized(this@AuthAdapter) {
-                        val generation = pendingMicrosoftGeneration
-                        if (generation == null || !shouldCancelMicrosoftAuth(
-                                authInProgress = microsoftAuthInProgress,
-                                browserWasOpened = microsoftBrowserWasOpened,
-                                redirectReceived = microsoftRedirectReceived,
-                                resumingActivityIsRedirectHandler = isRedirectHandler,
+                        val pending = pendingMicrosoft
+                        if (pending == null || !shouldCancelBrowserFlow(
+                                authInProgress = true,
+                                browserWasOpened = pending.browserWasOpened,
+                                callbackReceived = pending.redirectReceived,
+                                resumingActivityIsCallbackHandler = isRedirectHandler,
                                 resumeSuppressionGeneration = microsoftResumeSuppressionGeneration,
-                                currentGeneration = generation,
+                                currentGeneration = pending.generation,
                         )
                         ) {
                             null
                         } else {
-                            val origin = pendingOrigin
                             clearPkceStateLocked()
-                            origin to generation
+                            pending.origin to pending.generation
                         }
                     }
                     cancellation?.let { (origin, generation) ->
@@ -276,7 +248,7 @@ object AuthAdapter {
                     val appleCancellationGeneration = synchronized(this@AuthAdapter) {
                         val pending = pendingAppleAuth
                         if (pending != null &&
-                            shouldCancelAppleAuth(
+                            shouldCancelBrowserFlow(
                                 authInProgress = pendingAppleAuth != null,
                                 browserWasOpened = pending.browserWasOpened,
                                 callbackReceived = pending.callbackReceived,
@@ -291,7 +263,7 @@ object AuthAdapter {
                     }
                 }
                 override fun onActivityPaused(activity: Activity) {
-                    if (microsoftAuthInProgress) microsoftBrowserWasOpened = true
+                    pendingMicrosoft?.browserWasOpened = true
                     activityTracker.onActivityPaused(activity)
                 }
                 override fun onActivityStopped(activity: Activity) { activityTracker.onActivityStopped(activity) }
@@ -326,13 +298,12 @@ object AuthAdapter {
         lifecycleCallbacks = null
         activityTracker.clear()
         appContext = null
-        googleSignInClient = null
-        hasLegacyGoogleSession = false
         googleLegacyAccountNeedsRevalidation = true
         googleSessionState = GoogleSessionState(null, kind = GoogleSessionKind.NONE)
         googleCredentialCleanup = null
         inMemoryOneTapSession = null
         inMemoryMicrosoftRefreshToken = null
+        inMemoryMicrosoftTenant = null
         inMemoryMicrosoftScopes = defaultMicrosoftScopes
         isInitialized = false
     }
@@ -343,22 +314,22 @@ object AuthAdapter {
     }
 
     @JvmStatic
-    fun registerGooglePickerActivity(activity: Activity, origin: String, generation: Long): Boolean = synchronized(this) {
+    internal fun registerGooglePickerActivity(activity: Activity, origin: Origin, generation: Long): Boolean = synchronized(this) {
         val stateEpoch = googlePickerStateEpochLocked(origin, generation) ?: return@synchronized false
-        if (origin == "login") {
+        if (origin == Origin.LOGIN) {
             googleLegacyAccountNeedsRevalidation = true
         }
         googlePickerOperationState.register(activity, origin, generation, stateEpoch)
     }
 
     @JvmStatic
-    fun claimGooglePickerLaunch(activity: Activity, origin: String, generation: Long): Boolean = synchronized(this) {
+    internal fun claimGooglePickerLaunch(activity: Activity, origin: Origin, generation: Long): Boolean = synchronized(this) {
         val stateEpoch = googlePickerStateEpochLocked(origin, generation) ?: return@synchronized false
         googlePickerOperationState.claimLaunch(activity, origin, generation, stateEpoch)
     }
 
     @JvmStatic
-    internal fun beginGooglePickerSignOut(activity: Activity, origin: String, generation: Long): GooglePickerSignOutDecision = synchronized(this) {
+    internal fun beginGooglePickerSignOut(activity: Activity, origin: Origin, generation: Long): GooglePickerSignOutDecision = synchronized(this) {
         val stateEpoch = googlePickerStateEpochLocked(origin, generation)
             ?: return@synchronized GooglePickerSignOutDecision.REJECT
         googlePickerOperationState.beginSignOut(activity, origin, generation, stateEpoch)
@@ -373,7 +344,7 @@ object AuthAdapter {
     }
 
     @JvmStatic
-    fun unregisterGooglePickerActivity(activity: Activity, origin: String, generation: Long) {
+    internal fun unregisterGooglePickerActivity(activity: Activity, origin: Origin, generation: Long) {
         synchronized(this) {
             googlePickerOperationState.unregister(activity, origin, generation)
         }
@@ -382,17 +353,6 @@ object AuthAdapter {
     @JvmStatic
     fun cleanupStaleGoogleSignInResult(context: Context, account: GoogleSignInAccount) {
         cleanupStaleGoogleAccount(context, account)
-    }
-
-    internal fun onGooglePickerSignOutChanged() {
-        val activity = synchronized(this) {
-            googlePickerOperationState.activeIdentity() as? GoogleSignInActivity
-        } ?: return
-        activity.runOnUiThread {
-            if (!activity.isFinishing && !activity.isDestroyed) {
-                activity.onGooglePickerSignOutChanged()
-            }
-        }
     }
 
     private fun notifyGooglePickerSignOutChange(result: GooglePickerSignOutResult) {
@@ -446,10 +406,10 @@ object AuthAdapter {
         notifyGooglePickerSignOutChange(result)
     }
 
-    fun onSignInSuccess(
+    internal fun onSignInSuccess(
         account: GoogleSignInAccount,
         scopes: List<String>,
-        origin: String = "login",
+        origin: Origin = Origin.LOGIN,
         hostedDomain: String? = null,
         generation: Long,
     ): Boolean {
@@ -458,22 +418,7 @@ object AuthAdapter {
             cleanupStaleGoogleAccount(context, account)
             return false
         }
-        val expirationTime = getGoogleExpirationTimeMs(account.idToken)
-        val claims = JwtClaims.decode(account.idToken.orEmpty())
-        val user = ProviderUserFields(
-            provider = "google",
-            email = account.email,
-            name = account.displayName,
-            firstName = claims["given_name"],
-            lastName = claims["family_name"],
-            photo = account.photoUrl?.toString(),
-            idToken = account.idToken,
-            serverAuthCode = account.serverAuthCode,
-            userId = account.id,
-            hostedDomain = hostedDomain,
-            scopes = scopes.toTypedArray(),
-            expirationTime = expirationTime,
-        )
+        val user = googleUserFrom(account, hostedDomain, scopes.toTypedArray())
         if (!nativeOnLoginSuccess(origin, user, generation)) {
             cleanupStaleGoogleAccount(context, account)
             return false
@@ -483,7 +428,6 @@ object AuthAdapter {
                 false
             } else {
                 clearPendingGoogleGenerationLocked(origin)
-                hasLegacyGoogleSession = true
                 googleLegacyAccountNeedsRevalidation = false
                 googlePickerOperationState.markSdkAccountEstablished()
                 googleSessionState = GoogleSessionState(
@@ -493,6 +437,7 @@ object AuthAdapter {
                 )
                 inMemoryOneTapSession = null
                 inMemoryMicrosoftRefreshToken = null
+                inMemoryMicrosoftTenant = null
                 inMemoryMicrosoftScopes = defaultMicrosoftScopes
                 GoogleSessionStore.persistLocked(context, googleSessionState)
                 true
@@ -504,42 +449,20 @@ object AuthAdapter {
         return committed
     }
 
-    fun onSignInError(errorCode: Int, message: String?, origin: String = "login", generation: Long) {
+    internal fun onSignInError(errorCode: Int, message: String?, origin: Origin = Origin.LOGIN, generation: Long) {
         if (!consumeGoogleGeneration(origin, generation)) return
         val mappedError = mapGoogleStatusCode(errorCode)
         nativeOnLoginError(origin, mappedError.code, message, generation)
     }
 
-    @JvmStatic
-    fun loginSync(
-        context: Context,
-        provider: String,
-        scopes: Array<String>?,
-        loginHint: String?,
-        nonce: String?,
-        useOneTap: Boolean,
-        forceAccountPicker: Boolean = false,
-        useLegacyGoogleSignIn: Boolean = false,
-        filterByAuthorizedAccounts: Boolean = false,
-        forceCodeForRefreshToken: Boolean = false,
-        requestVerifiedPhoneNumber: Boolean = false,
-        tenant: String? = null,
-        prompt: String? = null,
-        hostedDomain: String? = null,
-        openIDRealm: String? = null,
-        generation: Long,
-    ) {
+    internal fun loginSync(context: Context, request: LoginRequest, generation: Long) {
         val cleanupBarrier = beginGoogleAuthStateTransition(clearPendingCallbacks = true)
-        if (provider == "apple") {
-            loginApple(context, scopes, nonce, generation, cleanupBarrier)
+        if (request.provider == AuthProvider.APPLE) {
+            loginApple(context, request.scopes, request.nonce, generation, cleanupBarrier)
             return
         }
-        if (provider == "microsoft") {
-            loginMicrosoft(context, scopes, loginHint, tenant, prompt, "login", generation)
-            return
-        }
-        if (provider != "google") {
-            nativeOnLoginError("login", AuthErrorCode.UNSUPPORTED_PROVIDER.code, "Unsupported provider: $provider", generation)
+        if (request.provider == AuthProvider.MICROSOFT) {
+            loginMicrosoft(context, request.scopes, request.loginHint, request.tenant, request.prompt, Origin.LOGIN, generation)
             return
         }
 
@@ -551,20 +474,20 @@ object AuthAdapter {
         val ctx = appContext ?: context.applicationContext
         val clientId = getClientIdFromResources(ctx)
         if (clientId == null) {
-            if (consumeGoogleGeneration("login", generation)) {
-                nativeOnLoginError("login", AuthErrorCode.CONFIGURATION_ERROR.code, "Google Client ID is required. Set it in app.json plugins.", generation)
+            if (consumeGoogleGeneration(Origin.LOGIN, generation)) {
+                nativeOnLoginError(Origin.LOGIN, AuthErrorCode.CONFIGURATION_ERROR.code, "Google Client ID is required. Set it in app.json plugins.", generation)
             }
             return
         }
 
-        val requestedScopes = scopes?.toList() ?: listOf("email", "profile")
+        val requestedScopes = request.scopes?.toList() ?: listOf("email", "profile")
 
         val startLogin = {
-            if (isCurrentGoogleGeneration("login", generation) && isCurrentGoogleStateEpoch(loginStateEpoch)) {
-                if (nonce == null && (useLegacyGoogleSignIn || forceAccountPicker)) {
-                    loginLegacy(context, clientId, requestedScopes, loginHint, forceAccountPicker, forceCodeForRefreshToken, hostedDomain, "login", generation)
+            if (isCurrentGoogleGeneration(Origin.LOGIN, generation) && isCurrentGoogleStateEpoch(loginStateEpoch)) {
+                if (request.nonce == null && (request.useLegacyGoogleSignIn || request.forceAccountPicker)) {
+                    loginLegacy(context, clientId, requestedScopes, request, Origin.LOGIN, generation)
                 } else {
-                    loginOneTap(context, clientId, requestedScopes, loginHint, nonce, forceAccountPicker, useOneTap, filterByAuthorizedAccounts, requestVerifiedPhoneNumber, hostedDomain, "login", generation)
+                    loginOneTap(context, clientId, requestedScopes, request, Origin.LOGIN, generation)
                 }
             }
         }
@@ -586,23 +509,13 @@ object AuthAdapter {
         cleanupBarrier: Deferred<Unit>?,
     ) {
         val ctx = appContext ?: context.applicationContext
-        val brokerUrlResource = ctx.resources.getIdentifier(
-            "nitro_auth_apple_android_broker_url",
-            "string",
-            ctx.packageName,
-        )
-        val callbackSchemeResource = ctx.resources.getIdentifier(
-            "nitro_auth_apple_android_callback_scheme",
-            "string",
-            ctx.packageName,
-        )
         val config = AppleAndroidBrokerConfig.parse(
-            baseUrl = brokerUrlResource.takeIf { it != 0 }?.let(ctx::getString),
-            callbackScheme = callbackSchemeResource.takeIf { it != 0 }?.let(ctx::getString),
+            baseUrl = stringResource(ctx, "nitro_auth_apple_android_broker_url"),
+            callbackScheme = stringResource(ctx, "nitro_auth_apple_android_callback_scheme"),
         )
         if (config == null) {
             nativeOnLoginError(
-                "login",
+                Origin.LOGIN,
                 AuthErrorCode.CONFIGURATION_ERROR.code,
                 "Apple Android broker URL and callback scheme are required. Set them in app.json plugins.",
                 generation,
@@ -610,10 +523,10 @@ object AuthAdapter {
             return
         }
 
-        val hashedNonce = nonce ?: createNonce()[1]
+        val hashedNonce = nonce ?: createNonce().hashed
         if (!Regex("^[a-f0-9]{64}$").matches(hashedNonce)) {
             nativeOnLoginError(
-                "login",
+                Origin.LOGIN,
                 AuthErrorCode.INVALID_NONCE.code,
                 "Apple nonce must be a 64-character SHA-256 hex value",
                 generation,
@@ -625,7 +538,7 @@ object AuthAdapter {
             createAppleCodePair()
         } catch (_: Exception) {
             nativeOnLoginError(
-                "login",
+                Origin.LOGIN,
                 AuthErrorCode.UNKNOWN.code,
                 "Could not create Apple PKCE challenge",
                 generation,
@@ -633,7 +546,7 @@ object AuthAdapter {
             return
         }
         val pending = PendingAppleAuth(
-            origin = "login",
+            origin = Origin.LOGIN,
             generation = generation,
             config = config,
             codeVerifier = code.verifier,
@@ -645,7 +558,7 @@ object AuthAdapter {
         synchronized(this) {
             if (pendingAppleAuth != null) {
                 nativeOnLoginError(
-                    "login",
+                    Origin.LOGIN,
                     AuthErrorCode.OPERATION_IN_PROGRESS.code,
                     "Apple authentication is already in progress",
                     generation,
@@ -775,7 +688,7 @@ object AuthAdapter {
                     nativeOnLoginSuccess(
                         completed.origin,
                         ProviderUserFields(
-                            provider = "apple",
+                            provider = AuthProvider.APPLE,
                             email = credential.email,
                             name = credential.name,
                             firstName = credential.firstName,
@@ -811,7 +724,7 @@ object AuthAdapter {
         return true
     }
 
-    private fun loginMicrosoft(context: Context, scopes: Array<String>?, loginHint: String?, tenant: String?, prompt: String?, origin: String = "login", generation: Long) {
+    private fun loginMicrosoft(context: Context, scopes: Array<String>?, loginHint: String?, tenant: String?, prompt: String?, origin: Origin = Origin.LOGIN, generation: Long) {
         val ctx = appContext ?: context.applicationContext
         val clientId = getMicrosoftClientIdFromResources(ctx)
         if (clientId == null) {
@@ -823,7 +736,7 @@ object AuthAdapter {
         val effectivePrompt = prompt ?: "select_account"
 
         synchronized(this) {
-            if (microsoftAuthInProgress) {
+            if (pendingMicrosoft != null) {
                 nativeOnLoginError(
                     origin,
                     AuthErrorCode.OPERATION_IN_PROGRESS.code,
@@ -832,13 +745,8 @@ object AuthAdapter {
                 )
                 return
             }
-            microsoftAuthInProgress = true
-            microsoftBrowserWasOpened = false
-            microsoftRedirectReceived = false
             microsoftResumeSuppressionGeneration = null
-            pendingOrigin = origin
-            pendingMicrosoftScopes = effectiveScopes
-            pendingMicrosoftGeneration = generation
+            pendingMicrosoft = PendingMicrosoftAuth(origin, generation, effectiveScopes)
         }
 
         val codeVerifier = generateCodeVerifier()
@@ -855,15 +763,17 @@ object AuthAdapter {
         }
 
         synchronized(this) {
-            pendingPkceVerifier = codeVerifier
-            pendingState = state
-            pendingNonce = nonce
-            pendingMicrosoftTenant = effectiveTenant
-            pendingMicrosoftClientId = clientId
-            pendingMicrosoftB2cDomain = b2cDomain
+            pendingMicrosoft?.let {
+                it.verifier = codeVerifier
+                it.state = state
+                it.nonce = nonce
+                it.tenant = effectiveTenant
+                it.clientId = clientId
+                it.b2cDomain = b2cDomain
+            }
             rememberMicrosoftStateLocked(state, generation)
         }
-        val redirectUri = "msauth://${ctx.packageName}/${clientId}"
+        val redirectUri = microsoftRedirectUri(ctx, clientId)
 
         val authUrl = Uri.parse("${authBaseUrl}oauth2/v2.0/authorize").buildUpon()
             .appendQueryParameter("client_id", clientId)
@@ -909,12 +819,13 @@ object AuthAdapter {
     fun handleMicrosoftRedirect(uri: Uri) {
         val callbackState = uri.getQueryParameter("state")
         val claim = synchronized(this) {
-            val currentGeneration = pendingMicrosoftGeneration
+            val pending = pendingMicrosoft
+            val currentGeneration = pending?.generation
             val decision = classifyMicrosoftRedirect(
-                currentState = pendingState,
+                currentState = pending?.state,
                 currentGeneration = currentGeneration,
                 callbackState = callbackState,
-                redirectReceived = microsoftRedirectReceived,
+                redirectReceived = pending?.redirectReceived ?: false,
                 knownStates = knownMicrosoftStates,
             )
             when (decision) {
@@ -926,13 +837,13 @@ object AuthAdapter {
                 MicrosoftRedirectDecision.CURRENT,
                 MicrosoftRedirectDecision.INVALID -> {
                     microsoftResumeSuppressionGeneration = null
-                    if (currentGeneration == null) {
+                    if (pending == null) {
                         null
                     } else {
-                        microsoftRedirectReceived = true
+                        pending.redirectReceived = true
                         MicrosoftRedirectClaim(
-                            generation = currentGeneration,
-                            origin = pendingOrigin,
+                            generation = pending.generation,
+                            origin = pending.origin,
                             stateIsValid = decision == MicrosoftRedirectDecision.CURRENT,
                         )
                     }
@@ -970,29 +881,30 @@ object AuthAdapter {
     private fun exchangeCodeForTokens(code: String, generation: Long) {
         val ctx = appContext ?: return
         val snapshot = synchronized(this) {
-            if (!isCurrentMicrosoftGenerationLocked(generation)) {
+            val pending = pendingMicrosoft
+            if (pending == null || !isCurrentMicrosoftGenerationLocked(generation)) {
                 null
             } else {
-                val clientId = pendingMicrosoftClientId
-                val tenant = pendingMicrosoftTenant
-                val verifier = pendingPkceVerifier
-                if (clientId == null || tenant == null || verifier == null || pendingNonce == null) {
+                val clientId = pending.clientId
+                val tenant = pending.tenant
+                val verifier = pending.verifier
+                if (clientId == null || tenant == null || verifier == null || pending.nonce == null) {
                     null
                 } else {
                     MicrosoftExchangeSnapshot(
-                        origin = pendingOrigin,
+                        origin = pending.origin,
                         clientId = clientId,
                         tenant = tenant,
-                        b2cDomain = pendingMicrosoftB2cDomain,
+                        b2cDomain = pending.b2cDomain,
                         verifier = verifier,
-                        scopes = pendingMicrosoftScopes.ifEmpty { defaultMicrosoftScopes },
+                        scopes = pending.scopes.ifEmpty { defaultMicrosoftScopes },
                     )
                 }
             }
         }
         if (snapshot == null) {
             val origin = synchronized(this) {
-                if (!isCurrentMicrosoftGenerationLocked(generation)) null else pendingOrigin
+                if (!isCurrentMicrosoftGenerationLocked(generation)) null else pendingMicrosoft?.origin
             }
             if (origin != null && nativeOnLoginError(origin, AuthErrorCode.INVALID_STATE.code, "Missing PKCE state for token exchange", generation)) {
                 completeMicrosoftFailure(generation)
@@ -1000,7 +912,7 @@ object AuthAdapter {
             return
         }
 
-        val redirectUri = "msauth://${ctx.packageName}/${snapshot.clientId}"
+        val redirectUri = microsoftRedirectUri(ctx, snapshot.clientId)
         val authBaseUrl = MicrosoftAuthConfig.getMicrosoftAuthBaseUrl(snapshot.tenant, snapshot.b2cDomain)
         if (authBaseUrl == null) {
             if (nativeOnLoginError(snapshot.origin, AuthErrorCode.CONFIGURATION_ERROR.code, "Invalid Microsoft tenant or B2C domain", generation)) {
@@ -1008,7 +920,7 @@ object AuthAdapter {
             }
             return
         }
-        val tokenUrl = "${authBaseUrl}oauth2/v2.0/token"
+        val tokenUrl = microsoftTokenUrl(authBaseUrl)
 
         postForm(
             url = tokenUrl,
@@ -1025,7 +937,7 @@ object AuthAdapter {
                         val nativeAccepted = nativeOnLoginSuccess(
                             completion.origin,
                             ProviderUserFields(
-                                provider = "microsoft",
+                                provider = AuthProvider.MICROSOFT,
                                 email = completion.email,
                                 name = completion.name,
                                 idToken = completion.idToken,
@@ -1056,11 +968,6 @@ object AuthAdapter {
                     completeMicrosoftFailure(generation)
                 }
             },
-            onCancelled = { message ->
-                if (nativeOnLoginError(snapshot.origin, AuthErrorCode.CANCELLED.code, message, generation)) {
-                    completeMicrosoftFailure(generation)
-                }
-            },
         )
     }
 
@@ -1069,7 +976,6 @@ object AuthAdapter {
         params: Map<String, String>,
         onResult: (Int, String) -> Unit,
         onNetworkError: (String?) -> Unit,
-        onCancelled: (String?) -> Unit,
     ) {
         moduleScope.launch {
             try {
@@ -1099,8 +1005,7 @@ object AuthAdapter {
                 } finally {
                     connection.disconnect()
                 }
-            } catch (e: CancellationException) {
-                onCancelled(e.message)
+            } catch (_: CancellationException) {
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     onNetworkError(e.message)
@@ -1109,7 +1014,7 @@ object AuthAdapter {
         }
     }
 
-    private fun mapMicrosoftRefreshFailure(responseCode: Int, responseBody: String): Pair<AuthErrorCode, String> {
+    private fun mapMicrosoftRefreshFailure(responseBody: String): Pair<AuthErrorCode, String> {
         return try {
             val json = JSONObject(responseBody)
             val errorCode = json.optString("error", "token_error")
@@ -1126,15 +1031,16 @@ object AuthAdapter {
         true
     }
 
-    private fun completeMicrosoftTokenResponse(
+    internal fun completeMicrosoftTokenResponse(
         responseCode: Int,
         responseBody: String,
         generation: Long,
         requestedScopes: List<String>,
     ): MicrosoftTokenCompletion? = synchronized(this) {
         if (!isCurrentMicrosoftGenerationLocked(generation)) return@synchronized null
-        val origin = pendingOrigin
-        val expectedNonce = pendingNonce
+        val pending = pendingMicrosoft ?: return@synchronized null
+        val origin = pending.origin
+        val expectedNonce = pending.nonce
         val grantedScopes = requestedScopes
 
         if (responseCode != 200) {
@@ -1161,13 +1067,8 @@ object AuthAdapter {
         }
 
         try {
-            val json = JSONObject(responseBody)
-            val idToken = json.optString("id_token")
-            val accessToken = json.optString("access_token")
-            val refreshToken = json.optString("refresh_token")
-            val expiresIn = json.optLong("expires_in", 0)
-            val expirationTime = expirationMillisFromExpiresIn(System.currentTimeMillis(), expiresIn)
-            if (idToken.isEmpty()) {
+            val response = parseMicrosoftTokenResponse(responseBody)
+            if (response.idToken == null) {
                 return@synchronized MicrosoftTokenCompletion(
                     origin = origin,
                     generation = generation,
@@ -1177,8 +1078,8 @@ object AuthAdapter {
                 )
             }
 
-            val claims = JwtClaims.decode(idToken)
-            if (claims["nonce"] != expectedNonce) {
+            val loginTenant = pending.tenant
+            if (response.claims["nonce"] != expectedNonce) {
                 return@synchronized MicrosoftTokenCompletion(
                     origin = origin,
                     generation = generation,
@@ -1192,13 +1093,14 @@ object AuthAdapter {
                 origin = origin,
                 generation = generation,
                 success = true,
-                idToken = idToken,
-                accessToken = accessToken,
-                refreshToken = refreshToken,
-                email = claims["preferred_username"] ?: claims["email"],
-                name = claims["name"],
+                idToken = response.idToken,
+                accessToken = response.accessToken,
+                refreshToken = response.refreshToken,
+                email = response.email,
+                name = response.name,
                 scopes = grantedScopes,
-                expirationTime = expirationTime,
+                tenant = loginTenant,
+                expirationTime = response.expirationTime,
             )
         } catch (error: Exception) {
             MicrosoftTokenCompletion(
@@ -1211,16 +1113,16 @@ object AuthAdapter {
         }
     }
 
-    private fun commitMicrosoftTokenSuccess(completion: MicrosoftTokenCompletion): Boolean = synchronized(this) {
+    internal fun commitMicrosoftTokenSuccess(completion: MicrosoftTokenCompletion): Boolean = synchronized(this) {
         if (!isCurrentMicrosoftGenerationLocked(completion.generation)) return@synchronized false
-        if (completion.origin == "login") {
-            inMemoryMicrosoftRefreshToken = completion.refreshToken?.ifEmpty { null }
+        if (completion.origin == Origin.LOGIN) {
+            inMemoryMicrosoftRefreshToken = completion.refreshToken
         } else if (!completion.refreshToken.isNullOrEmpty()) {
             inMemoryMicrosoftRefreshToken = completion.refreshToken
         }
         inMemoryMicrosoftScopes = completion.scopes
+        inMemoryMicrosoftTenant = completion.tenant
         googleSessionState = GoogleSessionState(null, kind = GoogleSessionKind.NONE)
-        hasLegacyGoogleSession = false
         inMemoryOneTapSession = null
         appContext?.let { GoogleSessionStore.clearLocked(it) }
         clearPkceStateLocked()
@@ -1229,7 +1131,6 @@ object AuthAdapter {
 
     private fun restoreDurableGoogleState(context: Context) = synchronized(this) {
         googleSessionState = GoogleSessionStore.restore(context)
-        hasLegacyGoogleSession = googleSessionState.kind == GoogleSessionKind.LEGACY
         googleLegacyAccountNeedsRevalidation = false
     }
 
@@ -1256,29 +1157,18 @@ object AuthAdapter {
         }
 
         moduleScope.launch {
-            val decision = synchronized(this@AuthAdapter) {
-                decideGoogleCredentialCleanup(
-                    cleanupGeneration = googleCredentialCleanup?.generation,
-                    expectedGeneration = generation,
-                    cleanupStateEpoch = googleCredentialCleanup?.stateEpoch,
-                    currentStateEpoch = googleAuthStateEpoch,
-                    externalCallStarted = cleanup.externalCallStarted,
-                )
-            }
-            if (decision != GoogleCredentialCleanupDecision.RUN) {
-                synchronized(this@AuthAdapter) {
-                    if (googleCredentialCleanup === cleanup) googleCredentialCleanup = null
+            val run = synchronized(this@AuthAdapter) {
+                val owned = googleCredentialCleanup === cleanup && googleAuthStateEpoch == stateEpoch
+                if (owned) {
+                    cleanup.externalCallStarted = true
+                } else if (googleCredentialCleanup === cleanup) {
+                    googleCredentialCleanup = null
                 }
+                owned
+            }
+            if (!run) {
                 completion.complete(Unit)
                 return@launch
-            }
-
-            synchronized(this@AuthAdapter) {
-                if (googleCredentialCleanup !== cleanup || googleAuthStateEpoch != stateEpoch) {
-                    completion.complete(Unit)
-                    return@launch
-                }
-                cleanup.externalCallStarted = true
             }
             try {
                 CredentialManager.create(context).clearCredentialState(ClearCredentialStateRequest())
@@ -1308,7 +1198,7 @@ object AuthAdapter {
         return isLegacyGoogleRevokeEligible(
             sessionKind = sessionKind,
             hasTrackedLegacySession = synchronized(this) {
-                hasLegacyGoogleSession && !googleLegacyAccountNeedsRevalidation
+                googleSessionState.kind == GoogleSessionKind.LEGACY && !googleLegacyAccountNeedsRevalidation
             },
             providerSdkHasAccount = getOwnedLegacyGoogleAccount(context) != null,
         )
@@ -1333,32 +1223,17 @@ object AuthAdapter {
         val currentAccount = GoogleSignIn.getLastSignedInAccount(context)
         if (currentAccount?.id != account.id) return
         val accountId = account.id ?: return
-        val owner = "stale-google:$accountId"
-        val decision = synchronized(this) {
-            if (!shouldCleanupStaleGooglePickerAccount(
-                    needsRevalidation = googleLegacyAccountNeedsRevalidation,
-                    loginPending = pendingGoogleLogin.isPending,
-                    scopesPending = pendingGoogleScopes.isPending,
-                    sessionKind = googleSessionState.kind,
-                    hasOneTapSession = inMemoryOneTapSession != null,
-                    hasMicrosoftRefreshToken = inMemoryMicrosoftRefreshToken != null,
-                )
-            ) {
-                GooglePickerSignOutDecision.REJECT
-            } else {
-                googlePickerOperationState.beginTargetedSignOut(owner, accountId)
-            }
-        }
-        if (decision == GooglePickerSignOutDecision.START) {
-            startGoogleSdkSignOut(context, owner)
-        }
+        beginTargetedGoogleSignOut(context, "stale-google:$accountId", accountId)
     }
 
     private fun signOutUnownedGoogleAccount(context: Context) {
         @Suppress("DEPRECATION")
         val account = GoogleSignIn.getLastSignedInAccount(context) ?: return
         val accountId = account.id ?: return
-        val owner = "unowned-google:$accountId"
+        beginTargetedGoogleSignOut(context, "unowned-google:$accountId", accountId)
+    }
+
+    private fun beginTargetedGoogleSignOut(context: Context, owner: String, accountId: String) {
         val decision = synchronized(this) {
             if (!shouldCleanupStaleGooglePickerAccount(
                     needsRevalidation = googleLegacyAccountNeedsRevalidation,
@@ -1376,19 +1251,6 @@ object AuthAdapter {
         }
         if (decision == GooglePickerSignOutDecision.START) {
             startGoogleSdkSignOut(context, owner)
-        }
-    }
-
-    private fun acceptedGoogleAccountIdLocked(): String? {
-        val state = googleSessionState
-        return when (state.kind) {
-            GoogleSessionKind.LEGACY -> {
-                if (!googleLegacyAccountNeedsRevalidation) state.accountId else null
-            }
-            GoogleSessionKind.MODERN -> {
-                inMemoryOneTapSession?.credential?.id?.takeIf { it == state.accountId }
-            }
-            GoogleSessionKind.NONE -> null
         }
     }
 
@@ -1440,7 +1302,7 @@ object AuthAdapter {
         return combined
     }
 
-    private fun advanceGoogleAuthStateLocked() {
+    internal fun advanceGoogleAuthStateLocked() {
         googleAuthStateEpoch = if (googleAuthStateEpoch == Long.MAX_VALUE) 1L else googleAuthStateEpoch + 1L
     }
 
@@ -1448,7 +1310,7 @@ object AuthAdapter {
         rememberMicrosoftState(knownMicrosoftStates, state, generation)
     }
 
-    private fun beginGoogleRevoke(generation: Long) = synchronized(this) {
+    internal fun beginGoogleRevoke(generation: Long) = synchronized(this) {
         googleRevokeState.begin(generation, googleAuthStateEpoch)
     }
 
@@ -1460,7 +1322,6 @@ object AuthAdapter {
         if (!googleRevokeState.finish(callback)) return@synchronized false
         if (nativeAccepted && callback.decision == GoogleRevokeCallbackDecision.APPLY_SUCCESS) {
             clearPkceStateLocked()
-            hasLegacyGoogleSession = false
             inMemoryOneTapSession = null
             googleSessionState = GoogleSessionState(null, kind = GoogleSessionKind.NONE)
         }
@@ -1471,7 +1332,7 @@ object AuthAdapter {
         googleAuthStateEpoch == stateEpoch
     }
 
-    private fun settleGoogleRevoke(
+    internal fun settleGoogleRevoke(
         context: Context,
         generation: Long,
         code: AuthErrorCode?,
@@ -1482,10 +1343,10 @@ object AuthAdapter {
         if (callback.decision == GoogleRevokeCallbackDecision.IGNORE) return
         val nativeAccepted = when (callback.decision) {
             GoogleRevokeCallbackDecision.APPLY_SUCCESS ->
-                reportNativeRevokeAccessResult(null, null, generation)
+                nativeOnRevokeAccessResult(null, null, generation)
             GoogleRevokeCallbackDecision.SETTLE_FAILURE,
             GoogleRevokeCallbackDecision.SETTLE_ONLY ->
-                reportNativeRevokeAccessResult(code?.code, underlyingError, generation)
+                nativeOnRevokeAccessResult(code?.code, underlyingError, generation)
             GoogleRevokeCallbackDecision.IGNORE -> return
         }
         if (!finishGoogleRevokeCallback(callback, nativeAccepted)) return
@@ -1497,21 +1358,11 @@ object AuthAdapter {
         }
     }
 
-    private fun reportNativeRevokeAccessResult(code: Int?, underlyingError: String?, generation: Long): Boolean {
-        val sink = synchronized(this) { nativeRevokeResultSink }
-        if (sink != null) {
-            sink(code, underlyingError, generation)
-            return true
-        } else {
-            return nativeOnRevokeAccessResult(code, underlyingError, generation)
-        }
-    }
-
-    private fun isCurrentGoogleGeneration(origin: String, generation: Long): Boolean = synchronized(this) {
+    private fun isCurrentGoogleGeneration(origin: Origin, generation: Long): Boolean = synchronized(this) {
         acceptsPendingGoogleGenerationLocked(origin, generation)
     }
 
-    private fun consumeGoogleGeneration(origin: String, generation: Long): Boolean = synchronized(this) {
+    private fun consumeGoogleGeneration(origin: Origin, generation: Long): Boolean = synchronized(this) {
         if (!acceptsPendingGoogleGenerationLocked(origin, generation)) return@synchronized false
         clearPendingGoogleGenerationLocked(origin)
         true
@@ -1531,13 +1382,6 @@ object AuthAdapter {
     private fun clearPendingRefreshGeneration(generation: Long) = synchronized(this) {
         pendingGoogleRefresh.clearIf(generation)
         pendingMicrosoftRefresh.clearIf(generation)
-    }
-
-    private fun consumeSilentGeneration(generation: Long): Boolean = synchronized(this) {
-        if (!acceptsSilentGenerationLocked(generation)) return@synchronized false
-        pendingGoogleSilent.clear()
-        pendingMicrosoftSilent.clear()
-        true
     }
 
     private fun clearPendingSilentGeneration(generation: Long) = synchronized(this) {
@@ -1568,7 +1412,7 @@ object AuthAdapter {
     }
 
     private fun clearPkceStateIfCurrent(generation: Long): Boolean = synchronized(this) {
-        if (!acceptsAuthCallback(pendingMicrosoftGeneration, generation)) return@synchronized false
+        if (!acceptsAuthCallback(pendingMicrosoft?.generation, generation)) return@synchronized false
         clearPkceStateLocked()
         true
     }
@@ -1579,41 +1423,30 @@ object AuthAdapter {
     }
 
     private fun clearPkceStateLocked() {
-        pendingOrigin = "login"
-        pendingPkceVerifier = null
-        pendingState = null
-        pendingNonce = null
-        pendingMicrosoftTenant = null
-        pendingMicrosoftClientId = null
-        pendingMicrosoftB2cDomain = null
-        pendingMicrosoftGeneration = null
-        pendingMicrosoftScopes = emptyList()
-        microsoftAuthInProgress = false
-        microsoftBrowserWasOpened = false
-        microsoftRedirectReceived = false
+        pendingMicrosoft = null
         microsoftResumeSuppressionGeneration = null
     }
 
-    private fun pendingGoogleOperation(origin: String): PendingOperation? = when (origin) {
-        "login" -> pendingGoogleLogin
-        "scopes" -> pendingGoogleScopes
+    private fun pendingGoogleOperation(origin: Origin): PendingOperation? = when (origin) {
+        Origin.LOGIN -> pendingGoogleLogin
+        Origin.SCOPES -> pendingGoogleScopes
         else -> null
     }
 
-    private fun acceptsPendingGoogleGenerationLocked(origin: String, generation: Long): Boolean =
+    private fun acceptsPendingGoogleGenerationLocked(origin: Origin, generation: Long): Boolean =
         pendingGoogleOperation(origin)?.accepts(generation, googleAuthStateEpoch) ?: false
 
-    private fun googlePickerStateEpochLocked(origin: String, generation: Long): Long? {
+    private fun googlePickerStateEpochLocked(origin: Origin, generation: Long): Long? {
         if (!acceptsPendingGoogleGenerationLocked(origin, generation)) return null
         return pendingGoogleOperation(origin)?.stateEpoch
     }
 
-    private fun clearPendingGoogleGenerationLocked(origin: String) {
+    private fun clearPendingGoogleGenerationLocked(origin: Origin) {
         pendingGoogleOperation(origin)?.clear()
     }
 
     private fun isCurrentMicrosoftGenerationLocked(generation: Long): Boolean =
-        acceptsAuthCallback(pendingMicrosoftGeneration, generation)
+        acceptsAuthCallback(pendingMicrosoft?.generation, generation)
 
     /**
      * `expirationTime` is defined as the access-token expiry in epoch
@@ -1621,41 +1454,98 @@ object AuthAdapter {
      * this documented fallback derives the expiry from the ID-token `exp`
      * claim instead. See `docs/error-contract.md`.
      */
+    private fun parseGoogleIdCredential(credential: Credential): GoogleIdTokenCredential? = when {
+        credential is GoogleIdTokenCredential -> credential
+        credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL ->
+            GoogleIdTokenCredential.createFrom(credential.data)
+        else -> null
+    }
+
+    private fun googleUserFrom(
+        account: GoogleSignInAccount,
+        hostedDomain: String?,
+        scopes: Array<String>?,
+    ): ProviderUserFields {
+        val claims = JwtClaims.decode(account.idToken.orEmpty())
+        return ProviderUserFields(
+            provider = AuthProvider.GOOGLE,
+            email = account.email,
+            name = account.displayName,
+            firstName = claims["given_name"],
+            lastName = claims["family_name"],
+            photo = account.photoUrl?.toString(),
+            idToken = account.idToken,
+            serverAuthCode = account.serverAuthCode,
+            userId = account.id,
+            hostedDomain = hostedDomain,
+            scopes = scopes,
+            expirationTime = getGoogleExpirationTimeMs(account.idToken),
+        )
+    }
+
+    private fun googleUserFrom(
+        credential: GoogleIdTokenCredential,
+        hostedDomain: String?,
+        scopes: Array<String>?,
+    ): ProviderUserFields {
+        val claims = JwtClaims.decode(credential.idToken)
+        return ProviderUserFields(
+            provider = AuthProvider.GOOGLE,
+            email = credential.email,
+            name = credential.displayName,
+            firstName = claims["given_name"],
+            lastName = claims["family_name"],
+            photo = credential.profilePictureUri?.toString(),
+            idToken = credential.idToken,
+            userId = credential.id,
+            phoneNumber = credential.phoneNumber,
+            hostedDomain = claims["hd"] ?: hostedDomain,
+            scopes = scopes,
+            expirationTime = getGoogleExpirationTimeMs(credential.idToken),
+        )
+    }
+
     private fun getGoogleExpirationTimeMs(idToken: String?): Long? {
         if (idToken.isNullOrEmpty()) return null
         val expSeconds = JwtClaims.decode(idToken)["exp"]?.toLongOrNull() ?: return null
         return epochSecondsToMillisOrNull(expSeconds)
     }
 
-    private fun getMicrosoftClientIdFromResources(context: Context): String? {
-        val resId = context.resources.getIdentifier("nitro_auth_microsoft_client_id", "string", context.packageName)
+    private fun stringResource(context: Context, name: String): String? {
+        val resId = context.resources.getIdentifier(name, "string", context.packageName)
         return if (resId != 0) context.getString(resId) else null
     }
 
-    private fun getMicrosoftTenantFromResources(context: Context): String? {
-        val resId = context.resources.getIdentifier("nitro_auth_microsoft_tenant", "string", context.packageName)
-        return if (resId != 0) context.getString(resId) else null
-    }
+    private fun getMicrosoftClientIdFromResources(context: Context): String? =
+        stringResource(context, "nitro_auth_microsoft_client_id")
 
-    private fun getMicrosoftB2cDomainFromResources(context: Context): String? {
-        val resId = context.resources.getIdentifier("nitro_auth_microsoft_b2c_domain", "string", context.packageName)
-        return if (resId != 0) context.getString(resId) else null
-    }
+    private fun microsoftRedirectUri(context: Context, clientId: String): String =
+        "msauth://${context.packageName}/$clientId"
+
+    private fun microsoftTokenUrl(authBaseUrl: String): String = "${authBaseUrl}oauth2/v2.0/token"
+
+    internal fun microsoftSessionTenant(context: Context): String =
+        synchronized(this) { inMemoryMicrosoftTenant }
+            ?: getMicrosoftTenantFromResources(context)
+            ?: "common"
+
+    private fun getMicrosoftTenantFromResources(context: Context): String? =
+        stringResource(context, "nitro_auth_microsoft_tenant")
+
+    private fun getMicrosoftB2cDomainFromResources(context: Context): String? =
+        stringResource(context, "nitro_auth_microsoft_b2c_domain")
 
     private fun loginOneTap(
         context: Context,
         clientId: String,
         scopes: List<String>,
-        loginHint: String?,
-        nonce: String?,
-        forceAccountPicker: Boolean,
-        useOneTap: Boolean,
-        filterByAuthorizedAccounts: Boolean,
-        requestVerifiedPhoneNumber: Boolean,
-        hostedDomain: String?,
-        origin: String = "login",
+        request: LoginRequest,
+        origin: Origin,
         generation: Long,
     ) {
+        val nonce = request.nonce
+        val hostedDomain = request.hostedDomain
+        val forceAccountPicker = request.forceAccountPicker
         val activity = currentActivity ?: context as? Activity
         if (activity == null) {
             if (nonce != null) {
@@ -1666,7 +1556,7 @@ object AuthAdapter {
                 return
             }
             Log.w(TAG, "No Activity context available for One-Tap, falling back to legacy")
-            return loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, false, hostedDomain, origin, generation)
+            return loginLegacy(context, clientId, scopes, request.copy(forceCodeForRefreshToken = false), origin, generation)
         }
 
         val credentialManager = CredentialManager.create(activity)
@@ -1681,10 +1571,10 @@ object AuthAdapter {
             requestBuilder.addCredentialOption(signInOption)
         } else {
             val googleIdOption = GetGoogleIdOption.Builder()
-                .setFilterByAuthorizedAccounts(filterByAuthorizedAccounts)
+                .setFilterByAuthorizedAccounts(request.filterByAuthorizedAccounts)
                 .setServerClientId(clientId)
-                .setAutoSelectEnabled(useOneTap && !forceAccountPicker)
-                .setRequestVerifiedPhoneNumber(requestVerifiedPhoneNumber)
+                .setAutoSelectEnabled(request.useOneTap && !forceAccountPicker)
+                .setRequestVerifiedPhoneNumber(request.requestVerifiedPhoneNumber)
                 .apply {
                     if (nonce != null) setNonce(nonce)
                     if (hostedDomain != null) setHostedDomainFilter(hostedDomain)
@@ -1692,11 +1582,11 @@ object AuthAdapter {
                 .build()
             requestBuilder.addCredentialOption(googleIdOption)
         }
-        val request = requestBuilder.build()
+        val credentialRequest = requestBuilder.build()
 
         moduleScope.launch(Dispatchers.Main) {
             try {
-                val result = credentialManager.getCredential(context = activity, request = request)
+                val result = credentialManager.getCredential(context = activity, request = credentialRequest)
                 handleCredentialResponse(result, scopes, hostedDomain, nonce, origin, generation)
             } catch (e: CancellationException) {
                 if (consumeGoogleGeneration(origin, generation)) {
@@ -1715,7 +1605,7 @@ object AuthAdapter {
                     }
                 } else if (isCurrentGoogleGeneration(origin, generation)) {
                     Log.w(TAG, "One-Tap has no credentials, falling back to legacy: ${e.message}")
-                    loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, false, hostedDomain, origin, generation)
+                    loginLegacy(context, clientId, scopes, request.copy(forceCodeForRefreshToken = false), origin, generation)
                 }
             } catch (e: Exception) {
                 if (nonce != null) {
@@ -1725,7 +1615,7 @@ object AuthAdapter {
                     }
                 } else if (isCurrentGoogleGeneration(origin, generation)) {
                     Log.w(TAG, "One-Tap failed, falling back to legacy: ${e.message}")
-                    loginLegacy(context, clientId, scopes, loginHint, forceAccountPicker, false, hostedDomain, origin, generation)
+                    loginLegacy(context, clientId, scopes, request.copy(forceCodeForRefreshToken = false), origin, generation)
                 }
             }
         }
@@ -1735,16 +1625,14 @@ object AuthAdapter {
         context: Context,
         clientId: String,
         scopes: List<String>,
-        loginHint: String?,
-        forceAccountPicker: Boolean,
-        forceCodeForRefreshToken: Boolean,
-        hostedDomain: String?,
-        origin: String = "login",
+        request: LoginRequest,
+        origin: Origin,
         generation: Long,
     ) {
         val ctx = appContext ?: context.applicationContext
         val intent = GoogleSignInActivity.createIntent(
-            ctx, clientId, scopes.toTypedArray(), loginHint, forceAccountPicker, forceCodeForRefreshToken, hostedDomain, origin, generation
+            ctx, clientId, scopes.toTypedArray(), request.loginHint, request.forceAccountPicker,
+            request.forceCodeForRefreshToken, request.hostedDomain, origin, generation,
         )
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         ctx.startActivity(intent)
@@ -1755,18 +1643,12 @@ object AuthAdapter {
         scopes: List<String>,
         hostedDomain: String?,
         expectedNonce: String?,
-        origin: String,
+        origin: Origin,
         generation: Long,
     ) {
         val credential = response.credential
         val googleIdTokenCredential = try {
-            if (credential is GoogleIdTokenCredential) {
-                credential
-            } else if (credential.type == "com.google.android.libraries.identity.googleid.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL") {
-                GoogleIdTokenCredential.createFrom(credential.data)
-            } else {
-                null
-            }
+            parseGoogleIdCredential(credential)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse Google ID token credential: ${e.message}")
             null
@@ -1796,22 +1678,7 @@ object AuthAdapter {
                     return
                 }
             }
-            val claims = JwtClaims.decode(idToken)
-            val expirationTime = getGoogleExpirationTimeMs(idToken)
-            val user = ProviderUserFields(
-                provider = "google",
-                email = googleIdTokenCredential.email,
-                name = googleIdTokenCredential.displayName,
-                firstName = claims["given_name"],
-                lastName = claims["family_name"],
-                photo = googleIdTokenCredential.profilePictureUri?.toString(),
-                idToken = idToken,
-                userId = googleIdTokenCredential.id,
-                phoneNumber = googleIdTokenCredential.phoneNumber,
-                hostedDomain = claims["hd"] ?: hostedDomain,
-                scopes = scopes.toTypedArray(),
-                expirationTime = expirationTime,
-            )
+            val user = googleUserFrom(googleIdTokenCredential, hostedDomain, scopes.toTypedArray())
             if (!nativeOnLoginSuccess(origin, user, generation)) return
             val committed = synchronized(this) {
                 if (!acceptsPendingGoogleGenerationLocked(origin, generation)) {
@@ -1820,7 +1687,6 @@ object AuthAdapter {
                     clearPendingGoogleGenerationLocked(origin)
                     val session = OneTapSession(googleIdTokenCredential, scopes, hostedDomain)
                     inMemoryOneTapSession = session
-                    hasLegacyGoogleSession = false
                     googleSessionState = GoogleSessionState(
                         requestedHostedDomain = hostedDomain,
                         accountId = googleIdTokenCredential.id,
@@ -1828,6 +1694,7 @@ object AuthAdapter {
                     )
                     GoogleSessionStore.persistLocked(context, googleSessionState)
                     inMemoryMicrosoftRefreshToken = null
+                    inMemoryMicrosoftTenant = null
                     inMemoryMicrosoftScopes = defaultMicrosoftScopes
                     googlePickerOperationState.markSdkAccountEstablished()
                     true
@@ -1852,7 +1719,7 @@ object AuthAdapter {
             googleAuthStateEpoch
         }
         val request = {
-            if (isCurrentGoogleGeneration("scopes", generation) && isCurrentGoogleStateEpoch(scopesStateEpoch)) {
+            if (isCurrentGoogleGeneration(Origin.SCOPES, generation) && isCurrentGoogleStateEpoch(scopesStateEpoch)) {
                 requestScopesAfterTransition(ctx, scopes, generation)
             }
         }
@@ -1867,27 +1734,12 @@ object AuthAdapter {
     }
 
     private fun reportOneTapSession(
-        origin: String,
+        origin: Origin,
         session: OneTapSession,
         scopes: List<String>,
         generation: Long,
     ): Boolean {
-        val credential = session.credential
-        val claims = JwtClaims.decode(credential.idToken)
-        val user = ProviderUserFields(
-            provider = "google",
-            email = credential.email,
-            name = credential.displayName,
-            firstName = claims["given_name"],
-            lastName = claims["family_name"],
-            photo = credential.profilePictureUri?.toString(),
-            idToken = credential.idToken,
-            userId = credential.id,
-            phoneNumber = credential.phoneNumber,
-            hostedDomain = claims["hd"] ?: session.hostedDomain,
-            scopes = scopes.toTypedArray(),
-            expirationTime = getGoogleExpirationTimeMs(credential.idToken),
-        )
+        val user = googleUserFrom(session.credential, session.hostedDomain, scopes.toTypedArray())
         return nativeOnLoginSuccess(origin, user, generation)
     }
 
@@ -1923,16 +1775,11 @@ object AuthAdapter {
         val request = buildCredentialManagerRefreshRequest(clientId, session.hostedDomain)
         moduleScope.launch(Dispatchers.Main) {
             val refreshed = try {
-                val credential = CredentialManager.create(activity)
-                    .getCredential(context = activity, request = request)
-                    .credential
-                if (credential is GoogleIdTokenCredential) {
-                    credential
-                } else if (credential.type == "com.google.android.libraries.identity.googleid.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL") {
-                    GoogleIdTokenCredential.createFrom(credential.data)
-                } else {
-                    null
-                }
+                parseGoogleIdCredential(
+                    CredentialManager.create(activity)
+                        .getCredential(context = activity, request = request)
+                        .credential,
+                )
             } catch (e: CancellationException) {
                 if (consumeRefreshGeneration(generation)) {
                     nativeOnRefreshError(AuthErrorCode.REFRESH_FAILED.code, e.message, generation)
@@ -1980,13 +1827,13 @@ object AuthAdapter {
                 googleSessionState.returnedHostedDomainForAccount(account.id)
             }
             if (GoogleSignIn.hasPermissions(account, *newScopes.toTypedArray())) {
-                onSignInSuccess(account, allScopes, "scopes", restoredHostedDomain, generation)
+                onSignInSuccess(account, allScopes, Origin.SCOPES, restoredHostedDomain, generation)
                 return
             }
             val clientId = getClientIdFromResources(context)
             if (clientId == null) {
-                if (consumeGoogleGeneration("scopes", generation)) {
-                    nativeOnLoginError("scopes", AuthErrorCode.CONFIGURATION_ERROR.code, "Google Client ID not configured", generation)
+                if (consumeGoogleGeneration(Origin.SCOPES, generation)) {
+                    nativeOnLoginError(Origin.SCOPES, AuthErrorCode.CONFIGURATION_ERROR.code, "Google Client ID not configured", generation)
                 }
                 return
             }
@@ -1996,7 +1843,7 @@ object AuthAdapter {
                 allScopes.toTypedArray(),
                 account.email,
                 hostedDomain = restoredHostedDomain,
-                origin = "scopes",
+                origin = Origin.SCOPES,
                 generation = generation,
             )
             context.startActivity(intent)
@@ -2005,12 +1852,12 @@ object AuthAdapter {
         val oneTapSession = synchronized(this) { inMemoryOneTapSession }
         if (oneTapSession != null) {
             val mergedScopes = (oneTapSession.scopes + scopes.toList()).distinct()
-            if (!synchronized(this) { acceptsPendingGoogleGenerationLocked("scopes", generation) }) return
+            if (!synchronized(this) { acceptsPendingGoogleGenerationLocked(Origin.SCOPES, generation) }) return
             val credential = oneTapSession.credential
-            if (!reportOneTapSession("scopes", oneTapSession, mergedScopes, generation)) return
+            if (!reportOneTapSession(Origin.SCOPES, oneTapSession, mergedScopes, generation)) return
             synchronized(this) {
-                if (!acceptsPendingGoogleGenerationLocked("scopes", generation)) return@synchronized
-                clearPendingGoogleGenerationLocked("scopes")
+                if (!acceptsPendingGoogleGenerationLocked(Origin.SCOPES, generation)) return@synchronized
+                clearPendingGoogleGenerationLocked(Origin.SCOPES)
                 inMemoryOneTapSession = OneTapSession(credential, mergedScopes, oneTapSession.hostedDomain)
             }
             return
@@ -2020,17 +1867,17 @@ object AuthAdapter {
         }
         if (microsoftSession) {
             synchronized(this) {
-                clearPendingGoogleGenerationLocked("scopes")
+                clearPendingGoogleGenerationLocked(Origin.SCOPES)
             }
             val mergedScopes = synchronized(this) {
                 (inMemoryMicrosoftScopes + scopes.toList()).distinct()
             }
-            val tenant = getMicrosoftTenantFromResources(context)
-            loginMicrosoft(context, mergedScopes.toTypedArray(), null, tenant, null, "scopes", generation)
+            val tenant = microsoftSessionTenant(context)
+            loginMicrosoft(context, mergedScopes.toTypedArray(), null, tenant, null, Origin.SCOPES, generation)
             return
         }
-        if (consumeGoogleGeneration("scopes", generation)) {
-            nativeOnLoginError("scopes", AuthErrorCode.NOT_SIGNED_IN.code, "No user logged in", generation)
+        if (consumeGoogleGeneration(Origin.SCOPES, generation)) {
+            nativeOnLoginError(Origin.SCOPES, AuthErrorCode.NOT_SIGNED_IN.code, "No user logged in", generation)
         }
     }
 
@@ -2052,21 +1899,11 @@ object AuthAdapter {
                 pendingGoogleRefresh.begin(generation, googleAuthStateEpoch)
                 pendingMicrosoftRefresh.clear()
             }
-            val client = googleSignInClient ?: run {
-                val clientId = getClientIdFromResources(ctx)
-                if (clientId == null) {
-                    clearPendingRefreshGeneration(generation)
-                    nativeOnRefreshError(AuthErrorCode.CONFIGURATION_ERROR.code, "Google Client ID not configured", generation)
-                    return
-                }
-                val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                    .requestIdToken(clientId)
-                    .requestServerAuthCode(clientId)
-                    .requestEmail()
-                    .build()
-                GoogleSignIn.getClient(ctx, gso).also {
-                    googleSignInClient = it
-                }
+            val client = getLegacyGoogleClient(ctx)
+            if (client == null) {
+                clearPendingRefreshGeneration(generation)
+                nativeOnRefreshError(AuthErrorCode.CONFIGURATION_ERROR.code, "Google Client ID not configured", generation)
+                return
             }
             client.silentSignIn().addOnCompleteListener { task ->
                 if (!consumeRefreshGeneration(generation)) return@addOnCompleteListener
@@ -2115,7 +1952,7 @@ object AuthAdapter {
     fun logoutSync(context: Context) {
         val ctx = appContext ?: context.applicationContext
         beginGoogleAuthStateTransition(clearPendingCallbacks = true)
-        val shouldSignOutLegacy = synchronized(this) { hasLegacyGoogleSession } ||
+        val shouldSignOutLegacy = synchronized(this) { googleSessionState.kind == GoogleSessionKind.LEGACY } ||
             GoogleSignIn.getLastSignedInAccount(ctx) != null
         synchronized(this) {
             GoogleSessionStore.clearLocked(ctx)
@@ -2125,18 +1962,18 @@ object AuthAdapter {
             getLegacyGoogleClient(ctx)?.signOut()
         }
         synchronized(this) {
-            hasLegacyGoogleSession = false
             googleLegacyAccountNeedsRevalidation = true
             inMemoryOneTapSession = null
             inMemoryMicrosoftRefreshToken = null
+            inMemoryMicrosoftTenant = null
             inMemoryMicrosoftScopes = defaultMicrosoftScopes
         }
     }
 
     @JvmStatic
-    fun revokeAccessSync(context: Context, provider: String, generation: Long) {
+    fun revokeAccessSync(context: Context, provider: AuthProvider, generation: Long) {
         val ctx = appContext ?: context.applicationContext
-        if (provider != "google") {
+        if (provider != AuthProvider.GOOGLE) {
             nativeOnRevokeAccessResult(
                 AuthErrorCode.UNSUPPORTED_PROVIDER.code,
                 "Client-side access revocation is unavailable for $provider",
@@ -2200,10 +2037,8 @@ object AuthAdapter {
         }
     }
 
-    private fun getClientIdFromResources(context: Context): String? {
-        val resId = context.resources.getIdentifier("nitro_auth_google_client_id", "string", context.packageName)
-        return if (resId != 0) context.getString(resId) else null
-    }
+    private fun getClientIdFromResources(context: Context): String? =
+        stringResource(context, "nitro_auth_google_client_id")
 
     @JvmStatic
     fun restoreSession(context: Context, generation: Long) {
@@ -2245,27 +2080,15 @@ object AuthAdapter {
                 googleSessionState.returnedHostedDomainForAccount(account.id)
             }
             if (!synchronized(this) { acceptsSilentGenerationLocked(generation) }) return
-            val expirationTime = getGoogleExpirationTimeMs(account.idToken)
-            val claims = JwtClaims.decode(account.idToken.orEmpty())
-            val user = ProviderUserFields(
-                provider = "google",
-                email = account.email,
-                name = account.displayName,
-                firstName = claims["given_name"],
-                lastName = claims["family_name"],
-                photo = account.photoUrl?.toString(),
-                idToken = account.idToken,
-                serverAuthCode = account.serverAuthCode,
-                userId = account.id,
-                hostedDomain = hostedDomain,
-                scopes = account.grantedScopes?.map { it.scopeUri }?.toTypedArray(),
-                expirationTime = expirationTime,
+            val user = googleUserFrom(
+                account,
+                hostedDomain,
+                account.grantedScopes?.map { it.scopeUri }?.toTypedArray(),
             )
-            if (!nativeOnLoginSuccess("silent", user, generation)) return
+            if (!nativeOnLoginSuccess(Origin.SILENT, user, generation)) return
             synchronized(this) {
                 if (!acceptsSilentGenerationLocked(generation)) return@synchronized
                 clearPendingSilentGenerationLocked(generation)
-                hasLegacyGoogleSession = true
                 googleSessionState = GoogleSessionState(
                     requestedHostedDomain = hostedDomain,
                     accountId = account.id,
@@ -2287,7 +2110,7 @@ object AuthAdapter {
                 }
                 if (oneTapSession != null) {
                     if (!synchronized(this) { acceptsSilentGenerationLocked(generation) }) return
-                    if (!reportOneTapSession("silent", oneTapSession, oneTapSession.scopes, generation)) return
+                    if (!reportOneTapSession(Origin.SILENT, oneTapSession, oneTapSession.scopes, generation)) return
                     synchronized(this) {
                         if (acceptsSilentGenerationLocked(generation)) clearPendingSilentGenerationLocked(generation)
                     }
@@ -2297,14 +2120,14 @@ object AuthAdapter {
                     signOutUnownedGoogleAccount(context)
                 }
                 clearPendingSilentGeneration(generation)
-                nativeOnLoginError("silent", AuthErrorCode.NOT_SIGNED_IN.code, "No session", generation)
+                nativeOnLoginError(Origin.SILENT, AuthErrorCode.NOT_SIGNED_IN.code, "No session", generation)
             }
         }
     }
 
     private fun refreshMicrosoftToken(context: Context, refreshToken: String, generation: Long) {
         val clientId = getMicrosoftClientIdFromResources(context)
-        val tenant = getMicrosoftTenantFromResources(context) ?: "common"
+        val tenant = microsoftSessionTenant(context)
         val b2cDomain = getMicrosoftB2cDomainFromResources(context)
         val effectiveScopes = synchronized(this) {
             inMemoryMicrosoftScopes.ifEmpty { defaultMicrosoftScopes }
@@ -2312,17 +2135,17 @@ object AuthAdapter {
 
         if (clientId == null) {
             clearPendingSilentGeneration(generation)
-            nativeOnLoginError("silent", AuthErrorCode.CONFIGURATION_ERROR.code, "Microsoft Client ID is required for refresh", generation)
+            nativeOnLoginError(Origin.SILENT, AuthErrorCode.CONFIGURATION_ERROR.code, "Microsoft Client ID is required for refresh", generation)
             return
         }
 
         val authBaseUrl = MicrosoftAuthConfig.getMicrosoftAuthBaseUrl(tenant, b2cDomain)
         if (authBaseUrl == null) {
             clearPendingSilentGeneration(generation)
-            nativeOnLoginError("silent", AuthErrorCode.CONFIGURATION_ERROR.code, "Invalid Microsoft tenant or B2C domain", generation)
+            nativeOnLoginError(Origin.SILENT, AuthErrorCode.CONFIGURATION_ERROR.code, "Invalid Microsoft tenant or B2C domain", generation)
             return
         }
-        val tokenUrl = "${authBaseUrl}oauth2/v2.0/token"
+        val tokenUrl = microsoftTokenUrl(authBaseUrl)
 
         postForm(
             url = tokenUrl,
@@ -2341,9 +2164,9 @@ object AuthAdapter {
                 )?.let { completion ->
                     if (completion.success) {
                         val nativeAccepted = nativeOnLoginSuccess(
-                            "silent",
+                            Origin.SILENT,
                             ProviderUserFields(
-                                provider = "microsoft",
+                                provider = AuthProvider.MICROSOFT,
                                 email = completion.email,
                                 name = completion.name,
                                 idToken = completion.idToken,
@@ -2356,7 +2179,7 @@ object AuthAdapter {
                         finishMicrosoftRefresh(completion, nativeAccepted)
                     } else {
                         val nativeAccepted = nativeOnLoginError(
-                            "silent",
+                            Origin.SILENT,
                             completion.code.code,
                             completion.detail,
                             generation,
@@ -2375,26 +2198,7 @@ object AuthAdapter {
                     transportError = message,
                 )?.let { completion ->
                     val nativeAccepted = nativeOnLoginError(
-                        "silent",
-                        completion.code.code,
-                        completion.detail,
-                        generation,
-                    )
-                    finishMicrosoftRefresh(completion, nativeAccepted)
-                }
-            },
-            onCancelled = { message ->
-                completeMicrosoftRefreshResponse(
-                    operation = MicrosoftRefreshOperation.SILENT,
-                    generation = generation,
-                    responseCode = null,
-                    responseBody = "",
-                    requestedScopes = effectiveScopes,
-                    transportError = message,
-                    cancelled = true,
-                )?.let { completion ->
-                    val nativeAccepted = nativeOnLoginError(
-                        "silent",
+                        Origin.SILENT,
                         completion.code.code,
                         completion.detail,
                         generation,
@@ -2407,7 +2211,7 @@ object AuthAdapter {
 
     private fun refreshMicrosoftTokenForRefresh(context: Context, refreshToken: String, generation: Long) {
         val clientId = getMicrosoftClientIdFromResources(context)
-        val tenant = getMicrosoftTenantFromResources(context) ?: "common"
+        val tenant = microsoftSessionTenant(context)
         val b2cDomain = getMicrosoftB2cDomainFromResources(context)
         val effectiveScopes = synchronized(this) {
             inMemoryMicrosoftScopes.ifEmpty { defaultMicrosoftScopes }
@@ -2425,7 +2229,7 @@ object AuthAdapter {
             nativeOnRefreshError(AuthErrorCode.CONFIGURATION_ERROR.code, "Invalid Microsoft tenant or B2C domain", generation)
             return
         }
-        val tokenUrl = "${authBaseUrl}oauth2/v2.0/token"
+        val tokenUrl = microsoftTokenUrl(authBaseUrl)
 
         postForm(
             url = tokenUrl,
@@ -2477,35 +2281,16 @@ object AuthAdapter {
                     finishMicrosoftRefresh(completion, nativeAccepted)
                 }
             },
-            onCancelled = { message ->
-                completeMicrosoftRefreshResponse(
-                    operation = MicrosoftRefreshOperation.REFRESH,
-                    generation = generation,
-                    responseCode = null,
-                    responseBody = "",
-                    requestedScopes = effectiveScopes,
-                    transportError = message,
-                    cancelled = true,
-                )?.let { completion ->
-                    val nativeAccepted = nativeOnRefreshError(
-                        completion.code.code,
-                        completion.detail,
-                        generation,
-                    )
-                    finishMicrosoftRefresh(completion, nativeAccepted)
-                }
-            },
         )
     }
 
-    private fun completeMicrosoftRefreshResponse(
+    internal fun completeMicrosoftRefreshResponse(
         operation: MicrosoftRefreshOperation,
         generation: Long,
         responseCode: Int?,
         responseBody: String,
         requestedScopes: List<String>,
         transportError: String? = null,
-        cancelled: Boolean = false,
     ): MicrosoftRefreshCompletion? = synchronized(this) {
         val pending = microsoftRefreshPending(operation)
         if (!pending.accepts(generation, googleAuthStateEpoch)) {
@@ -2519,13 +2304,13 @@ object AuthAdapter {
                 generation = generation,
                 stateEpoch = callbackStateEpoch,
                 success = false,
-                code = if (cancelled) AuthErrorCode.CANCELLED else AuthErrorCode.NETWORK_ERROR,
+                code = AuthErrorCode.NETWORK_ERROR,
                 detail = transportError,
             )
         }
 
         if (responseCode != 200) {
-            val mappedError = mapMicrosoftRefreshFailure(responseCode, responseBody)
+            val mappedError = mapMicrosoftRefreshFailure(responseBody)
             return@synchronized MicrosoftRefreshCompletion(
                 operation = operation,
                 generation = generation,
@@ -2538,25 +2323,19 @@ object AuthAdapter {
         }
 
         return@synchronized try {
-            val json = JSONObject(responseBody)
-            val idToken = json.optString("id_token")
-            val accessToken = json.optString("access_token")
-            val newRefreshToken = json.optString("refresh_token")
-            val expiresIn = json.optLong("expires_in", 0)
-            val expirationTime = expirationMillisFromExpiresIn(System.currentTimeMillis(), expiresIn)
-            val claims = JwtClaims.decode(idToken)
+            val response = parseMicrosoftTokenResponse(responseBody)
             MicrosoftRefreshCompletion(
                 operation = operation,
                 generation = generation,
                 stateEpoch = callbackStateEpoch,
                 success = true,
-                idToken = idToken.ifEmpty { null },
-                accessToken = accessToken.ifEmpty { null },
-                refreshToken = newRefreshToken.ifEmpty { null },
-                email = claims["preferred_username"] ?: claims["email"],
-                name = claims["name"],
+                idToken = response.idToken,
+                accessToken = response.accessToken,
+                refreshToken = response.refreshToken,
+                email = response.email,
+                name = response.name,
                 scopes = requestedScopes,
-                expirationTime = expirationTime,
+                expirationTime = response.expirationTime,
             )
         } catch (error: Exception) {
             MicrosoftRefreshCompletion(
@@ -2580,7 +2359,7 @@ object AuthAdapter {
         }
     }
 
-    private fun commitMicrosoftRefresh(completion: MicrosoftRefreshCompletion): Boolean = synchronized(this) {
+    internal fun commitMicrosoftRefresh(completion: MicrosoftRefreshCompletion): Boolean = synchronized(this) {
         val pending = microsoftRefreshPending(completion.operation)
         if (!pending.accepts(completion.generation, googleAuthStateEpoch, completion.stateEpoch)) {
             return@synchronized false

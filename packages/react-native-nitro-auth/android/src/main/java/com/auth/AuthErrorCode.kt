@@ -3,8 +3,9 @@ package com.auth
 /**
  * Mirror of the generated C++ `AuthErrorCode` enum
  * (nitrogen/generated/shared/c++/AuthErrorCode.hpp). The integer `code` is the
- * wire value passed across JNI/FFI boundaries; `wire` is the JavaScript union
- * string. Both must stay aligned with the generated enum.
+ * generated enum value that ProviderRequestRegistry maps back to the typed
+ * error; `wire` is the JavaScript union string. Both must stay aligned with
+ * the generated enum.
  */
 internal enum class AuthErrorCode(val code: Int, val wire: String) {
     REFRESH_FAILED(0, "refresh_failed"),

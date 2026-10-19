@@ -54,7 +54,7 @@ export type OfficialArtworkProps = {
 };
 
 export type OfficialArtwork = {
-  aspect: (provider: BrandedProvider, iconOnly: boolean) => number;
+  aspect: (provider: BrandedProvider) => number;
   Renderer: ComponentType<OfficialArtworkProps>;
 };
 
@@ -114,11 +114,29 @@ function getButtonDimensions(
   return { width: baseWidth * scale, height: BUTTON_HEIGHT * scale };
 }
 
+/** Microsoft brand light theme is a distinct style; `dark` reuses `primary`. */
+type MicrosoftStyle = SocialButtonVariant | "light";
+
+function resolveMicrosoftStyle(
+  appearance: SocialButtonAppearance | undefined,
+  variant: SocialButtonVariant | undefined,
+): MicrosoftStyle {
+  if (appearance === "light") return "light";
+  if (appearance === "dark") return "primary";
+  return variant ?? "primary";
+}
+
+function getMicrosoftBorderColor(style: MicrosoftStyle): string | undefined {
+  if (style === "light") return "#8C8C8C";
+  return style === "outline" ? "#DDDDDD" : undefined;
+}
+
 function getMicrosoftBackground(
   disabled: boolean,
-  variant: SocialButtonVariant,
+  variant: MicrosoftStyle,
 ): string {
   if (disabled) return Platform.OS === "web" ? "#CCCCCC" : "#E2E8F0";
+  if (variant === "light") return "#FFFFFF";
   if (variant === "black") return "#000000";
   if (variant === "white") return "#FFFFFF";
   if (variant === "outline") return "transparent";
@@ -127,9 +145,10 @@ function getMicrosoftBackground(
 
 function getMicrosoftTextColor(
   disabled: boolean,
-  variant: SocialButtonVariant,
+  variant: MicrosoftStyle,
 ): string {
   if (disabled && Platform.OS !== "web") return "#64748B";
+  if (variant === "light") return "#5E5E5E";
   return variant === "white" || variant === "outline" ? "#111827" : "#FFFFFF";
 }
 
@@ -227,11 +246,12 @@ export function SocialButtonCore({
   });
 
   if (provider === "microsoft") {
-    const legacyVariant = variant ?? "primary";
+    const microsoftStyle = resolveMicrosoftStyle(requestedAppearance, variant);
+    const borderColor = getMicrosoftBorderColor(microsoftStyle);
     const customComponent =
       official === undefined ? customComponents?.microsoft : undefined;
     const contentProps = buildContentProps(viewportWidth, BUTTON_HEIGHT, false);
-    const textColor = getMicrosoftTextColor(isDisabled, legacyVariant);
+    const textColor = getMicrosoftTextColor(isDisabled, microsoftStyle);
     return (
       <Pressable
         testID={testID}
@@ -243,10 +263,11 @@ export function SocialButtonCore({
         style={[
           styles.microsoftButton,
           {
-            backgroundColor: getMicrosoftBackground(isDisabled, legacyVariant),
-            borderRadius: borderRadius ?? 8,
-            borderColor: variant === "outline" ? "#DDDDDD" : "transparent",
-            borderWidth: variant === "outline" ? 1 : 0,
+            backgroundColor: getMicrosoftBackground(isDisabled, microsoftStyle),
+            borderRadius:
+              borderRadius ?? (resolvedShape === "pill" ? BUTTON_HEIGHT / 2 : 8),
+            borderColor: borderColor ?? "transparent",
+            borderWidth: borderColor === undefined ? 0 : 1,
           },
           style,
         ]}
@@ -283,7 +304,7 @@ export function SocialButtonCore({
   }
 
   const { width, height } = getButtonDimensions(
-    official?.artwork.aspect(provider, false),
+    official?.artwork.aspect(provider),
     iconOnly,
     fontScale,
     viewportWidth,

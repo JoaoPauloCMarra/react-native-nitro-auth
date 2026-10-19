@@ -38,65 +38,6 @@ std::string jwtFor(const std::string& payload) {
     return "eyJhbGciOiJub25lIn0." + base64UrlEncode(payload) + ".sig";
 }
 
-void testSha256KnownVectors() {
-    assert(NitroAuth::sha256Hex("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-    assert(NitroAuth::sha256Hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    assert(NitroAuth::sha256Hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq") ==
-        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
-    assert(NitroAuth::sha256Hex(
-        "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu") ==
-        "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1");
-    assert(NitroAuth::sha256Hex(std::string(1000000, 'a')) ==
-        "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
-}
-
-void testSha256PaddingBoundaries() {
-    assert(NitroAuth::sha256Hex(std::string(55, 'a')) == "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318");
-    assert(NitroAuth::sha256Hex(std::string(56, 'a')) == "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a");
-    assert(NitroAuth::sha256Hex(std::string(63, 'a')) == "7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34");
-    assert(NitroAuth::sha256Hex(std::string(64, 'a')) == "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb");
-    assert(NitroAuth::sha256Hex(std::string(65, 'a')) == "635361c48bb9eab14198e76ea8ab7f1a41685d6ad62aa9146d301d4f17eb0ae0");
-}
-
-void testSha256HostileBytes() {
-    const std::string withNul("a\0b", 3);
-    assert(NitroAuth::sha256Hex(withNul) != NitroAuth::sha256Hex("a"));
-    assert(NitroAuth::sha256Hex(withNul) != NitroAuth::sha256Hex("ab"));
-    const std::string highBytes("\xff\xfe\x80\xc3\x28", 5);
-    const std::string hex = NitroAuth::sha256Hex(highBytes);
-    assert(hex.size() == 64);
-    for (const char character : hex) {
-        assert((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f'));
-    }
-    assert(NitroAuth::sha256Hex(std::string(1, '\0')) == "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d");
-}
-
-void testSha256CApiBounds() {
-    char hex[65];
-    assert(NitroAuthSha256Hex("abc", 3, hex, sizeof(hex)) == 0);
-    assert(std::string(hex) == NitroAuth::sha256Hex("abc"));
-    assert(hex[64] == '\0');
-
-    assert(NitroAuthSha256Hex("", 0, hex, sizeof(hex)) == 0);
-    assert(std::string(hex) == NitroAuth::sha256Hex(""));
-
-    assert(NitroAuthSha256Hex("abcdef", 3, hex, sizeof(hex)) == 0);
-    assert(std::string(hex) == NitroAuth::sha256Hex("abc"));
-
-    assert(NitroAuthSha256Hex(nullptr, 0, hex, sizeof(hex)) == -1);
-    assert(NitroAuthSha256Hex("abc", 3, nullptr, 65) == -1);
-
-    char guarded[66];
-    std::memset(guarded, 'Z', sizeof(guarded));
-    assert(NitroAuthSha256Hex("abc", 3, guarded, 64) == -1);
-    assert(NitroAuthSha256Hex("abc", 3, guarded, 0) == -1);
-    for (const char character : guarded) {
-        assert(character == 'Z');
-    }
-    assert(NitroAuthSha256Hex("abc", 3, guarded, 65) == 0);
-    assert(guarded[64] == '\0' && guarded[65] == 'Z');
-}
-
 void testJwtStructure() {
     const std::string payload = R"({"nonce":"n1","exp":1})";
     const std::string jwt = "eyJhbGciOiJub25lIn0.eyJub25jZSI6Im4xIiwiZXhwIjoxfQ.sig";
@@ -196,10 +137,7 @@ void testConcurrentCallersShareNoState() {
     std::vector<std::thread> threads;
     for (int index = 0; index < 8; ++index) {
         threads.emplace_back([&, index] {
-            const std::string input(static_cast<size_t>(index) * 31 + 1, static_cast<char>('a' + index));
-            const std::string expected = NitroAuth::sha256Hex(input);
             for (int round = 0; round < 200; ++round) {
-                if (NitroAuth::sha256Hex(input) != expected) failures++;
                 if (NitroAuth::decodeJwtPayloadJson(jwt).value_or("") != R"({"sub":"user"})") failures++;
             }
         });
@@ -211,10 +149,6 @@ void testConcurrentCallersShareNoState() {
 } // namespace
 
 int main() {
-    testSha256KnownVectors();
-    testSha256PaddingBoundaries();
-    testSha256HostileBytes();
-    testSha256CApiBounds();
     testJwtStructure();
     testJwtBase64Edges();
     testJwtNonJsonAndHugePayloads();

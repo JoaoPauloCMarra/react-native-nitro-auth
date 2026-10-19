@@ -18,36 +18,6 @@ internal fun rememberMicrosoftState(
     }
 }
 
-/**
- * Pure decision for the Microsoft browser-flow cancel branch in
- * `AuthAdapter.onActivityResumed`. A resume must only cancel the flow when the
- * browser was opened, no `msauth://` redirect has arrived yet, and the
- * resuming activity is not the redirect handler itself
- * (`MicrosoftAuthActivity` resumes immediately after delivering the redirect).
- */
-internal fun shouldCancelMicrosoftAuth(
-    authInProgress: Boolean,
-    browserWasOpened: Boolean,
-    redirectReceived: Boolean,
-    resumingActivityIsRedirectHandler: Boolean,
-    resumeSuppressionGeneration: Long? = null,
-    currentGeneration: Long? = null,
-): Boolean =
-    authInProgress &&
-        browserWasOpened &&
-        !redirectReceived &&
-        !resumingActivityIsRedirectHandler &&
-        !(resumeSuppressionGeneration != null && resumeSuppressionGeneration == currentGeneration)
-
-internal fun shouldConsumeMicrosoftResumeSuppression(
-    resumeSuppressionGeneration: Long?,
-    currentGeneration: Long?,
-    resumingActivityIsRedirectHandler: Boolean,
-): Boolean =
-    !resumingActivityIsRedirectHandler &&
-        resumeSuppressionGeneration != null &&
-        resumeSuppressionGeneration == currentGeneration
-
 internal fun microsoftResumeSuppressionFor(
     decision: MicrosoftRedirectDecision,
     currentGeneration: Long?,

@@ -20,6 +20,15 @@ final class MicrosoftFlowTests: XCTestCase {
     return result
   }
 
+  func testRefreshUsesLoginTenant() {
+    XCTAssertEqual(
+      AuthCore.microsoftRefreshTenant(loginTenant: "contoso.onmicrosoft.com", configuredTenant: "common"),
+      "contoso.onmicrosoft.com"
+    )
+    XCTAssertEqual(AuthCore.microsoftRefreshTenant(loginTenant: nil, configuredTenant: "organizations"), "organizations")
+    XCTAssertEqual(AuthCore.microsoftRefreshTenant(loginTenant: nil, configuredTenant: nil), "common")
+  }
+
   func testAuthorityUrlAcceptsDocumentedTenantsAndB2cForms() {
     XCTAssertEqual(AuthCore.getMicrosoftAuthBaseUrl(tenant: " common ", b2cDomain: nil), "https://login.microsoftonline.com/common/")
     XCTAssertEqual(AuthCore.getMicrosoftAuthBaseUrl(tenant: "common", b2cDomain: "  "), "https://login.microsoftonline.com/common/")

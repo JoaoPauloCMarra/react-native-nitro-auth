@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
-import { AuthService } from "react-native-nitro-auth";
+import { Platform, StyleSheet, View } from "react-native";
+import { AuthService, useAuth } from "react-native-nitro-auth";
 import {
   authErrorCode,
   capabilityMatrixMatches,
   currentPlatform,
 } from "./e2e-auth-checks";
-import { LabButton, labStyles } from "./e2e-lab-ui";
+import {
+  LabButton,
+  LabResult,
+  LabRow,
+  LabSubtitle,
+  LabTitle,
+} from "./e2e-lab-ui";
 
 async function signedOutScopeContract(): Promise<string> {
   if (AuthService.currentUser !== undefined) {
@@ -36,6 +42,7 @@ async function signedOutScopeContract(): Promise<string> {
 }
 
 export function AuthE2eLab() {
+  const { user } = useAuth();
   const [capabilities, setCapabilities] = useState("(idle)");
   const [events, setEvents] = useState("(idle)");
   const [apiStatus, setApiStatus] = useState("(idle)");
@@ -53,41 +60,25 @@ export function AuthE2eLab() {
 
   return (
     <View testID="e2e-lab" style={styles.lab} accessibilityLabel="E2E Lab">
-      <Text style={labStyles.title}>E2E Lab</Text>
-      <Text style={labStyles.subtitle}>
+      <LabTitle>E2E Lab</LabTitle>
+      <LabSubtitle>
         This lab requires an already signed-out package session and its replay
         never starts provider login or restore. The manual restore control may
         find an existing provider session.
-      </Text>
-      <Text testID="e2e-ready" style={labStyles.result}>
-        e2e-ready
-      </Text>
-      <Text testID="e2e-deeplink" style={labStyles.result}>
-        auth://e2e
-      </Text>
-      <Text testID="e2e-session-state" style={labStyles.result}>
-        {AuthService.currentUser ? "session=signed-in" : "session=signed-out"}
-      </Text>
-      <Text testID="e2e-capabilities" style={labStyles.result}>
-        {capabilities}
-      </Text>
-      <Text testID="e2e-events" style={labStyles.result}>
-        {events}
-      </Text>
-      <Text testID="e2e-api-status" style={labStyles.result}>
-        {apiStatus}
-      </Text>
-      <Text testID="e2e-session-action" style={labStyles.result}>
-        {sessionAction}
-      </Text>
-      <Text testID="e2e-scopes-status" style={labStyles.result}>
-        {scopeStatus}
-      </Text>
-      <Text testID="e2e-stress-result" style={labStyles.result}>
-        {stressStatus}
-      </Text>
+      </LabSubtitle>
+      <LabResult testID="e2e-ready">e2e-ready</LabResult>
+      <LabResult testID="e2e-deeplink">auth://e2e</LabResult>
+      <LabResult testID="e2e-session-state">
+        {user ? "session=signed-in" : "session=signed-out"}
+      </LabResult>
+      <LabResult testID="e2e-capabilities">{capabilities}</LabResult>
+      <LabResult testID="e2e-events">{events}</LabResult>
+      <LabResult testID="e2e-api-status">{apiStatus}</LabResult>
+      <LabResult testID="e2e-session-action">{sessionAction}</LabResult>
+      <LabResult testID="e2e-scopes-status">{scopeStatus}</LabResult>
+      <LabResult testID="e2e-stress-result">{stressStatus}</LabResult>
 
-      <View style={labStyles.row}>
+      <LabRow>
         <LabButton
           testID="e2e-capabilities-run"
           label="Capabilities"
@@ -220,7 +211,7 @@ export function AuthE2eLab() {
             );
           }}
         />
-      </View>
+      </LabRow>
     </View>
   );
 }

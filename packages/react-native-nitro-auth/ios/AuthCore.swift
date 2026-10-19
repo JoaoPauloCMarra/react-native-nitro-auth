@@ -1,9 +1,25 @@
 import Foundation
 import CommonCrypto
 
+enum ProviderOutcome: Equatable {
+  case success(NSDictionary)
+  case failure(PlatformAuthErrorCode, String? = nil)
+
+  static let cancelled = ProviderOutcome.failure(.cancelled)
+
+  var failureCode: PlatformAuthErrorCode? {
+    if case .failure(let code, _) = self { return code }
+    return nil
+  }
+
+  var userData: NSDictionary? {
+    if case .success(let data) = self { return data }
+    return nil
+  }
+}
+
 enum AuthCore {
   typealias RandomSource = (inout [UInt8]) -> Bool
-  typealias Sha256Hex = (UnsafePointer<CChar>, Int, UnsafeMutablePointer<CChar>, Int) -> Int32
   typealias JwtPayloadJson = (UnsafePointer<CChar>, UnsafeMutablePointer<CChar>, Int) -> Int32
 
   struct Nonce: Equatable {
@@ -68,22 +84,22 @@ enum AuthCore {
       .replacingOccurrences(of: "=", with: "")
   }
 
-  static func createNonce(random: RandomSource, sha256Hex: Sha256Hex) -> Nonce? {
+  static func createNonce(random: RandomSource) -> Nonce? {
     var randomBytes = [UInt8](repeating: 0, count: 32)
     guard random(&randomBytes) else {
       return nil
     }
 
     let raw = base64Url(Data(randomBytes))
-    var hashedChars = [CChar](repeating: 0, count: 65)
-    let hashStatus = raw.withCString { pointer in
-      hashedChars.withUnsafeMutableBufferPointer { buffer -> Int32 in
-        guard let output = buffer.baseAddress else { return -1 }
-        return sha256Hex(pointer, raw.utf8.count, output, buffer.count)
-      }
+    return Nonce(raw: raw, hashed: sha256Hex(Data(raw.utf8)))
+  }
+
+  static func sha256Hex(_ data: Data) -> String {
+    var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+    data.withUnsafeBytes {
+      _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &hash)
     }
-    guard hashStatus == 0 else { return nil }
-    return Nonce(raw: raw, hashed: String(cString: hashedChars))
+    return hash.map { String(format: "%02x", $0) }.joined()
   }
 
   static func generateCodeVerifier(random: RandomSource) -> String? {
@@ -126,6 +142,10 @@ enum AuthCore {
   static func microsoftRefreshTokenAfterCommit(current: String?, received: String, keepExisting: Bool) -> String? {
     if !received.isEmpty { return received }
     return keepExisting ? current : nil
+  }
+
+  static func microsoftRefreshTenant(loginTenant: String?, configuredTenant: String?) -> String {
+    loginTenant ?? configuredTenant ?? "common"
   }
 
   static func shouldClearMicrosoftRefreshToken(statusCode: Int) -> Bool {

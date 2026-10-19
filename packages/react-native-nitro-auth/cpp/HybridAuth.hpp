@@ -16,6 +16,32 @@
 
 namespace margelo::nitro::NitroAuth {
 
+// Callers hold the owner's mutex around every call.
+template <typename Callback>
+class ListenerRegistry {
+public:
+  uint64_t add(Callback callback) {
+    const auto id = _nextId++;
+    _entries[id] = std::move(callback);
+    return id;
+  }
+
+  void remove(uint64_t id) { _entries.erase(id); }
+
+  void clear() { _entries.clear(); }
+
+  std::vector<Callback> snapshot() const {
+    std::vector<Callback> callbacks;
+    callbacks.reserve(_entries.size());
+    for (const auto& [id, callback] : _entries) callbacks.push_back(callback);
+    return callbacks;
+  }
+
+private:
+  std::map<uint64_t, Callback> _entries;
+  uint64_t _nextId = 0;
+};
+
 class HybridAuth: public HybridAuthSpec {
 public:
   HybridAuth();
@@ -53,6 +79,9 @@ private:
   std::shared_ptr<Promise<void>> loginImpl(AuthProvider provider, const std::optional<LoginOptions>& options, const std::shared_ptr<Promise<AuthUser>>& result);
   void notifyTokensRefreshed(const AuthTokens& tokens);
   void emitAuthEvent(AuthEventType type, std::optional<AuthProvider> provider = std::nullopt, std::optional<AuthErrorCode> errorCode = std::nullopt);
+  void setUserScopesLocked();
+  template <typename Callback>
+  std::function<void()> subscribe(ListenerRegistry<Callback> HybridAuth::* registry, const Callback& callback);
   std::shared_ptr<Promise<AuthTokens>> advanceSessionGenerationLocked();
   void trackSessionPromiseLocked(const std::shared_ptr<Promise<void>>& promise);
   std::vector<std::shared_ptr<Promise<void>>> takePendingSessionPromisesLocked();
@@ -63,19 +92,14 @@ private:
 private:
   std::optional<AuthUser> _currentUser;
   std::vector<std::string> _grantedScopes;
-  std::map<uint64_t, std::function<void(const std::optional<AuthUser>&)>> _listeners;
-  uint64_t _nextListenerId = 0;
-
-  std::map<uint64_t, std::function<void(const AuthTokens&)>> _tokenListeners;
-  uint64_t _nextTokenListenerId = 0;
-  std::map<uint64_t, std::function<void(const AuthEvent&)>> _eventListeners;
-  uint64_t _nextEventListenerId = 0;
+  ListenerRegistry<std::function<void(const std::optional<AuthUser>&)>> _listeners;
+  ListenerRegistry<std::function<void(const AuthTokens&)>> _tokenListeners;
+  ListenerRegistry<std::function<void(const AuthEvent&)>> _eventListeners;
   std::shared_ptr<Promise<AuthTokens>> _refreshInFlight;
   std::vector<std::weak_ptr<Promise<void>>> _sessionPromises;
   uint64_t _sessionGeneration = 0;
   uint64_t _snapshotRevision = 0;
-  uint64_t _nextSnapshotListenerId = 0;
-  std::map<uint64_t, std::function<void(const AuthSessionSnapshot&)>> _snapshotListeners;
+  ListenerRegistry<std::function<void(const AuthSessionSnapshot&)>> _snapshotListeners;
   std::shared_ptr<Promise<AuthCredential>> _credentialPromise;
   bool _loggingEnabled = false;
 

@@ -22,7 +22,10 @@ export function mapOAuthErrorCode(
   error: string,
   context: OAuthErrorContext = "authorize",
 ): AuthErrorCode {
-  const code = OAUTH_ERROR_CODES[error.trim().toLowerCase()];
+  const key = error.trim().toLowerCase();
+  const code = Object.prototype.hasOwnProperty.call(OAUTH_ERROR_CODES, key)
+    ? OAUTH_ERROR_CODES[key]
+    : undefined;
   if (code === undefined) {
     return "unknown";
   }

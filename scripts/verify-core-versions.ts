@@ -1,19 +1,18 @@
 const projectRoot = import.meta.dir + "/..";
 
 const expectedVersions = {
-  expo: "~57.0.28",
-  "expo-asset": "~57.0.19",
-  "expo-build-properties": "~57.0.22",
-  "expo-constants": "~57.0.21",
-  "expo-linking": "~57.0.12",
-  "expo-router": "~57.0.26",
+  expo: "~58.0.16",
+  "expo-asset": "~58.0.17",
+  "expo-build-properties": "~58.0.11",
+  "expo-constants": "~58.0.12",
+  "expo-linking": "~58.0.13",
+  "expo-router": "~58.0.24",
   nitrogen: "0.37.1",
-  react: "19.2.3",
-  "react-dom": "19.2.3",
-  "react-native": "0.86.3",
-  "react-native-example": "0.86.3",
+  react: "19.3.0",
+  "react-dom": "19.3.0",
+  "react-native": "0.88.0",
   "react-native-nitro-modules": "0.37.1",
-  "react-native-svg": "15.15.4",
+  "react-native-svg": "15.16.0",
 } as const;
 const expectedNitroPeerRange = ">=0.37.0 <0.38.0";
 
@@ -22,7 +21,7 @@ type JsonRecord = Record<string, unknown>;
 
 const checks: Array<{
   file: string;
-  fields: Array<[string, string, DependencyName?]>;
+  fields: Array<[string, string]>;
 }> = [
   {
     file: "package.json",
@@ -44,7 +43,7 @@ const checks: Array<{
     fields: [
       ["dependencies", "react"],
       ["dependencies", "react-dom"],
-      ["dependencies", "react-native", "react-native-example"],
+      ["dependencies", "react-native"],
       ["dependencies", "expo"],
       ["dependencies", "expo-asset"],
       ["dependencies", "expo-build-properties"],
@@ -87,9 +86,9 @@ const failures: string[] = [];
 for (const check of checks) {
   const json = await readJson(check.file);
 
-  for (const [section, depName, expectedName = depName] of check.fields) {
+  for (const [section, depName] of check.fields) {
     const actualValue = getPathValue(json, [section, depName]);
-    const expectedValue = expectedVersions[expectedName];
+    const expectedValue = expectedVersions[depName as DependencyName];
 
     if (actualValue !== expectedValue) {
       failures.push(

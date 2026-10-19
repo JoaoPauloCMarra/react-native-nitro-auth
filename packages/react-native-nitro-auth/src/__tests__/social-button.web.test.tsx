@@ -1,5 +1,11 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { socialButtonEnv } from "./support/social-button-env";
 import { SocialButton, SocialProviderIcon } from "../ui/social-button.web";
 import { AuthError } from "../utils/auth-error";
@@ -276,5 +282,73 @@ describe("SocialButton (web)", () => {
     });
     expect(onError.mock.calls[0]?.[0]).toBeInstanceOf(AuthError);
     expect((onError.mock.calls[0]?.[0] as AuthError).code).toBe("token_error");
+  });
+
+  describe("Microsoft appearance and shape", () => {
+    const renderMicrosoft = (props: Record<string, unknown> = {}) => {
+      render(
+        React.createElement(SocialButton, {
+          provider: "microsoft",
+          ...props,
+        }),
+      );
+      return screen.getByRole("button", { name: "Sign in with Microsoft" });
+    };
+
+    it("microsoft appearance light renders the light palette", () => {
+      const button = renderMicrosoft({ appearance: "light" });
+
+      expect(button.style.backgroundColor).toBe("rgb(255, 255, 255)");
+      expect(button.style.borderColor).toBe("#8c8c8c");
+      expect(button.style.borderWidth).toBe("1px");
+      expect(screen.getByText("Sign in with Microsoft").style.color).toBe(
+        "rgb(94, 94, 94)",
+      );
+    });
+
+    it("microsoft appearance dark renders the dark palette", () => {
+      const button = renderMicrosoft({ appearance: "dark" });
+
+      expect(button.style.backgroundColor).toBe("rgb(47, 47, 47)");
+      expect(button.style.borderWidth).toBe("0px");
+      expect(screen.getByText("Sign in with Microsoft").style.color).toBe(
+        "rgb(255, 255, 255)",
+      );
+    });
+
+    it("microsoft appearance wins over the deprecated variant", () => {
+      const button = renderMicrosoft({ appearance: "light", variant: "black" });
+
+      expect(button.style.backgroundColor).toBe("rgb(255, 255, 255)");
+    });
+
+    it("microsoft variant keeps its palette when appearance is unset", () => {
+      const button = renderMicrosoft({ variant: "black" });
+
+      expect(button.style.backgroundColor).toBe("rgb(0, 0, 0)");
+    });
+
+    it("microsoft shape maps to the border radius and borderRadius wins", () => {
+      expect(renderMicrosoft({ shape: "pill" }).style.borderRadius).toBe(
+        "24px",
+      );
+      cleanup();
+      expect(renderMicrosoft({ shape: "rectangular" }).style.borderRadius).toBe(
+        "8px",
+      );
+      cleanup();
+      expect(renderMicrosoft().style.borderRadius).toBe("8px");
+      cleanup();
+      expect(
+        renderMicrosoft({ shape: "pill", borderRadius: 4 }).style.borderRadius,
+      ).toBe("4px");
+    });
+
+    it("microsoft appearance keeps the disabled colors", () => {
+      socialButtonEnv.platformOS = "web";
+      const button = renderMicrosoft({ appearance: "light", disabled: true });
+
+      expect(button.style.backgroundColor).toBe("rgb(204, 204, 204)");
+    });
   });
 });

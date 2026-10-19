@@ -270,6 +270,21 @@ test("all manifest flows are distinct, safe, present, and closed", () => {
   }
 });
 
+test("the runner rejects a flow that does not end with close", () => {
+  const root = createReplayFixture();
+  try {
+    const manifestFile = path.join(root, "e2e/auth-replay-coverage.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+    fs.writeFileSync(
+      path.join(root, manifest.suites[0].path),
+      'open "com.auth.example"\nwait id="probe-screen"\n',
+    );
+    assert.throws(() => readSuites(manifestFile), /close/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("coverage distinguishes visual-only assertions from provider acceptance", () => {
   const { manifest } = readCoverageManifest(projectRoot);
   const visualFeatures = manifest.features.filter(

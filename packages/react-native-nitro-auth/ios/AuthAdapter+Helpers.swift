@@ -5,18 +5,6 @@ var delegateHandle: UInt8 = 0
 var contextProviderHandle: UInt8 = 0
 
 extension AuthAdapter {
-  /// Maps OAuth 2.0 error codes (returned in query params or JSON) to
-  /// PlatformAuthErrorCode values, backed by the generated table from
-  /// `scripts/oauth-errors.json`; `docs/error-contract.md` is the documented
-  /// contract and fixture corpus.
-  ///
-  /// `context` selects the operation bucket: "authorize"/"token" surface
-  /// token/grant failures as `tokenError`; "refresh" surfaces them as
-  /// `refreshFailed`.
-  static func mapOAuthError(_ oauthCode: String, context: String = "authorize") -> PlatformAuthErrorCode {
-    AuthCore.mapOAuthError(oauthCode, context: context)
-  }
-
   static func activeWindow() -> UIWindow? {
     let windowScenes = UIApplication.shared.connectedScenes
       .compactMap { $0 as? UIWindowScene }
@@ -55,9 +43,9 @@ extension AuthAdapter {
 
 class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
   let expectedNonce: String?
-  let completion: (NSDictionary?, NSNumber?, String?) -> Void
+  let completion: (ProviderOutcome) -> Void
 
-  init(expectedNonce: String?, completion: @escaping (NSDictionary?, NSNumber?, String?) -> Void) {
+  init(expectedNonce: String?, completion: @escaping (ProviderOutcome) -> Void) {
     self.expectedNonce = expectedNonce
     self.completion = completion
   }
@@ -74,12 +62,12 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
       // replayed or swapped token from being accepted.
       if let expectedNonce = expectedNonce {
         guard let idToken = idToken, !idToken.isEmpty else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.noIdToken.rawValue), nil)
+          completion(.failure(.noIdToken))
           return
         }
         let claims = AuthAdapter.decodeJwt(idToken)
         guard claims["nonce"] == expectedNonce else {
-          completion(nil, NSNumber(value: PlatformAuthErrorCode.invalidNonce.rawValue), nil)
+          completion(.failure(.invalidNonce))
           return
         }
       }
@@ -94,9 +82,9 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
         "authorizationCode": appleIDCredential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) } ?? "",
         "userId": appleIDCredential.user,
       ]
-      completion(data as NSDictionary, nil, nil)
+      completion(.success(data as NSDictionary))
     } else {
-      completion(nil, NSNumber(value: PlatformAuthErrorCode.unknown.rawValue), nil)
+      completion(.failure(.unknown))
     }
   }
 
@@ -106,7 +94,7 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
       appleErrorDomain: ASAuthorizationError.errorDomain,
       appleUnknownCode: ASAuthorizationError.unknown.rawValue
     )
-    completion(nil, NSNumber(value: AuthAdapter.mapError(error).rawValue), detail)
+    completion(.failure(AuthAdapter.mapError(error), detail))
   }
 }
 

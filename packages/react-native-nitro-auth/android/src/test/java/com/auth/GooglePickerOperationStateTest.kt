@@ -12,10 +12,10 @@ class GooglePickerOperationStateTest {
         val state = GooglePickerOperationState()
         val activity = Any()
 
-        state.register(activity, "login", 11L, 4L)
+        state.register(activity, Origin.LOGIN, 11L, 4L)
 
         assertNotNull(state.invalidate())
-        assertFalse(state.claimLaunch(activity, "login", 11L, 4L))
+        assertFalse(state.claimLaunch(activity, Origin.LOGIN, 11L, 4L))
     }
 
     @Test
@@ -23,11 +23,11 @@ class GooglePickerOperationStateTest {
         val state = GooglePickerOperationState()
         val activity = Any()
 
-        state.register(activity, "login", 11L, 4L)
+        state.register(activity, Origin.LOGIN, 11L, 4L)
 
-        assertTrue(state.claimLaunch(activity, "login", 11L, 4L))
-        assertFalse(state.claimLaunch(activity, "login", 11L, 4L))
-        assertFalse(state.claimLaunch(Any(), "login", 11L, 4L))
+        assertTrue(state.claimLaunch(activity, Origin.LOGIN, 11L, 4L))
+        assertFalse(state.claimLaunch(activity, Origin.LOGIN, 11L, 4L))
+        assertFalse(state.claimLaunch(Any(), Origin.LOGIN, 11L, 4L))
     }
 
     @Test
@@ -36,12 +36,11 @@ class GooglePickerOperationStateTest {
         val oldActivity = Any()
         val newActivity = Any()
 
-        state.register(oldActivity, "login", 11L, 4L)
-        state.register(newActivity, "login", 11L, 4L)
-        state.unregister(oldActivity, "login", 11L)
+        state.register(oldActivity, Origin.LOGIN, 11L, 4L)
+        state.register(newActivity, Origin.LOGIN, 11L, 4L)
+        state.unregister(oldActivity, Origin.LOGIN, 11L)
 
-        assertTrue(state.isActive("login", 11L))
-        assertTrue(state.claimLaunch(newActivity, "login", 11L, 4L))
+        assertTrue(state.claimLaunch(newActivity, Origin.LOGIN, 11L, 4L))
     }
 
     @Test
