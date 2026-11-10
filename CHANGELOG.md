@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [0.14.2] - 2026-11-10
+
+### Breaking changes
+
+- None.
+
+### Compatibility
+
+- Tested with Expo SDK 58 (React Native 0.88.1, React 19.3.0).
+- Peer dependency ranges are unchanged.
+
+### Changed
+
+- The development and example dependency baseline moves to the latest patch releases within the current majors: Expo SDK 58 packages (`expo` 58.0.23, `expo-router` 58.0.30), React Native 0.88.1, `react-native-nitro-modules` and `nitrogen` 0.37.2, `react-native-safe-area-context` 5.11.1 and `react-native-screens` 4.30.1.
+- The generated Nitro bindings are regenerated with Nitrogen 0.37.2. The generated iOS Swift drops the unused recycling check for the non-view auth adapter and uses the new C++ part check.
+
 ## [0.14.1] - 2026-10-15
 
 ### Breaking changes
