@@ -12,7 +12,12 @@ const workflow = fs.readFileSync(
   "utf8",
 );
 
-function checkFixture(contents) {
+const ci = fs.readFileSync(
+  path.join(__dirname, "..", ".github", "workflows", "ci.yml"),
+  "utf8",
+);
+
+function checkFixture(contents, ciContents = ci) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nitro-publish-check-"));
   try {
     fs.mkdirSync(path.join(root, "scripts"));
@@ -24,6 +29,10 @@ function checkFixture(contents) {
     fs.writeFileSync(
       path.join(root, ".github", "workflows", "npm-publish.yml"),
       contents,
+    );
+    fs.writeFileSync(
+      path.join(root, ".github", "workflows", "ci.yml"),
+      ciContents,
     );
     return spawnSync(process.execPath, ["scripts/assert-publish-workflow.js"], {
       cwd: root,
@@ -77,6 +86,41 @@ test("rejects a missing pre-publish commit check", () => {
     (step) => step.id !== "validated_source",
   );
   const result = checkFixture(Bun.YAML.stringify(fixture));
+  assert.equal(result.status, 1, result.stdout);
+});
+
+test("rejects a publish job without the Bun cache restore", () => {
+  const fixture = Bun.YAML.parse(workflow);
+  fixture.jobs.publish.steps = fixture.jobs.publish.steps.filter(
+    (step) => step.uses !== "actions/cache/restore@v6",
+  );
+  const result = checkFixture(Bun.YAML.stringify(fixture));
+  assert.equal(result.status, 1, result.stdout);
+});
+
+test("rejects a publish job that saves the Bun cache", () => {
+  const fixture = workflow.replace(
+    "actions/cache/restore@v6",
+    "actions/cache@v6",
+  );
+  assert.notEqual(fixture, workflow);
+  const result = checkFixture(fixture);
+  assert.equal(result.status, 1, result.stdout);
+});
+
+test("rejects a CI job without the Bun cache", () => {
+  const fixture = Bun.YAML.parse(ci);
+  const job = Object.values(fixture.jobs)[0];
+  job.steps = job.steps.filter((step) => step.uses !== "actions/cache@v6");
+  const result = checkFixture(workflow, Bun.YAML.stringify(fixture));
+  assert.equal(result.status, 1, result.stdout);
+});
+
+test("rejects a CI job that runs coverage twice", () => {
+  const fixture = Bun.YAML.parse(ci);
+  const job = Object.values(fixture.jobs)[0];
+  job.steps.push({ run: "bun run test:coverage" });
+  const result = checkFixture(workflow, Bun.YAML.stringify(fixture));
   assert.equal(result.status, 1, result.stdout);
 });
 

@@ -66,13 +66,11 @@ describe("AuthModule (web)", () => {
     sessionStorage.clear();
     jest.clearAllMocks();
     jest.useRealTimers();
-    if (typeof globalThis.crypto.randomUUID !== "function") {
-      Object.defineProperty(globalThis.crypto, "randomUUID", {
-        configurable: true,
-        writable: true,
-        value: () => "test-random-uuid",
-      });
-    }
+    Object.defineProperty(globalThis.crypto, "randomUUID", {
+      configurable: true,
+      writable: true,
+      value: () => "test-random-uuid",
+    });
     Object.defineProperty(globalThis.crypto, "getRandomValues", {
       configurable: true,
       writable: true,
@@ -1699,6 +1697,124 @@ describe("AuthModule (web)", () => {
     expect(auth.currentUser?.provider).toBe("google");
   });
 
+  it("keeps live credentials when silentRestore reloads the sanitized stored copy", async () => {
+    jest.useFakeTimers();
+    let idToken = "";
+    const popup = createPopupWindow();
+    installWindowOpen(
+      jest.fn((url: string) => {
+        const params = new URL(url).searchParams;
+        const state = params.get("state");
+        idToken = createJwtWithPayload({
+          email: "live@example.com",
+          nonce: params.get("nonce"),
+        });
+        popup.location.href = `${window.location.origin}#id_token=${idToken}&access_token=live-access-token&state=${state}&expires_in=3600`;
+        return popup;
+      }),
+    );
+    const auth = await loadAuthModule({
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+    });
+
+    await Promise.all([
+      auth.login("google"),
+      jest.advanceTimersByTimeAsync(501),
+    ]);
+    expect(auth.currentUser?.accessToken).toBe("live-access-token");
+
+    await auth.silentRestore();
+    expect(auth.currentUser?.accessToken).toBe("live-access-token");
+    expect(auth.currentUser?.idToken).toBe(idToken);
+    await expect(auth.getAccessToken()).resolves.toBe("live-access-token");
+
+    await auth.silentRestore();
+    expect(auth.currentUser?.accessToken).toBe("live-access-token");
+    await expect(auth.getAccessToken()).resolves.toBe("live-access-token");
+  });
+
+  describe("silentRestore merging stored and live credentials", () => {
+    const googleWebClientId = "test-client-id.apps.googleusercontent.com";
+    const loginGoogleWithPersistedTokens = async () => {
+      jest.useFakeTimers();
+      const popup = createPopupWindow();
+      installWindowOpen(
+        jest.fn((url: string) => {
+          const params = new URL(url).searchParams;
+          const idToken = createJwtWithPayload({
+            email: "live@example.com",
+            sub: "live-user",
+            nonce: params.get("nonce"),
+          });
+          popup.location.href = `${window.location.origin}#id_token=${idToken}&access_token=live-access-token&state=${params.get("state")}&expires_in=3600`;
+          return popup;
+        }),
+      );
+      const auth = await loadAuthModule({
+        googleWebClientId,
+        nitroAuthPersistTokensOnWeb: true,
+      });
+      await Promise.all([
+        auth.login("google"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+      return auth;
+    };
+    const readStoredUser = (): Record<string, unknown> =>
+      JSON.parse(sessionStorage.getItem(CACHE_KEY) ?? "{}");
+
+    it("adopts a newer stored access token written by another tab", async () => {
+      const auth = await loginGoogleWithPersistedTokens();
+      const stored = readStoredUser();
+      expect(stored.accessToken).toBe("live-access-token");
+      sessionStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ ...stored, accessToken: "other-tab-access-token" }),
+      );
+
+      await auth.silentRestore();
+
+      expect(auth.currentUser?.accessToken).toBe("other-tab-access-token");
+      expect(auth.currentUser?.idToken).toBe(stored.idToken);
+      await expect(auth.getAccessToken()).resolves.toBe(
+        "other-tab-access-token",
+      );
+    });
+
+    it.each([
+      ["userId", { userId: "other-user" }],
+      ["email", { email: "other@example.com" }],
+    ])(
+      "replaces the live user when the stored %s differs",
+      async (_field, override) => {
+        const auth = await loginGoogleWithPersistedTokens();
+        const stored = readStoredUser();
+        sessionStorage.setItem(
+          CACHE_KEY,
+          JSON.stringify({
+            provider: "google",
+            ...stored,
+            ...override,
+            idToken: undefined,
+            accessToken: "other-account-token",
+          }),
+        );
+
+        await auth.silentRestore();
+
+        expect(auth.currentUser).toMatchObject({
+          provider: "google",
+          ...override,
+          accessToken: "other-account-token",
+        });
+        expect(auth.currentUser?.idToken).toBeUndefined();
+        expect(JSON.stringify(auth.currentUser)).not.toContain(
+          "live-access-token",
+        );
+      },
+    );
+  });
+
   it("restores a fresh Google session without opening a popup", async () => {
     sessionStorage.setItem(
       CACHE_KEY,
@@ -1825,6 +1941,30 @@ describe("AuthModule (web)", () => {
     ]);
 
     expect(events).toContain("login_failed:cancelled");
+  });
+
+  it("does not emit login_failed for a duplicate login rejected before it started", async () => {
+    jest.useFakeTimers();
+    const events: string[] = [];
+    installWindowOpen(
+      jest.fn(() => createPopupWindow("https://accounts.google.com/signin")),
+    );
+    const auth = await loadAuthModule({
+      googleWebClientId: "test-client-id.apps.googleusercontent.com",
+    });
+    auth.onAuthEvent((event) => {
+      events.push(`${event.type}:${event.errorCode ?? ""}`);
+    });
+
+    const firstLogin = auth.login("google");
+    await expect(auth.login("google")).rejects.toThrow("operation_in_progress");
+
+    expect(events).toEqual(["login_started:"]);
+    await Promise.all([
+      expect(firstLogin).rejects.toThrow("timeout"),
+      jest.advanceTimersByTimeAsync(120001),
+    ]);
+    expect(events).toEqual(["login_started:", "login_failed:timeout"]);
   });
 
   it("emits dispose to registered event listeners", async () => {
@@ -3300,6 +3440,71 @@ describe("AuthModule (web)", () => {
       await auth.silentRestore();
 
       expect(localStorage.getItem(MS_REFRESH_TOKEN_KEY)).toBeNull();
+      await expect(auth.refreshToken()).resolves.toMatchObject({
+        accessToken: "b",
+      });
+    });
+
+    it("silentRestore keeps one whole session when another tab signed in without identifying fields", async () => {
+      jest.useFakeTimers();
+      installMicrosoftLogin([
+        { id_token: idToken(), access_token: "a", expires_in: 3600 },
+      ]);
+      const auth = await loadAuthModule({
+        microsoftClientId: "test-client-id",
+        nitroAuthWebStorage: "local",
+        nitroAuthPersistProfileOnWeb: false,
+      });
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+      const before = auth.currentUser;
+      const scopesBefore = [...auth.grantedScopes];
+      expect(before?.accessToken).toBe("a");
+      const laterExpiry = (before?.expirationTime ?? 0) + 7 * 24 * 3600 * 1000;
+      localStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ provider: "microsoft", expirationTime: laterExpiry }),
+      );
+      localStorage.setItem(
+        SCOPES_KEY,
+        JSON.stringify(["openid", "other-account-scope"]),
+      );
+
+      await auth.silentRestore();
+
+      expect(auth.currentUser?.accessToken).toBe("a");
+      expect(auth.currentUser?.expirationTime).toBe(before?.expirationTime);
+      expect(auth.grantedScopes).toEqual(scopesBefore);
+    });
+
+    it("silentRestore after a login keeps the tokens and the refresh path", async () => {
+      jest.useFakeTimers();
+      installMicrosoftLogin([
+        {
+          id_token: idToken(),
+          access_token: "a",
+          refresh_token: "r1",
+          expires_in: 3600,
+        },
+        { id_token: idToken(), access_token: "b", expires_in: 3600 },
+      ]);
+      const auth = await loadAuthModule({
+        microsoftClientId: "test-client-id",
+      });
+      await Promise.all([
+        auth.login("microsoft"),
+        jest.advanceTimersByTimeAsync(501),
+      ]);
+      const before = auth.currentUser;
+      expect(before?.accessToken).toBe("a");
+
+      await auth.silentRestore();
+
+      expect(auth.currentUser?.accessToken).toBe("a");
+      expect(auth.currentUser?.idToken).toBe(before?.idToken);
+      expect(auth.currentUser?.refreshToken).toBe(before?.refreshToken);
       await expect(auth.refreshToken()).resolves.toMatchObject({
         accessToken: "b",
       });

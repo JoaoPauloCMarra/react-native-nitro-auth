@@ -67,6 +67,56 @@ assert.ok(
   "source verification must finish before publication",
 );
 
+const bunCachePath = "~/.bun/install/cache";
+const bunCacheKey = "bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}";
+
+function assertBunCacheBeforeInstall(jobName, steps, cacheAction) {
+  const installIndex = steps.findIndex(
+    (step) => step.run === "bun install --frozen-lockfile",
+  );
+  assert.notEqual(installIndex, -1, `${jobName} must install dependencies`);
+  const cacheStep = steps[installIndex - 1];
+  assert.equal(
+    cacheStep?.uses,
+    cacheAction,
+    `${jobName} must run ${cacheAction} right before bun install`,
+  );
+  assert.equal(cacheStep.with?.path, bunCachePath);
+  assert.equal(cacheStep.with?.key, bunCacheKey);
+}
+
+assertBunCacheBeforeInstall(
+  "validate",
+  workflow.jobs.validate.steps,
+  "actions/cache@v6",
+);
+assertBunCacheBeforeInstall(
+  "publish",
+  publishSteps,
+  "actions/cache/restore@v6",
+);
+
+const ciPath = path.join(__dirname, "..", ".github", "workflows", "ci.yml");
+const ci = Bun.YAML.parse(fs.readFileSync(ciPath, "utf8"));
+const ciJobs = Object.values(ci.jobs);
+assert.ok(ciJobs.length > 0, "ci must define a job");
+for (const job of ciJobs) {
+  assert.equal(job["runs-on"], "ubuntu-26.04", "ci must run on Linux only");
+  const checkout = job.steps.find((step) =>
+    step.uses?.startsWith("actions/checkout@"),
+  );
+  assert.equal(checkout?.with?.["persist-credentials"], false);
+  assertBunCacheBeforeInstall("ci", job.steps, "actions/cache@v6");
+  const coverageRuns = job.steps.filter((step) =>
+    step.run?.includes("test:coverage"),
+  );
+  assert.equal(
+    coverageRuns.length,
+    0,
+    "ci must not run coverage outside release:preflight",
+  );
+}
+
 console.log(
   "Publish workflow validates source identity and publishes only on GitHub Release events.",
 );

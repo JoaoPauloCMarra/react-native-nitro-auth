@@ -49,7 +49,6 @@ const appConfig = {
           ios: {
             deploymentTarget: "16.4",
             usePrecompiledModules: false,
-            enableSceneSupport: true,
             ccacheEnabled:
               process.env.NITRO_AUTH_IOS_CCACHE !== "0" && hasCcache(),
           },

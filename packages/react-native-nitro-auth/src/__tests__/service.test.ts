@@ -81,7 +81,7 @@ jest.mock("react-native-nitro-modules", () => {
 describe("AuthService", () => {
   function native() {
     const results = (NitroModules.createHybridObject as jest.Mock).mock.results;
-    const result = results.at(-1);
+    const result = results[results.length - 1];
 
     if (!result) {
       throw new Error("Auth hybrid object was not created");
@@ -616,7 +616,7 @@ describe("AuthService", () => {
 
       const result = AuthService.onAuthEvent(callback);
 
-      const deliver = native().onAuthEvent.mock.calls.at(-1)?.[0];
+      const deliver = native().onAuthEvent.mock.calls[native().onAuthEvent.mock.calls.length - 1]?.[0];
       deliver({ type: "login_started", provider: "google" });
       expect(callback).toHaveBeenCalledWith({
         type: "login_started",
@@ -729,11 +729,11 @@ describe("AuthService", () => {
     const observer = jest.fn();
     const remove = service.onSessionChanged(observer);
     service.dispose();
-    expect(observer.mock.calls.at(-1)?.[0].user).toBeUndefined();
+    expect(observer.mock.calls[observer.mock.calls.length - 1]?.[0].user).toBeUndefined();
     service.getSessionSnapshot();
     snapshot = { revision: 1, scopes: ["email"], user: { provider: "google" } };
     callback?.(snapshot);
-    expect(observer.mock.calls.at(-1)?.[0].user.provider).toBe("google");
+    expect(observer.mock.calls[observer.mock.calls.length - 1]?.[0].user.provider).toBe("google");
     expect(backend.onSessionChanged).toHaveBeenCalledTimes(2);
     remove();
     remove();

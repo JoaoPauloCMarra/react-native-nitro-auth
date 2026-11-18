@@ -299,7 +299,7 @@ describe("SocialButton (web)", () => {
       const button = renderMicrosoft({ appearance: "light" });
 
       expect(button.style.backgroundColor).toBe("rgb(255, 255, 255)");
-      expect(button.style.borderColor).toBe("#8c8c8c");
+      expect(button.style.borderColor).toBe("rgb(140, 140, 140)");
       expect(button.style.borderWidth).toBe("1px");
       expect(screen.getByText("Sign in with Microsoft").style.color).toBe(
         "rgb(94, 94, 94)",

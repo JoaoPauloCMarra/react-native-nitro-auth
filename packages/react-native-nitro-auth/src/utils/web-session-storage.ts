@@ -184,11 +184,12 @@ export class WebSessionStorage {
   }
 
   private loadValue(key: string): string | undefined {
-    const storage = this.getBrowserStorage();
-    if (storage) {
-      return storage.getItem(key) ?? inMemoryWebStorage.get(key);
-    }
-    return inMemoryWebStorage.get(key);
+    // Trade-off: an in-memory value kept after a failed write is read before storage, so with shared storage it can hide a newer value another tab wrote until the next successful write.
+    return (
+      inMemoryWebStorage.get(key) ??
+      this.getBrowserStorage()?.getItem(key) ??
+      undefined
+    );
   }
 
   private removeValue(key: string): void {
