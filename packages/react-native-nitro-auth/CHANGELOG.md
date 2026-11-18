@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes are always listed first in each release section.
 
+## [0.14.3] - 2026-11-18
+
+### Breaking changes
+
+- None.
+
+### Fixed
+
+- Web: `silentRestore()` after a login no longer drops the in-memory `accessToken`, `idToken`, `refreshToken` and `serverAuthCode` when `nitroAuthPersistTokensOnWeb` is unset. A live session for the same account keeps its own credentials, expiry and scopes as one whole session; storage never fills in single fields, so another tab's expiry or scopes cannot be paired with this tab's tokens. A fresh page load behaves as before. With `nitroAuthPersistTokensOnWeb` on, a stored session that carries an `accessToken` (for example one refreshed in another tab) replaces the in-memory session as a whole, and so does a stored user from another provider or with a different `userId` or `email`.
+- Web: when browser storage rejects a write, the newer in-memory fallback value is now read before the older stored value.
+- Web: a duplicate `login()` rejected with `operation_in_progress` no longer emits a `login_failed` event without a matching `login_started`.
+
+### Compatibility
+
+- Tested with Expo SDK 58 at patch level 58.0.26 (React Native 0.88.1, React 19.3.0).
+- Peer dependency ranges are unchanged.
+
+### Documentation
+
+- Web: document that a Google `refreshToken()` (and `getAccessToken()` near expiry) is interactive, opens a popup, needs a user gesture and otherwise rejects `popup_blocked`; a Microsoft refresh is network-only; `silentRestore()` never opens UI and returns `interaction_required` for an expiring Google token. Runtime behavior is unchanged.
+
 ## [0.14.2] - 2026-11-10
 
 ### Breaking changes

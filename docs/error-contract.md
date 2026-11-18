@@ -96,7 +96,10 @@ failures as `token_error`; `refresh` surfaces them as `refresh_failed`.
   `ProviderTokenCapabilities` type. Android Google reports
   `supportsAccessToken: false`; Apple reports no client-side token support.
 - `getAccessToken()` refreshes near-expiry sessions (5-minute skew) when the
-  provider supports client-side refresh.
+  provider supports client-side refresh. On web, a Google refresh opens a popup,
+  needs a user gesture, and otherwise rejects `popup_blocked`; a Microsoft
+  refresh is network-only. `silentRestore()` never opens UI and rejects with
+  `interaction_required` for an expiring Google token.
 
 ## 3. Session lifecycle (U3, items 8–10)
 

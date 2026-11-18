@@ -209,6 +209,19 @@ describe("WebSessionStorage", () => {
       expect(storage.restore()).toEqual({});
     });
 
+    it("reads the newer in-memory value over an older stored value after a failed write", () => {
+      sessionStorage.setItem(SCOPES_KEY, JSON.stringify(["old"]));
+      jest.spyOn(Storage.prototype, "setItem").mockImplementation((key) => {
+        if (key === SCOPES_KEY) throw new Error("quota exceeded");
+      });
+      const storage = new WebSessionStorage({});
+
+      storage.saveScopes(["new"]);
+
+      expect(storage.restore().scopes).toEqual(["new"]);
+      storage.clearSession();
+    });
+
     it("falls back to memory when the configured storage rejects writes", () => {
       jest.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
         throw new Error("denied");

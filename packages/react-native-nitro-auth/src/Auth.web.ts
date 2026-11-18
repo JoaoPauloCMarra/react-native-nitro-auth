@@ -290,9 +290,27 @@ class AuthWeb implements Auth {
   }
 
   private loadFromCache(): void {
-    const restored = this._storage.restore();
-    if (restored.user) this._currentUser = restored.user;
-    if (restored.scopes) this._grantedScopes = restored.scopes;
+    const session =this.chooseRestoredSession(this._storage.restore());
+    if (session.user) this._currentUser = session.user;
+    if (session.scopes) this._grantedScopes = session.scopes;
+  }
+
+  private chooseRestoredSession(restored: {
+    user?: AuthUser;
+    scopes?: string[];
+  }): { user?: AuthUser; scopes?: string[] } {
+    const live = this._currentUser;
+    const stored = restored.user;
+    if (!live || !stored) return restored;
+    const sameAccount =
+      live.provider === stored.provider &&
+      !(live.userId && stored.userId && live.userId !== stored.userId) &&
+      !(live.email && stored.email && live.email !== stored.email);
+    // Storage wins as a whole when it is another account or carries tokens
+    // (another tab may have refreshed them). A token-free copy of the same
+    // account is stripped, so the live session stays whole.
+    if (!sameAccount || stored.accessToken !== undefined) return restored;
+    return {};
   }
 
   get currentUser(): AuthUser | undefined {
@@ -534,12 +552,14 @@ class AuthWeb implements Auth {
     this.assertNoCredential();
     const loginHint = options?.loginHint;
     let generation = this._sessionGeneration;
+    let started = false;
     logger.log(`Starting login with ${provider}`, { scopes: options?.scopes });
     try {
       const user = await this.runLoginOperation(
         async () => {
           // Only emit after the in-flight guard: a rejected duplicate login
           // must not claim it "started".
+          started = true;
           this.emitEvent("login_started", provider);
           if (provider === "google") {
             const scopes = options?.scopes ?? DEFAULT_SCOPES;
@@ -583,7 +603,7 @@ class AuthWeb implements Auth {
       return user;
     } catch (e: unknown) {
       const error = this.mapError(e);
-      this.emitEvent("login_failed", provider, error.code);
+      if (started) this.emitEvent("login_failed", provider, error.code);
       logger.error(`Login failed for ${provider}:`, error.message);
       throw error;
     }

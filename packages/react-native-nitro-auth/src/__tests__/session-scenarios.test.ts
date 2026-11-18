@@ -747,13 +747,11 @@ describe("Session lifecycle scenarios", () => {
     sessionStorage.clear();
     jest.clearAllMocks();
     jest.useRealTimers();
-    if (typeof globalThis.crypto.randomUUID !== "function") {
-      Object.defineProperty(globalThis.crypto, "randomUUID", {
-        configurable: true,
-        writable: true,
-        value: () => "test-random-uuid",
-      });
-    }
+    Object.defineProperty(globalThis.crypto, "randomUUID", {
+      configurable: true,
+      writable: true,
+      value: () => "test-random-uuid",
+    });
     if (typeof globalThis.TextEncoder !== "function") {
       Object.defineProperty(globalThis, "TextEncoder", {
         configurable: true,

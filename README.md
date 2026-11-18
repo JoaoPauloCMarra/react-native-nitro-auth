@@ -484,6 +484,11 @@ Supported login options:
   at the provider.
 - `getAccessToken()` returns the current access token and refreshes near-expiry
   Google or Microsoft credentials when supported.
+- On web, a Google refresh (`refreshToken()`, or `getAccessToken()` near expiry)
+  is interactive: it opens a popup, so call it from a user gesture. Otherwise it
+  rejects with `popup_blocked`. A Microsoft refresh on web is network-only and
+  opens no UI. `silentRestore()` never opens UI and rejects with
+  `interaction_required` for an expiring Google token.
 - On iOS and Android, `refreshToken()` (and `getAccessToken()` when it has to
   refresh) rejects with `operation_in_progress` while a `login()`,
   `requestScopes()`, `silentRestore()`, or `revokeAccess()` is pending. It
@@ -794,7 +799,7 @@ The native package gate and Expo example use React Native `0.88.1`. The
 consumer against React Native `0.87.0`'s default type entry. The consumer
 checks import and require declarations for the root and both button subpaths;
 that compatibility check does not change the runtime baseline. Expo SDK
-`58.0.23` selects React Native `0.88.1`; do not override it in an Expo app.
+`58.0.26` selects React Native `0.88.1`; do not override it in an Expo app.
 
 Package peer ranges: `react-native >=0.77.0`,
 `react-native-nitro-modules >=0.37.0 <0.38.0`, and optional `expo >=53.0.0`,

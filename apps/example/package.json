@@ -19,15 +19,15 @@
     "ios:build": "cd ios && pod install && xcodebuild -workspace NitroAuth.xcworkspace -scheme NitroAuth -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build"
   },
   "dependencies": {
-    "@babel/runtime": "^7.29.13",
+    "@babel/runtime": "^7.29.14",
     "dotenv": "^18.0.10",
-    "expo": "~58.0.23",
-    "expo-asset": "~58.0.20",
+    "expo": "~58.0.26",
+    "expo-asset": "~58.0.21",
     "expo-build-properties": "~58.0.12",
-    "expo-constants": "~58.0.15",
-    "expo-linking": "~58.0.16",
-    "expo-router": "~58.0.30",
-    "expo-status-bar": "~58.0.4",
+    "expo-constants": "~58.0.16",
+    "expo-linking": "~58.0.17",
+    "expo-router": "~58.0.32",
+    "expo-status-bar": "~58.0.5",
     "expo-system-ui": "~58.0.7",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -43,8 +43,8 @@
     "react-native-worklets": "0.13.0"
   },
   "devDependencies": {
-    "babel-preset-expo": "~58.0.24",
-    "eslint": "^10.14.0",
+    "babel-preset-expo": "~58.0.26",
+    "eslint": "^10.15.0",
     "eslint-config-expo-magic": "^5.5.0"
   }
 }

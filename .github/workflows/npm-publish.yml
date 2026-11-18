@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BUN_VERSION: "1.4.3"
+  BUN_VERSION: "1.4.4"
   NODE_VERSION: "24"
   NPM_VERSION: "12.2.0"
   PACKAGE_DIR: packages/react-native-nitro-auth
@@ -103,6 +103,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang llvm
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -255,6 +261,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang llvm
+
+      - name: Restore Bun dependency cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
